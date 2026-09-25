@@ -2,12 +2,15 @@
 
 A first-person archery survival game that runs in the browser. You are sealed inside Sector 7 plaza, a neon cyberpunk city at night in the rain. Hold the bow, draw, release, and survive endless zombie waves coming down the four avenues.
 
-- **No dependencies.** Everything is one self-contained `index.html`: a custom WebGL2 renderer, synthesized audio, and an embedded font. It needs no build step and no CDN.
+- **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the plaza street lamps, wet reflections from a captured environment map, bloom, and ambient occlusion on the High setting.
+- **Rigged zombies:** one skinned mesh per infected, rigged and animated in Blender (`models/zombie.glb`, built by `tools/make_rig.py`). Walk, run, heavy, crawl, attack, slam and roar clips blend into hit reactions and physics-driven deaths.
 - **Desktop only:** keyboard and mouse, in any current Chrome, Edge, Firefox or Safari with WebGL2.
 
 ## Play locally
 
-Open `index.html` in a browser. Or serve the folder with `python3 -m http.server`, then open `http://localhost:8000`.
+Serve the folder, then open it: `python3 -m http.server`, then `http://localhost:8000`. (Opening `index.html` straight from disk won't work, because browsers block ES modules on `file://`.)
+
+To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 
 ## Deploy
 
