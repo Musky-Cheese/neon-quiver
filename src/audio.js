@@ -70,6 +70,7 @@ const AUD = {
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
   hit(head, pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o); this.tone('sine', 120, 50, 0.12, 0.35, o); if (head) { this.tone('sine', 1650, 1600, 0.25, 0.14, o); this.tone('sine', 2475, 2450, 0.18, 0.06, o); } },
   thunk() { if (!this.ctx) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2); this.tone('triangle', 300, 120, 0.06, 0.1); },
+  land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
   kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04); this.tone('square', 990, 990, 0.08, 0.04, this.sfx, this.now() + 0.05); },
   explode(dist) {
     if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);

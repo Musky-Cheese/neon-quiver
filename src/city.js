@@ -252,53 +252,26 @@ function buildCity() {
   g.cyl(M4.trs(M, 0, 1.4, 0, 0, 0, 0, 1.4, 1.2, 1.4), [0.08, 0.08, 0.1], 0, 4, 16);
   WORLD.circles.push({ x: 0, z: 0, r: 4.3, h: 1.0 }, { x: 0, z: 0, r: 0.8, h: 2.1 });
   WORLD.lights.push({ p: [0, 3.5, 0], r: 18, c: [0.4, 1.6, 2.2], kind: 'fountain' });
-  // crashed hover-cars
-  function hoverCar(x, z, ry, c) {
-    const m = M4.trs(M4.create(), x, 0, z, 0.06, ry, 0.08, 1, 1, 1);
-    const part = (px, py, pz, sx, sy, sz, cc, e = 0, mt = 0) => { M4.trs(_t4b, px, py, pz, 0, 0, 0, sx, sy, sz); M4.mul(_t4c, m, _t4b); g.box(_t4c, cc, e, mt); };
-    part(0, 0.75, 0, 2.3, 0.8, 4.8, c, 0, 4); part(0, 1.35, -0.3, 1.9, 0.55, 2.4, [0.05, 0.1, 0.15], 0.6); part(0, 0.3, 0, 2.0, 0.2, 4.2, NEON.cyan, 1.5);
-    part(-0.8, 0.85, 2.42, 0.5, 0.18, 0.05, NEON.red, 4); part(0.8, 0.85, 2.42, 0.5, 0.18, 0.05, NEON.red, 4);
-    part(-0.8, 0.85, -2.42, 0.5, 0.14, 0.05, [1, 0.95, 0.85], 3); part(0.8, 0.85, -2.42, 0.5, 0.14, 0.05, [1, 0.95, 0.85], 3);
-    const s = Math.sin(ry), co = Math.cos(ry);
-    WORLD.circles.push({ x: x + s * 1.3, z: z + co * 1.3, r: 1.3, h: 1.7 }, { x: x - s * 1.3, z: z - co * 1.3, r: 1.3, h: 1.7 });
-  }
-  hoverCar(15, -17, 0.55, [0.25, 0.05, 0.12]);
-  hoverCar(-21, 12, -1.1, [0.05, 0.12, 0.22]);
-  hoverCar(24, 22, 2.2, [0.18, 0.18, 0.2]);
+  // crashed hover-cars (props.js)
+  propHoverCar(g, R, 15, -17, 0.55, [0.25, 0.05, 0.12], 1);
+  propHoverCar(g, R, -21, 12, -1.1, [0.05, 0.12, 0.22], 0);
+  propHoverCar(g, R, 24, 22, 2.2, [0.18, 0.18, 0.2], 2);
   // jersey barriers
-  function barrier(x, z, rot) {
-    const sx = rot ? 0.7 : 3.2, sz = rot ? 3.2 : 0.7;
-    B(x, 0.5, z, sx, 1.0, sz, [0.16, 0.16, 0.18], 0, 4);
-    B(x, 0.75, z, sx + 0.04, 0.12, sz + 0.04, NEON.amber, 1.8);
-    WORLD.boxes.push({ x0: x - sx / 2, x1: x + sx / 2, y0: 0, y1: 1.0, z0: z - sz / 2, z1: z + sz / 2 });
-  }
+  function barrier(x, z, rot) { propBarrier(g, x, z, rot); }
   barrier(-9, 24, 0); barrier(-5.5, 24.6, 0); barrier(11, -26, 0); barrier(27, 5, 1); barrier(-28, -9, 1); barrier(-5, -30, 0); barrier(6, 30, 0); barrier(30, -12, 1);
   // vending machines / kiosks
-  function vend(x, z, ry, c) {
-    B(x, 1.1, z, ry ? 0.9 : 1.2, 2.2, ry ? 1.2 : 0.9, metal, 0, 4);
-    const off = 0.46; const fx = ry === 0 ? 0 : ry > 0 ? off : -off, fz = ry === 0 ? -off * Math.sign(z) : 0;
-    B(x + fx, 1.3, z + fz, ry ? 0.04 : 1.0, 1.4, ry ? 1.0 : 0.04, c, 1.6);
-    WORLD.boxes.push({ x0: x - 0.6, x1: x + 0.6, y0: 0, y1: 2.2, z0: z - 0.6, z1: z + 0.6 });
-  }
+  function vend(x, z, ry, c) { const fx = ry === 0 ? 0 : ry > 0 ? 1 : -1, fz = ry === 0 ? -Math.sign(z) : 0; propVend(g, R, x, z, fx, fz, c); }
   vend(-14, 38.8, 0, NEON.cyan); vend(-12.6, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
-  // bioluminescent trees in planters
-  function tree(x, z, c) {
-    g.cyl(M4.trs(M, x, 0.4, z, 0, 0, 0, 2.6, 0.8, 2.6), [0.1, 0.1, 0.12], 0, 4, 16);
-    g.cyl(M4.trs(M, x, 2.2, z, 0, 0, 0.05, 0.3, 3.6, 0.3), [0.12, 0.08, 0.08], 0, 0, 8);
-    for (let i = 0; i < 7; i++) { const a = i / 7 * TAU; g.sphere(M4.trs(M, x + Math.cos(a) * r(0.4, 1.1), r(3.4, 4.6), z + Math.sin(a) * r(0.4, 1.1), 0, 0, 0, r(1.0, 1.6), r(0.9, 1.3), r(1.0, 1.6)), [c[0] * 0.3, c[1] * 0.3, c[2] * 0.3], 3.6, 0, 8, 6); }
-    WORLD.circles.push({ x, z, r: 1.35, h: 5 });
-  }
+  // bioluminescent trees in planters (props.js)
+  const tree = (x, z, c) => propTree(g, R, x, z, c);
   tree(-17, -19, NEON.cyan); tree(18, 16, NEON.mag); tree(-26, 26, NEON.violet); tree(28, -27, NEON.cyan);
   // street lamps
-  function lamp(x, z) {
-    B(x, 3.5, z, 0.22, 7, 0.22, [0.1, 0.1, 0.12], 0, 4);
-    B(x, 7, z, 1.6, 0.25, 0.4, [0.1, 0.1, 0.12], 0, 4);
-    B(x, 6.85, z, 1.4, 0.06, 0.3, [0.8, 0.95, 1.0], 4);
-    WORLD.circles.push({ x, z, r: 0.25, h: 7 });
-    WORLD.lights.push({ p: [x, 6.4, z], r: 20, c: [1.2, 1.5, 2.0], kind: 'lamp' });
-    WORLD.halos.push({ p: [x, 6.8, z], s: 2.6, c: [-1, 0, 0] });
-  }
+  function lamp(x, z) { propLamp(g, x, z); }
   lamp(-32, -32); lamp(32, 32); lamp(-32, 32); lamp(32, -32);
+  // benches facing the fountain, with bins between them
+  for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
+  propBench(g, R, 12.5, -3.4, '-x');
+  for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
   // holo barriers across the 4 street mouths
   const holoTex = (function () {
     const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const x = cv.getContext('2d');

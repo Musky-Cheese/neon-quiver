@@ -191,6 +191,22 @@ function updateProjectiles(dt) {
     }
   }
 }
+/* height of the highest walkable top under a footprint of radius rad. Only tops you are already level
+   with (or just below, so a jump that clips an edge still lands) count; taller things stay walls. */
+function groundAt(x, z, y, rad) {
+  let h = 0; const lim = y + 0.32;
+  for (const b of WORLD.boxes) {
+    if (b.y1 > lim || b.y1 > 2.5 || b.y1 <= h) continue;
+    if (x + rad < b.x0 || x - rad > b.x1 || z + rad < b.z0 || z - rad > b.z1) continue;
+    h = b.y1;
+  }
+  for (const c of WORLD.circles) {
+    if (c.h > lim || c.h > 2.5 || c.h <= h) continue;
+    const dx = x - c.x, dz = z - c.z, R = c.r + rad * 0.5;
+    if (dx * dx + dz * dz < R * R) h = c.h;
+  }
+  return h;
+}
 /* ray vs static world (boxes + cylinders); returns distance or null */
 function rayWorld(ox, oy, oz, dx, dy, dz, maxD) {
   const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
@@ -541,7 +557,11 @@ function updatePlayer(dt) {
   P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
   P.x += P.vx * dt; P.z += P.vz * dt;
   if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
-  P.vy -= 20 * dt; P.y += P.vy * dt; if (P.y <= 0) { P.y = 0; P.vy = 0; P.grounded = true; }
+  P.vy -= 20 * dt; P.y += P.vy * dt;
+  // land on whatever is under your feet: benches, planters, barriers, the fountain rim
+  const gy = groundAt(P.x, P.z, P.y, 0.26);
+  if (P.y <= gy && P.vy <= 0) { if (!P.grounded && P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); P.y = gy; P.vy = 0; P.grounded = true; }
+  else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
   const hs = Math.hypot(P.vx, P.vz);

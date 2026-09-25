@@ -43,7 +43,7 @@ function spawnZombie(type, x, z, wave) {
 /* -------- collision helpers -------- */
 function pushOutCircle(o, rad) {
   for (const b of WORLD.boxes) {
-    if (o.y > b.y1) continue;
+    if (o.y > b.y1 - 0.02) continue;   // standing on top of it
     const cx = clamp(o.x, b.x0, b.x1), cz = clamp(o.z, b.z0, b.z1);
     const dx = o.x - cx, dz = o.z - cz, d2 = dx * dx + dz * dz;
     if (d2 < rad * rad) {
@@ -55,7 +55,7 @@ function pushOutCircle(o, rad) {
     }
   }
   for (const c of WORLD.circles) {
-    if (o.y > c.h) continue;
+    if (o.y > c.h - 0.02) continue;
     const dx = o.x - c.x, dz = o.z - c.z, d2 = dx * dx + dz * dz, R = rad + c.r;
     if (d2 < R * R && d2 > 1e-8) { const d = Math.sqrt(d2), k = (R - d) / d; o.x += dx * k; o.z += dz * k; }
   }

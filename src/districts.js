@@ -79,22 +79,10 @@ function buildDistricts(C) {
     WORLD.lights.push({ p: [x, 11.6, z], r: 24, c: [1.5, 1.5, 1.6], kind: 'lamp' });
     WORLD.halos.push({ p: [x, 11.85, z], s: 3.4, c: [-1, 0, 0] });
   }
-  function burnBarrel(x, z) {
-    B(x, 0.5, z, 0.7, 1.0, 0.7, [0.14, 0.08, 0.05], 0, 8);
-    WORLD.circles.push({ x, z, r: 0.45, h: 1.0 });
-    WORLD.fires.push({ x, y: 1.0, z }); WORLD.halos.push({ p: [x, 1.5, z], s: 2.4, c: [0.9, 0.4, 0.08] });
-  }
-  function dumpster(x, z, ry) {
-    const c = R() < 0.5 ? [0.06, 0.14, 0.09] : [0.07, 0.09, 0.16];
-    B(x, 0.65, z, 1.9, 1.3, 1.15, c, 0, 8, ry); B(x, 1.34, z, 2.0, 0.08, 1.25, [0.04, 0.04, 0.05], 0, 4, ry + 0.02);
-    const hx = Math.abs(Math.cos(ry)) > 0.5 ? 1.0 : 0.62, hz = Math.abs(Math.cos(ry)) > 0.5 ? 0.62 : 1.0;
-    solid(x - hx, x + hx, 0, 1.3, z - hz, z + hz);
-    for (let i = 0; i < 3; i++) C.getG().sphere(M4.trs(M, x + r(-1.4, 1.4), 0.28, z + r(-1.4, 1.4), 0, r(0, 3), 0, r(0.5, 0.8), r(0.45, 0.6), r(0.5, 0.8)), [0.03, 0.03, 0.035], 0, 0, 8, 6);
-  }
-  function crates(x, z) {
-    for (let i = 0; i < 3; i++) { const s = r(0.8, 1.1); B(x + (i % 2) * 1.0, s / 2 + (i === 2 ? 1.0 : 0), z + (i === 1 ? 0.2 : 0), s, s, s, [0.22, 0.15, 0.08], 0, 8, r(-0.2, 0.2)); }
-    solid(x - 0.55, x + 1.55, 0, 1.2, z - 0.55, z + 0.75);
-  }
+  const burnBarrel = (x, z) => propBurnBarrel(C.getG(), x, z);
+  const dumpster = (x, z, ry) => propDumpster(C.getG(), R, x, z, ry, solid);
+  const crates = (x, z) => propCrates(C.getG(), R, x, z, solid);
+  const bench = (x, z, face, len) => propBench(C.getG(), R, x, z, face, len);
 
   /* ---------------- RAIL YARD (north) ---------------- */
   setG('near');
@@ -125,6 +113,7 @@ function buildDistricts(C) {
   flood(-20, -95); flood(20, -122); flood(20, -80);
   barrier(-4, -90, 0); barrier(12, -104, 1); barrier(-18, -122, 0);
   crates(14, -97); crates(-24, -110);
+  bench(-6, -77, '+z'); bench(16, -77, '+z');
   // yard signage
   addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), 0, 9, -74.3, Math.PI, 12, 3, [1.3, 1.3, 1.3], 0, true);
   WORLD.supplies.push({ kind: 'terminal', x: -22, z: -79, ry: 0.4, d: 'yard' }, { kind: 'cache', x: 25, z: -104, d: 'yard' }, { kind: 'cache', x: -12, z: -135, d: 'yard' });
@@ -156,14 +145,9 @@ function buildDistricts(C) {
   }
   for (let x = 82; x <= 134; x += 6.5) cable(x, 5.2, -12.4, x + 1.5, 5.4, 12.4, 1.2, true, R() < 0.5 ? [1, 0.25, 0.1] : [1, 0.6, 0.15]);
   // food carts + tables in the central lane
-  for (const [x, z] of [[88, -4], [104, 5], [121, -6], [131, 4]]) {
-    B(x, 0.7, z, 2.2, 1.0, 1.2, [0.2, 0.2, 0.22], 0, 4); B(x, 1.25, z, 2.3, 0.1, 1.3, [0.12, 0.12, 0.13], 0, 4);
-    C.getG().cyl(M4.trs(M, x, 1.9, z, 0, 0, 0, 0.06, 1.3, 0.06), [0.1, 0.1, 0.1], 0, 4, 6);
-    C.getG().cyl(M4.trs(M, x, 2.7, z, 0, 0, 0, 3.0, 0.5, 3.0), awn[Math.floor(R() * awn.length)], 0.3, 0, 12, 0.02, 0.5, true);
-    solid(x - 1.15, x + 1.15, 0, 1.3, z - 0.65, z + 0.65); WORLD.steam.push([x + 0.6, 1.4, z]);
-    WORLD.lights.push({ p: [x, 2.2, z], r: 8, c: [1.8, 0.9, 0.4], shop: true });
-    for (let k = 0; k < 2; k++) { const tx = x + r(-4, 4), tz = z + (k ? 4.5 : -4.5); C.getG().cyl(M4.trs(M, tx, 0.38, tz, 0, 0, 0, 1.1, 0.06, 1.1), [0.15, 0.14, 0.13], 0, 4, 12); C.getG().cyl(M4.trs(M, tx, 0.2, tz, 0, 0, 0, 0.12, 0.38, 0.12), [0.1, 0.1, 0.1], 0, 4, 6); WORLD.circles.push({ x: tx, z: tz, r: 0.55, h: 0.8 }); }
-  }
+  for (const [x, z] of [[88, -4], [104, 5], [121, -6], [131, 4]]) propFoodCart(C.getG(), R, x, z, awn[Math.floor(R() * awn.length)], solid);
+  for (const x of [84, 110, 127]) bench(x, -11.2, '+z');
+  for (const x of [93, 116]) bench(x, 11.2, '-z');
   // entrance arch
   for (const az of [-6.5, 6.5]) { B(76, 3.5, az, 0.5, 7, 0.5, [0.25, 0.05, 0.05], 0, 4); WORLD.circles.push({ x: 76, z: az, r: 0.35, h: 7 }); }
   B(76, 7.2, 0, 0.6, 0.5, 14.5, [0.25, 0.05, 0.05], 0, 4);
@@ -194,6 +178,7 @@ function buildDistricts(C) {
   cable(-110, 7, 1.5, -94, 7.5, -1.5, 1, true, [0.9, 0.2, 0.6]);
   for (const [x, z] of [[-113, -4], [-135, 22], [-90, 18], [-113, 30], [-128, -30]]) { B(x, 3.6, z, 0.18, 0.18, 0.9, [0.1, 0.1, 0.1], 0, 4); B(x, 3.5, z, 0.5, 0.1, 0.5, [1, 0.8, 0.55], 3.5); WORLD.halos.push({ p: [x, 3.45, z], s: 1.6, c: [0.6, 0.42, 0.22] }); WORLD.lights.push({ p: [x, 3.2, z], r: 11, c: [1.6, 1.1, 0.55], shop: true }); }
   lamp(-80, -20); lamp(-88, 22);
+  bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 
 }

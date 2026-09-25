@@ -305,6 +305,33 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     float rust = smoothstep(0.55, 0.8, vn(fcW * 1.3 + N0.xz * 5.) + streak * 0.4);
     base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
     bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
+  } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
+    base *= 0.35; rough = 0.04 + streak * 0.14 * uWet; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
+  } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
+    float scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
+    float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
+    base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
+    rough = mix(0.24, 0.75, dirt) + streak * 0.05 * uWet; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
+  } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
+    float rid = abs(vn(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
+    float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
+    base = mix(base * (0.55 + 0.6 * rid), vec3(0.05, 0.09, 0.03), moss * 0.7);
+    bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
+  } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
+    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vn(vNqW.xz * 23.) * 0.5;
+    base *= (0.7 + 0.45 * gr) * mix(1., 0.72, uWet * step(0.5, N0.y));
+    bumpH = gr * 0.002; rough = mix(0.62, 0.35, uWet * step(0.5, N0.y)); rimK = 0.5;
+  } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
+    base *= 0.65 + 0.55 * vn(vNqW.xz * 6. + vNqW.y * 6.);
+    emis += base * uNeon * 0.3; rough = 0.62; rimK = 1.2; bumpH = vn(vNqW.xz * 17. + vNqW.y * 13.) * 0.006;
+  } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
+    base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
+  } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
+    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vn(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
+    float pit = smoothstep(0.78, 0.9, vn(vNqW.xz * 31. + vNqW.y * 29.));
+    float top = step(0.5, N0.y);
+    base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, uWet * top);
+    bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, uWet * top * 0.8); rimK = 0.3;
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);
@@ -428,6 +455,132 @@ class Geo {
       }
     }
     for (let s = 0; s < seg; s++) for (let t = 0; t < tube; t++) { const a = base + s * (tube + 1) + t, b = a + tube + 1; this.i.push(a, b, a + 1, a + 1, b, b + 1); }
+  }
+  /* ---- modeling kit for props (m must be rigid: rotation + translation only) ---- */
+  // re-orient triangles [i0, i1) so each faces along its vertices' normals
+  _fixWinding(i0) {
+    const I = this.i, v = this.v;
+    for (let k = i0; k < I.length; k += 3) {
+      const a = I[k] * 11, b = I[k + 1] * 11, c = I[k + 2] * 11;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      if (nx * (v[a + 3] + v[b + 3] + v[c + 3]) + ny * (v[a + 4] + v[b + 4] + v[c + 4]) + nz * (v[a + 5] + v[b + 5] + v[c + 5]) < 0) { const t = I[k + 1]; I[k + 1] = I[k + 2]; I[k + 2] = t; }
+    }
+  }
+  // box with rounded edges: size sx,sy,sz, edge radius r, s steps per bevel. taper = top face scale [tx, tz]
+  rbox(m, sx, sy, sz, r, c, e = 0, mat = 0, s = 2, taper = null) {
+    if (r <= 0.012 && !taper) { this.box(M4.mul(_t4c, m, M4.trs(_t4b, 0, 0, 0, 0, 0, 0, sx, sy, sz)), c, e, mat); return; }   // too small to see a bevel: 12 triangles
+    const H = [sx / 2, sy / 2, sz / 2]; r = Math.min(r, H[0] * 0.98, H[1] * 0.98, H[2] * 0.98);
+    const i0 = this.i.length, P = [0, 0, 0];
+    const co = (h) => { const a = []; for (let k = 0; k <= s; k++) a.push(-h + r * k / s); for (let k = 0; k <= s; k++) a.push(h - r + r * k / s); return a; };
+    for (let ax = 0; ax < 3; ax++) for (const sg of [-1, 1]) {
+      const u = (ax + 1) % 3, w = (ax + 2) % 3, U = co(H[u]), W = co(H[w]), base = this.n;
+      for (let j = 0; j < W.length; j++) for (let i = 0; i < U.length; i++) {
+        P[ax] = sg * H[ax]; P[u] = U[i]; P[w] = W[j];
+        let ox = 0, oy = 0, oz = 0; const q = [0, 0, 0];
+        for (let k = 0; k < 3; k++) q[k] = Math.max(-(H[k] - r), Math.min(H[k] - r, P[k]));
+        ox = P[0] - q[0]; oy = P[1] - q[1]; oz = P[2] - q[2]; const L = Math.hypot(ox, oy, oz) || 1;
+        let x = q[0] + ox / L * r, y = q[1] + oy / L * r, z = q[2] + oz / L * r;
+        if (taper) { const t = (y + H[1]) / sy; x *= 1 + (taper[0] - 1) * t; z *= 1 + (taper[1] - 1) * t; }
+        this._vert(m, x, y, z, ox / L, oy / L, oz / L, c, e, mat);
+      }
+      const nu = U.length;
+      for (let j = 0; j < W.length - 1; j++) for (let i = 0; i < nu - 1; i++) { const a = base + j * nu + i; this.i.push(a, a + 1, a + nu + 1, a, a + nu + 1, a + nu); }
+    }
+    this._fixWinding(i0);
+  }
+  // surface of revolution around local Y. prof: [[r, y, color?, emissive?], ...] bottom to top; a repeated point makes a hard edge
+  lathe(m, prof, c, e = 0, mat = 0, seg = 16, capTop = true, capBot = false) {
+    const i0 = this.i.length, n = prof.length, NR = [];
+    const segN = (a, b) => { const dr = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dr, dy) || 1; return [dy / L, -dr / L]; };
+    for (let k = 0; k < n; k++) {
+      const p = prof[k], pv = prof[k - 1], nx = prof[k + 1];
+      const hardPrev = pv && pv[0] === p[0] && pv[1] === p[1], hardNext = nx && nx[0] === p[0] && nx[1] === p[1];
+      let a = null, b = null;
+      if (pv && !hardPrev) a = segN(pv, p); if (nx && !hardNext) b = segN(p, nx);
+      const nn = a && b ? [a[0] + b[0], a[1] + b[1]] : (a || b || [1, 0]); const L = Math.hypot(nn[0], nn[1]) || 1; NR.push([nn[0] / L, nn[1] / L]);
+    }
+    const base = this.n;
+    for (let k = 0; k < n; k++) {
+      const [r, y] = prof[k], cc = prof[k][2] || c, ee = prof[k][3] !== undefined ? prof[k][3] : e;
+      for (let sI = 0; sI <= seg; sI++) { const a = sI / seg * TAU, ca = Math.cos(a), sa = Math.sin(a); this._vert(m, ca * r, y, sa * r, ca * NR[k][0], NR[k][1], sa * NR[k][0], cc, ee, mat); }
+    }
+    for (let k = 0; k < n - 1; k++) {
+      if (prof[k][0] === prof[k + 1][0] && prof[k][1] === prof[k + 1][1]) continue;
+      for (let sI = 0; sI < seg; sI++) { const a = base + k * (seg + 1) + sI, b = a + seg + 1; this.i.push(a, a + 1, b + 1, a, b + 1, b); }
+    }
+    const cap = (p, up) => { const cc = p[2] || c, ee = p[3] !== undefined ? p[3] : e; const ct = this._vert(m, 0, p[1], 0, 0, up, 0, cc, ee, mat), r0 = this.n;
+      for (let sI = 0; sI <= seg; sI++) { const a = sI / seg * TAU; this._vert(m, Math.cos(a) * p[0], p[1], Math.sin(a) * p[0], 0, up, 0, cc, ee, mat); }
+      for (let sI = 0; sI < seg; sI++) this.i.push(ct, r0 + sI, r0 + sI + 1); };
+    if (capTop && prof[n - 1][0] > 0) cap(prof[n - 1], 1); if (capBot && prof[0][0] > 0) cap(prof[0], -1);
+    this._fixWinding(i0);
+  }
+  // tube along world-space points with per-point radius (branches, pipes, rails). cols: optional per-point colours
+  tube(pts, rad, c, e = 0, mat = 0, sides = 6, capEnd = true, cols = null) {
+    const i0 = this.i.length, n = pts.length, base = this.n;
+    let T = [0, 1, 0], N = null;
+    for (let k = 0; k < n; k++) {
+      const p = pts[k], a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      if (!N) { N = Math.abs(ty) < 0.9 ? [0, 1, 0] : [1, 0, 0]; }
+      // parallel transport: remove the tangent component from the previous normal
+      const d = N[0] * tx + N[1] * ty + N[2] * tz; N = [N[0] - d * tx, N[1] - d * ty, N[2] - d * tz]; const nl = Math.hypot(...N) || 1; N = N.map(v => v / nl);
+      const Bx = ty * N[2] - tz * N[1], By = tz * N[0] - tx * N[2], Bz = tx * N[1] - ty * N[0]; T = [tx, ty, tz];
+      const cc = cols ? cols[k] : c;
+      for (let sI = 0; sI <= sides; sI++) {
+        const an = sI / sides * TAU, ca = Math.cos(an), sa = Math.sin(an), ox = N[0] * ca + Bx * sa, oy = N[1] * ca + By * sa, oz = N[2] * ca + Bz * sa;
+        this._vert(null, p[0] + ox * rad[k], p[1] + oy * rad[k], p[2] + oz * rad[k], ox, oy, oz, cc, e, mat);
+      }
+    }
+    for (let k = 0; k < n - 1; k++) for (let sI = 0; sI < sides; sI++) { const a = base + k * (sides + 1) + sI, b = a + sides + 1; this.i.push(a, a + 1, b + 1, a, b + 1, b); }
+    if (capEnd && rad[n - 1] > 0.004) { const p = pts[n - 1], cc = cols ? cols[n - 1] : c, ct = this._vert(null, p[0] + T[0] * rad[n - 1] * 0.6, p[1] + T[1] * rad[n - 1] * 0.6, p[2] + T[2] * rad[n - 1] * 0.6, T[0], T[1], T[2], cc, e, mat); const r0 = base + (n - 1) * (sides + 1); for (let sI = 0; sI < sides; sI++) this.i.push(ct, r0 + sI, r0 + sI + 1); }
+    this._fixWinding(i0);
+  }
+  // lumpy organic ball (foliage, rubbish bags): sphere displaced by 3D value noise, smooth normals rebuilt
+  blob(m, rx, ry, rz, amp, seed, c, e = 0, mat = 0, seg = 12, rings = 8, emisMask = 0) {
+    const i0 = this.i.length, base = this.n;
+    const hsh = (x, y, z) => { const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 19.3) * 43758.5453; return s - Math.floor(s); };
+    const vn3 = (x, y, z) => { const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx = x - ix, fy = y - iy, fz = z - iz, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy), sz = fz * fz * (3 - 2 * fz);
+      const L = (a, b, t) => a + (b - a) * t; const h = (i, j, k) => hsh(ix + i, iy + j, iz + k);
+      return L(L(L(h(0, 0, 0), h(1, 0, 0), sx), L(h(0, 1, 0), h(1, 1, 0), sx), sy), L(L(h(0, 0, 1), h(1, 0, 1), sx), L(h(0, 1, 1), h(1, 1, 1), sx), sy), sz); };
+    for (let r = 0; r <= rings; r++) {
+      const vv = r / rings * Math.PI, sv = Math.sin(vv), cv = Math.cos(vv);
+      for (let sI = 0; sI <= seg; sI++) {
+        const u = (sI % seg) / seg * TAU, x = Math.cos(u) * sv, y = cv, z = Math.sin(u) * sv;
+        const nz = vn3(x * 2.1, y * 2.1, z * 2.1) * 0.65 + vn3(x * 5.3, y * 5.3, z * 5.3) * 0.35, k = 1 + (nz - 0.5) * 2 * amp;
+        const cv2 = 0.75 + 0.5 * vn3(x * 3.7 + 9, y * 3.7, z * 3.7);
+        const ee = emisMask ? e * Math.max(0, (vn3(x * 6 + 3, y * 6, z * 6) - 0.55) * 4) * (0.4 + 0.6 * Math.max(0, y)) : e;
+        this._vert(m, x * rx * k, y * ry * k, z * rz * k, 0, 0, 0, [c[0] * cv2, c[1] * cv2, c[2] * cv2], ee, mat);
+      }
+    }
+    for (let r = 0; r < rings; r++) for (let sI = 0; sI < seg; sI++) { const a = base + r * (seg + 1) + sI, b = a + seg + 1; this.i.push(a, a + 1, b, b, a + 1, b + 1); }
+    // smooth normals from the displaced shape (seam columns share a position, so average them too)
+    const v = this.v, acc = new Float32Array((this.n - base) * 3);
+    for (let k = i0; k < this.i.length; k += 3) {
+      const A = this.i[k], B = this.i[k + 1], C = this.i[k + 2], a = A * 11, b = B * 11, cI = C * 11;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[cI] - v[a], wy = v[cI + 1] - v[a + 1], wz = v[cI + 2] - v[a + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      for (const q of [A, B, C]) { const o = (q - base) * 3; acc[o] += nx; acc[o + 1] += ny; acc[o + 2] += nz; }
+    }
+    const cx = [0, 0, 0]; for (let q = base; q < this.n; q++) { cx[0] += v[q * 11]; cx[1] += v[q * 11 + 1]; cx[2] += v[q * 11 + 2]; } for (let k = 0; k < 3; k++) cx[k] /= this.n - base;
+    for (let r = 0; r <= rings; r++) { const a = (r * (seg + 1)) * 3, b = (r * (seg + 1) + seg) * 3; for (let k = 0; k < 3; k++) { const s = acc[a + k] + acc[b + k]; acc[a + k] = acc[b + k] = s; } }
+    for (let q = base; q < this.n; q++) {
+      const o = (q - base) * 3; let nx = acc[o], ny = acc[o + 1], nz = acc[o + 2];
+      const ox = v[q * 11] - cx[0], oy = v[q * 11 + 1] - cx[1], oz = v[q * 11 + 2] - cx[2];
+      if (nx * ox + ny * oy + nz * oz < 0) { nx = -nx; ny = -ny; nz = -nz; }   // outward
+      const L = Math.hypot(nx, ny, nz) || 1; v[q * 11 + 3] = nx / L; v[q * 11 + 4] = ny / L; v[q * 11 + 5] = nz / L;
+    }
+    this._fixWinding(i0);
+  }
+  // convex 2D profile [[x, y], ...] (counter-clockwise) extruded along local Z, centred, flat-shaded
+  extrude(m, prof, len, c, e = 0, mat = 0) {
+    const i0 = this.i.length, n = prof.length, h = len / 2;
+    for (let k = 0; k < n; k++) {
+      const a = prof[k], b = prof[(k + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L;
+      this.quad(m, [a[0], a[1], -h], [b[0], b[1], -h], [b[0], b[1], h], [a[0], a[1], h], [nx, ny, 0], c, e, mat);
+    }
+    for (const sz of [-1, 1]) { const b0 = this.n; for (const p of prof) this._vert(m, p[0], p[1], sz * h, 0, 0, sz, c, e, mat); for (let k = 1; k < n - 1; k++) this.i.push(b0, b0 + k, b0 + k + 1); }
+    this._fixWinding(i0);
   }
   build() {
     const n = this.n, v = this.v;
