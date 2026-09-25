@@ -3,8 +3,7 @@ root = os.path.dirname(os.path.abspath(__file__))
 S = lambda f: open(os.path.join(root, 'src', f)).read()
 fonts = ''
 for w, st, f in [(400, 'normal', 'heroscn-regular.woff'), (700, 'normal', 'heroscn-bold.woff'), (700, 'italic', 'heroscn-bolditalic.woff')]:
-    b = base64.b64encode(open(os.path.join(root, 'fonts', f), 'rb').read()).decode()
-    fonts += '@font-face{font-family:"Quiver Cn";font-weight:%d;font-style:%s;font-display:block;src:url(data:font/woff;base64,%s) format("woff");}\n' % (w, st, b)
+    fonts += '@font-face{font-family:"Quiver Cn";font-weight:%d;font-style:%s;font-display:block;src:url(fonts/%s) format("woff");}\n' % (w, st, f)
 css = S('style.css').replace('/*__FONTS__*/', fonts)
 IMPORTS = '''import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -15,7 +14,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 '''
-js = IMPORTS + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
+js = IMPORTS + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Hold a sealed cyberpunk plaza against endless zombie waves, right in your browser.">'
