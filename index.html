@@ -624,6 +624,22 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     float top = step(0.5, N0.y);
     base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, uWet * top);
     bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, uWet * top * 0.8); rimK = 0.3;
+  } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
+    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
+    base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
+    float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
+    base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
+    emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
+    bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(uWet, 0., 1.) * 0.6); rimK = 0.2;
+  } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
+    float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
+    vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
+    float koi = smoothstep(0.9, 0.96, vn(kp * 1.7));
+    base = mix(vec3(0.01, 0.03, 0.035), vec3(0.8, 0.35, 0.5), pet);
+    emis += vec3(1.0, 0.35, 0.08) * koi * 0.18 * (1. - pet);
+    bumpH = nqRipple(vNqW.xz * 2.2, uTime) * 0.003 * max(uRain, 0.25) + (vn(vNqW.xz * 1.3 + uTime * 0.2) - 0.5) * 0.004;
+    rough = mix(0.03, 0.6, pet); metal = 0.0; envK = uEnvK * 1.6; rimK = 0.0;
+    wetRefl = mix(0.85, 0.08, pet);
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);
@@ -1159,6 +1175,144 @@ function propFoodCart(g, R, x, z, awningCol, solid) {
 }
 
 /* ============================================================
+   Sakura Gardens pieces
+   ============================================================ */
+// cherry blossom: short gnarled trunk, limbs spreading low and wide, a broad umbrella of pink clusters.
+// planter: sit it in a concrete planter (plaza) or straight in the lawn (garden). Returns canopy centre.
+function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
+  const r = (a, b) => a + (b - a) * R();
+  const base = planter ? 0.8 : 0.02;
+  if (planter) {
+    g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
+    g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.06, 0.03, 0.035], 0, 16, 24);
+    if (ringCol) g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), ringCol, 2.2, 0, 1.415, 0.018, 40, 4);
+  } else {
+    g.blob(pT(PM.a, x, 0.0, z, r(0, TAU)), 1.1 * s, 0.14, 1.1 * s, 0.3, r(0, 99), [0.05, 0.08, 0.03], 0, 17, 12, 5);   // moss mound
+  }
+  const bark = [0.075, 0.05, 0.05], tips = [];
+  const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
+  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, base + 0.35 * s, z], [x + Math.cos(a) * 0.4 * s, base + 0.06, z + Math.sin(a) * 0.4 * s], [x + Math.cos(a) * 0.8 * s, base - 0.02, z + Math.sin(a) * 0.8 * s]], [0.16 * s, 0.08 * s, 0.03 * s], bark, 0, 12, 5); }
+  function grow(p, d, len, rad, depth) {
+    const pts = [p], rr = [rad]; let q = p, dir = d.slice();
+    for (let k = 1; k <= 4; k++) {   // kinked, slightly drooping limbs
+      dir = [dir[0] + r(-0.3, 0.3), dir[1] + (depth >= 2 ? 0.05 : -0.06) + r(-0.12, 0.12), dir[2] + r(-0.3, 0.3)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
+      q = [q[0] + dir[0] * len / 4, q[1] + dir[1] * len / 4, q[2] + dir[2] * len / 4]; pts.push(q); rr.push(rad * (1 - k * 0.1));
+    }
+    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 8 : depth === 1 ? 6 : 4, depth === 0);
+    if (depth === 0) { tips.push(q); return; }
+    const n = depth === 2 ? 4 : 2 + (R() < 0.5 ? 1 : 0), a0 = r(0, TAU);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + i / n * TAU + r(-0.35, 0.35), spread = depth === 2 ? r(0.7, 0.95) : r(0.45, 0.8);
+      const nd = [dir[0] * (1 - spread) + Math.cos(a) * spread, dir[1] * (1 - spread) * 0.6 + (depth === 2 ? 0.28 : 0.12), dir[2] * (1 - spread) + Math.sin(a) * spread];
+      grow(q, nd, len * r(0.65, 0.85), rad * 0.6, depth - 1);
+    }
+    if (depth === 1) tips.push(q);
+  }
+  grow([x, base, z], [r(-0.12, 0.12), 1, r(-0.12, 0.12)], 1.7 * s, 0.26 * s, 2);
+  // blossom: a big soft cluster at every tip plus smaller puffs around it, glowing faintly pink
+  let cx = 0, cy = 0, cz = 0;
+  for (const t of tips) {
+    cx += t[0]; cy += t[1]; cz += t[2];
+    g.blob(pT(PM.a, t[0], t[1] + 0.2, t[2], r(0, TAU)), r(0.75, 1.0) * s, r(0.5, 0.62) * s, r(0.75, 1.0) * s, 0.4, r(0, 99), blossom, 1.8, 14, 10, 7, 1);
+    for (let i = 0; i < 1; i++) { const a = r(0, TAU), d = r(0.5, 0.8) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
+  }
+  cx /= tips.length; cy /= tips.length; cz /= tips.length;
+  WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
+  WORLD.petals.push([cx, cy, cz, 2.6 * s]);
+  WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
+  if (planter) WORLD.circles.push({ x, z, r: 1.45, h: 0.86 });
+}
+// stone lantern (toro): turned pedestal, glowing fire box, pyramid roof
+function propToro(g, x, z, lit = true) {
+  const st = [0.24, 0.24, 0.23];
+  g.lathe(pT(PM.a, x, 0, z), [[0.36, 0], [0.36, 0.12], [0.14, 0.2], [0.11, 0.78], [0.3, 0.84], [0.3, 0.94]], st, 0, 16, 10, true, false);
+  g.rbox(pT(PM.a, x, 1.12, z), 0.44, 0.36, 0.44, 0.03, st, 0, 16, 1);
+  for (const [dx, dz] of [[0, 0.225], [0, -0.225], [0.225, 0], [-0.225, 0]]) g.rbox(pT(PM.a, x + dx, 1.12, z + dz, dx ? Math.PI / 2 : 0), 0.24, 0.22, 0.012, 0.004, [1, 0.72, 0.38], lit ? 2.6 : 0, 0, 1);
+  g.lathe(pT(PM.a, x, 0, z, Math.PI / 4), [[0.5, 1.3], [0.5, 1.33], [0.12, 1.55], [0, 1.6]], st, 0, 16, 4, false, false);
+  g.sphere(M4.trs(PM.a, x, 1.66, z, 0, 0, 0, 0.12, 0.14, 0.12), st, 0, 16, 8, 6);
+  WORLD.circles.push({ x, z, r: 0.36, h: 1.6 });
+  if (lit) { WORLD.lights.push({ p: [x, 1.2, z], r: 7, c: [1.5, 0.95, 0.5], shop: true }); WORLD.halos.push({ p: [x, 1.12, z], s: 1.4, c: [0.5, 0.32, 0.15] }); }
+}
+// torii gate across the avenue: two red pillars, black-capped curved top beam, tie beam, name plaque
+function propTorii(g, x, z, span = 8.4) {
+  const red = [0.5, 0.05, 0.035], blk = [0.03, 0.03, 0.035], h = span / 2;
+  for (const sx of [-h, h]) {
+    g.lathe(pT(PM.a, x + sx, 0, z), [[0.42, 0, blk], [0.42, 0.55, blk], [0.42, 0.55], [0.3, 0.6], [0.26, 6.0]], red, 0, 11, 16, false, false);
+    WORLD.circles.push({ x: x + sx, z, r: 0.42, h: 6.5 });
+  }
+  g.rbox(pT(PM.a, x, 5.15, z), span + 1.6, 0.34, 0.34, 0.05, red, 0, 11, 1);                                  // nuki
+  g.rbox(pT(PM.a, x, 6.05, z), span + 1.2, 0.36, 0.46, 0.05, red, 0, 11, 1);                                   // shimaki
+  for (const sx of [-1, 1]) g.rbox(pT(PM.a, x + sx * (h + 1.1), 6.42, z, 0, 0, -sx * 0.12), 2.6, 0.32, 0.7, 0.06, blk, 0, 11, 1);   // upswept ends
+  g.rbox(pT(PM.a, x, 6.36, z), span - 0.6, 0.3, 0.7, 0.06, blk, 0, 11, 1);                                      // kasagi
+  g.rbox(pT(PM.a, x, 5.6, z), 0.9, 0.9, 0.16, 0.04, blk, 0, 11, 1);                                             // plaque
+  g.rbox(pT(PM.a, x, 5.6, z), 0.76, 0.76, 0.18, 0.02, [1, 0.55, 0.72], 1.4, 0, 1);
+}
+// small shrine on a raised deck: two steps, vermilion posts, sweeping roof, hanging lanterns
+function propShrine(g, x, z, solid) {
+  const red = [0.5, 0.05, 0.035], wood = [0.2, 0.12, 0.07], roof = [0.07, 0.08, 0.08];
+  g.rbox(pT(PM.a, x, 0.3, z), 8, 0.6, 6, 0.04, wood, 0, 13, 1); solid(x - 4, x + 4, 0, 0.6, z - 3, z + 3);
+  g.rbox(pT(PM.a, x, 0.15, z - 3.4), 4, 0.3, 0.8, 0.03, [0.26, 0.25, 0.24], 0, 16, 1); solid(x - 2, x + 2, 0, 0.3, z - 3.8, z - 3);
+  for (const sx of [-3.5, 3.5]) for (const sz of [-2.5, 2.5]) { g.lathe(pT(PM.a, x + sx, 0.6, z + sz), [[0.2, 0], [0.18, 3.3]], red, 0, 11, 12, false, false); WORLD.circles.push({ x: x + sx, z: z + sz, r: 0.22, h: 4 }); }
+  g.rbox(pT(PM.a, x, 2.6, z + 2.4), 7, 2.0, 0.2, 0.03, [0.12, 0.07, 0.05], 0, 13, 1);                           // back wall
+  g.rbox(pT(PM.a, x, 1.4, z + 2.25), 2.2, 1.2, 0.06, 0.02, [1, 0.62, 0.4], 0.9, 0, 1);                          // glowing screen
+  solid(x - 3.5, x + 3.5, 0.6, 3.6, z + 2.3, z + 2.5);
+  g.rbox(pT(PM.a, x, 3.9, z), 8.6, 0.2, 6.6, 0.05, red, 0, 11, 1);
+  g.extrude(pT(PM.a, x, 4.0, z, Math.PI / 2), [[-4.3, 0], [4.3, 0], [4.6, 0.25], [2.5, 1.1], [0.35, 1.9], [-0.35, 1.9], [-2.5, 1.1], [-4.6, 0.25]], 10.2, roof, 0, 8);
+  g.rbox(pT(PM.a, x, 5.95, z), 10.6, 0.22, 0.5, 0.06, roof, 0, 8, 1);                                          // ridge
+  for (const sx of [-2.8, -0.9, 0.9, 2.8]) {
+    g.tube([[x + sx, 3.8, z - 3.2], [x + sx, 3.3, z - 3.2]], [0.01, 0.01], [0.03, 0.03, 0.03], 0, 0, 3, false);
+    g.lathe(pT(PM.a, x + sx, 2.75, z - 3.2), [[0.08, 0], [0.24, 0.12], [0.26, 0.3], [0.24, 0.48], [0.08, 0.58]], [1, 0.3, 0.18], 2.6, 15, 12, true, true);
+    WORLD.halos.push({ p: [x + sx, 3.05, z - 3.2], s: 1.5, c: [0.6, 0.12, 0.06] });
+  }
+  WORLD.lights.push({ p: [x, 2.8, z - 4], r: 10, c: [1.8, 0.6, 0.35], shop: true });
+}
+// irregular pond at water level with a muddy rim and bank stones. Returns the rim points.
+function propPond(g, R, cx, cz, rx, rz) {
+  const N = 40, pts = [];
+  for (let i = 0; i < N; i++) { const a = i / N * TAU, k = 1 + 0.12 * Math.sin(a * 3 + 1.3) + 0.07 * Math.sin(a * 5 + 0.4); pts.push([cx + Math.cos(a) * rx * k, cz + Math.sin(a) * rz * k]); }
+  const fan = (scale, y, c, mat) => { const i0 = g.i.length, c0 = g._vert(null, cx, y, cz, 0, 1, 0, c, 0, mat), r0 = g.n;
+    for (const [px, pz] of pts) g._vert(null, cx + (px - cx) * scale, y, cz + (pz - cz) * scale, 0, 1, 0, c, 0, mat);
+    for (let i = 0; i < N; i++) g.i.push(c0, r0 + (i + 1) % N, r0 + i); g._fixWinding(i0); };
+  fan(1.1, 0.014, [0.03, 0.03, 0.025], 16);          // wet mud band
+  fan(1.0, 0.02, [0.02, 0.04, 0.045], 18);            // water
+  for (let i = 0; i < N; i += 1) { if (R() < 0.35) continue; const [px, pz] = pts[i], s = 0.25 + R() * 0.35;
+    g.blob(pT(PM.a, cx + (px - cx) * 1.05, 0.05, cz + (pz - cz) * 1.05, R() * 6), s * 1.2, s * 0.55, s, 0.3, R() * 99, [0.2, 0.2, 0.19], 0, 16, 9, 6); }
+  WORLD.ponds.push({ x: cx, z: cz, rx: rx * 0.95, rz: rz * 0.95 });
+  return pts;
+}
+function propSteppingStone(g, R, x, z) {
+  g.blob(pT(PM.a, x, 0.08, z, R() * 6), 0.5, 0.16, 0.44, 0.15, R() * 99, [0.22, 0.22, 0.21], 0, 16, 10, 6);
+  WORLD.circles.push({ x, z, r: 0.42, h: 0.2 });
+}
+// flat stone path along a polyline (flagstones with gaps)
+function propPath(g, R, pts, w, y = 0.018) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1], L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(L / 1.1));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n, px = ax + (bx - ax) * t, pz = az + (bz - az) * t, ry = Math.atan2(bx - ax, bz - az);
+      const sh = 0.85 + R() * 0.2, c = 0.19 + R() * 0.05;
+      g.rbox(pT(PM.a, px + (R() - 0.5) * 0.08, y, pz + (R() - 0.5) * 0.08, ry + (R() - 0.5) * 0.12), w * sh, 0.04, L / n * 0.9, 0.012, [c, c, c * 0.95], 0, 16, 1);
+    }
+  }
+}
+function inPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
+// background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
+function propSakuraFar(g, R, x, z, s = 1, detail = 1) {
+  const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
+  const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
+  const h = r(1.4, 1.9) * s, sides = detail >= 2 ? 6 : 4;
+  g.tube([[x, 0, z], [x + r(-0.2, 0.2), h * 0.6, z + r(-0.2, 0.2)], [x + r(-0.3, 0.3), h, z + r(-0.3, 0.3)]], [0.24 * s, 0.2 * s, 0.16 * s], bark, 0, 12, sides, false);
+  const n = detail >= 2 ? 5 : detail === 1 ? 3 : 2, a0 = r(0, TAU), seg = detail >= 2 ? 10 : detail === 1 ? 7 : 6, rings = detail >= 2 ? 7 : detail === 1 ? 5 : 4;
+  for (let i = 0; i < n; i++) {
+    const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
+    g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
+    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
+  }
+  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
+  if (detail >= 2 && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
+}
+
+/* ============================================================
    Looks: switchable art directions for the whole city
    ============================================================ */
 const THEMES = {
@@ -1591,6 +1745,9 @@ const WORLD = {
   signs: [],    // {tex,m,col,mode,seed,add}
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
+  petals: [],   // [x, y, z, radius] blossom canopies that shed petals
+  ponds: [],    // {x, z, rx, rz} shallow water you wade through
+  navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -1649,7 +1806,7 @@ function billboardTexture(kind) {
 function buildCity() {
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
-  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
+  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
   const M = M4.create();
   const B = (x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0) => g.box(M4.trs(M, x, y, z, 0, ry, 0, sx, sy, sz), c, e, mat);
   const solid = (x0, x1, y0, y1, z0, z1) => WORLD.boxes.push({ x0, x1, y0, y1, z0, z1 });
@@ -1779,22 +1936,6 @@ function buildCity() {
     B((x0 + x1) / 2, h / 2, (z0 + z1) / 2, x1 - x0, h, z1 - z0, facadeCols[Math.floor(R() * 5)], 0, 1); solid(x0, x1, 0, h, z0, z1);
   }
   g = gFar;
-  // street walls further out, flanking the 4 corridors (so the streets read as streets)
-  for (const axis of ['z']) for (const s of [1]) for (const hside of [-1, 1]) {
-    let a = PLAZA + 32; while (a < 150) {
-      const len = r(14, 26), h = r(30, 110), depth = r(14, 24);
-      const u0 = hside > 0 ? 7 : -7 - depth, u1 = hside > 0 ? 7 + depth : -7;
-      const v0 = s > 0 ? a : -a - len, v1 = s > 0 ? a + len : -a;
-      if (axis === 'z') { g.box(M4.trs(M, (u0 + u1) / 2, h / 2, (v0 + v1) / 2, 0, 0, 0, depth, h, len), facadeCols[Math.floor(R() * 5)], 0, 1); solid(u0, u1, 0, h, v0, v1);
-        const nc = neonPick(); B(hside > 0 ? u0 - 0.1 : u1 + 0.1, h / 2, (v0 + v1) / 2 + (R() - 0.5) * len * 0.6, 0.2, h, 0.25, nc, 2);
-        if (R() < 0.5) { B(hside > 0 ? u0 - 0.05 : u1 + 0.05, 1.8, (v0 + v1) / 2, 0.1, 2.6, len * 0.7, [0.3, 0.2, 0.3], 0.8); }
-      } else { g.box(M4.trs(M, (v0 + v1) / 2, h / 2, (u0 + u1) / 2, 0, 0, 0, len, h, depth), facadeCols[Math.floor(R() * 5)], 0, 1); solid(v0, v1, 0, h, u0, u1);
-        const nc = neonPick(); B((v0 + v1) / 2 + (R() - 0.5) * len * 0.6, h / 2, hside > 0 ? u0 - 0.1 : u1 + 0.1, 0.25, h, 0.2, nc, 2);
-        if (R() < 0.5) { B((v0 + v1) / 2, 1.8, hside > 0 ? u0 - 0.05 : u1 + 0.05, len * 0.7, 2.6, 0.1, [0.3, 0.2, 0.3], 0.8); }
-      }
-      a += len + r(0, 3);
-    }
-  }
   // ---------- outer skyline ----------
   for (let gx = -420; gx <= 420; gx += 34) for (let gz = -420; gz <= 420; gz += 34) {
     const x = gx + r(-6, 6), z = gz + r(-6, 6); const dist = Math.hypot(x, z);
@@ -1804,6 +1945,7 @@ function buildCity() {
     if (DISTRICTS.some(d => x > d.x0 - 34 && x < d.x1 + 34 && z > d.z0 - 34 && z < d.z1 + 34)) continue;   // districts + their walls
     if ((ax < 36 || az < 36) && mx < 165) continue;          // street walls live here
     if (ax < 24 || az < 24) continue;                        // keep avenues open to the horizon
+    if (z > 66) continue;                                    // south of the plaza is cherry forest, not city
     if (R() < 0.18) continue;
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
@@ -1846,7 +1988,7 @@ function buildCity() {
   function vend(x, z, ry, c) { const fx = ry === 0 ? 0 : ry > 0 ? 1 : -1, fz = ry === 0 ? -Math.sign(z) : 0; propVend(g, R, x, z, fx, fz, c); }
   vend(-14, 38.8, 0, NEON.cyan); vend(-12.6, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
   // bioluminescent trees in planters (props.js)
-  const tree = (x, z, c) => propTree(g, R, x, z, c);
+  const tree = (x, z, c) => propSakura(g, R, x, z, 1, true, c);
   tree(-17, -19, NEON.cyan); tree(18, 16, NEON.mag); tree(-26, 26, NEON.violet); tree(28, -27, NEON.cyan);
   // street lamps
   function lamp(x, z) { propLamp(g, x, z); }
@@ -1855,28 +1997,13 @@ function buildCity() {
   for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
   propBench(g, R, 12.5, -3.4, '-x');
   for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
-  // holo barriers across the 4 street mouths
-  const holoTex = (function () {
-    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const x = cv.getContext('2d');
-    x.fillStyle = 'rgba(255,46,136,0.12)'; x.fillRect(0, 0, 512, 128);
-    for (let i = -2; i < 20; i++) { x.fillStyle = 'rgba(255,46,136,0.55)'; x.beginPath(); x.moveTo(i * 40, 0); x.lineTo(i * 40 + 20, 0); x.lineTo(i * 40 + 60, 128); x.lineTo(i * 40 + 40, 128); x.fill(); }
-    x.fillStyle = '#07050d'; x.fillRect(120, 34, 272, 60);
-    segText(x, 'SEALED', 256, 64, 40, { color: '#ff2e88', align: 'center', glow: 0.6 });
-    return canvasTex(cv);
-  })();
-  for (const [x, z, ry] of [[0, RING - 3, 0]]) {
-    addSign(holoTex, x, 1.2, z, ry, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
-    addSign(holoTex, x, 1.2, z, ry + Math.PI, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
-    for (const s of [-1, 1]) { const px = ry ? x : s * 6.2, pz = ry ? s * 6.2 : z; B(px, 1.4, pz, 0.35, 2.8, 0.35, [0.1, 0.1, 0.12], 0, 4); B(px, 2.85, pz, 0.4, 0.12, 0.4, NEON.mag, 4); }
-    B(0, 3, z + 1.2, 13, 6, 0.6, [0.07, 0.07, 0.08], 0, 8); solid(-7, 7, 0, 6, z - 0.2, z + 1.6);   // quarantine gate
-  }
-  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : gNear; }, getG: () => g });
+  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
   // hub supply points
   WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });
   for (const sp of WORLD.supplies) supplyProp(g, sp);
 
-  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build();
+  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build();
 
   // flying traffic
   for (let i = 0; i < 46; i++) {
@@ -1921,15 +2048,16 @@ function drawCityDynamic(time) {
 }
 
 /* ============================================================
-   Districts: the Rail Yard (north), the Night Market (east) and
-   the Warrens (west) hang off Sector 7 plaza. The south avenue is
-   sealed by the quarantine gate.
+   Districts: the Rail Yard (north), the Night Market (east), the
+   Warrens (west) and the Sakura Gardens (south, through the torii)
+   hang off Sector 7 plaza.
    ============================================================ */
 const DISTRICTS = [
   { id: 'hub', name: 'SECTOR 7 PLAZA', x0: -40, x1: 40, z0: -40, z1: 40, env: [0, 5, 10] },
   { id: 'yard', name: 'RAIL YARD', x0: -32, x1: 32, z0: -138, z1: -74, env: [0, 5, -104] },
   { id: 'market', name: 'NIGHT MARKET', x0: 74, x1: 138, z0: -32, z1: 32, env: [106, 5, 0] },
   { id: 'warrens', name: 'THE WARRENS', x0: -138, x1: -74, z0: -32, z1: 32, env: [-84, 5, 0] },
+  { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 74, z1: 138, env: [0, 5, 100] },
 ];
 function districtAt(x, z) {
   for (const d of DISTRICTS) if (x > d.x0 - 2 && x < d.x1 + 2 && z > d.z0 - 2 && z < d.z1 + 2) return d;
@@ -1937,9 +2065,10 @@ function districtAt(x, z) {
   if (Math.abs(x) < 8 && z < -40) return DISTRICTS[1];
   if (Math.abs(z) < 8 && x > 40) return DISTRICTS[2];
   if (Math.abs(z) < 8 && x < -40) return DISTRICTS[3];
+  if (Math.abs(x) < 8 && z > 40) return DISTRICTS[4];
   return DISTRICTS[0];
 }
-const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 74 };
+const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 136 };
 
 // terminals and ammo caches: static base geometry (the glow is drawn per frame in world.js)
 function supplyProp(g, sp) {
@@ -2103,6 +2232,43 @@ function buildDistricts(C) {
   bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 
+
+  /* ---------------- SAKURA GARDENS (south) ---------------- */
+  // no buildings here: the grove is walled in by cherry forest that fades into the mist
+  setG('garden');
+  const G = C.getG();
+  quad(-110, 110, 74, 230, 0.012, [0.07, 0.11, 0.05], 17);
+  // the forest: lighter trees on a jittered grid all round the grove (you can't walk out there)
+  for (let fz = 77; fz < 200; fz += 8.5) for (let fx = -90; fx <= 90; fx += 8.5) {
+    const x = fx + (R() - 0.5) * 6, z = fz + (R() - 0.5) * 6;
+    if (Math.abs(x) < 33 && z < 137.5) continue;                 // the grove itself
+    if (z < 79 && Math.abs(x) > 60) continue;                    // tucked behind the corner towers anyway
+    const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;   // thins out into the mist
+    propSakuraFar(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, edge < 7 ? 2 : edge < 20 ? 1 : 0);
+  }
+  WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 76, z1: 150 }, { x0: 32, x1: 150, z0: 76, z1: 150 }, { x0: -150, x1: 150, z0: 137, z1: 150 });
+  // the torii marks the way in from the plaza
+  propTorii(G, 0, 77);
+  const gt = signTexture('SAKURA GARDENS', '#ff8fc8', 'font');
+  addSign(gt, 0, 4.45, 76.6, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
+  // flagstone path to the shrine and a loop round the koi pond
+  propPath(G, R, [[0, 75], [0, 90], [0.6, 104], [0, 118], [0, 122.4]], 2.2);
+  const loop = []; for (let i = 0; i <= 28; i++) { const a = i / 28 * TAU; loop.push([-11 + Math.cos(a) * 12.5, 102 + Math.sin(a) * 9]); }
+  propPath(G, R, loop, 1.3);
+  propPond(G, R, -11, 102, 9, 6.5);
+  for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + (i % 2 ? 0.35 : -0.35));
+  // cherry trees: [x, z, size]
+  for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
+    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 116.5, 0.95], [10, 117, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-11, 131, 1.3], [11, 132, 1.25]])
+    propSakura(G, R, x, z, s, false);
+  // stone lanterns along the paths and round the pond
+  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z);
+  propShrine(G, 0, 126, solid);
+  bench(-11, 113.2, '-z'); bench(3.6, 99, '-x'); bench(-26.3, 101, '+x');
+  setG('props');
+  lamp(-14, 77); lamp(14, 77);
+  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86, d: 'garden' }, { kind: 'cache', x: 26, z: 131, d: 'garden' });
+
 }
 
 /* ============================================================
@@ -2116,7 +2282,7 @@ function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.
 function navCenter(k, out) { out[0] = NAV.x0 + (k % NAV.w + 0.5) * NAV.cell; out[1] = NAV.z0 + (Math.floor(k / NAV.w) + 0.5) * NAV.cell; return out; }
 
 function buildNav() {
-  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((78 - NAV.z0) / c);
+  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
   const N = NAV.w * NAV.h, B = new Uint8Array(N);
   const mark = (x0, x1, z0, z1) => {
     const i0 = Math.max(0, Math.floor((x0 - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((x1 - NAV.x0) / c));
@@ -2126,6 +2292,7 @@ function buildNav() {
   const pad = 0.35;
   for (const b of WORLD.boxes) if (b.y0 < 1.2 && b.y1 > 0.5) mark(b.x0 - pad, b.x1 + pad, b.z0 - pad, b.z1 + pad);
   for (const q of WORLD.circles) if (q.h > 0.5) mark(q.x - q.r - pad, q.x + q.r + pad, q.z - q.r - pad, q.z + q.r + pad);
+  for (const q of WORLD.navBlocks) mark(q.x0, q.x1, q.z0, q.z1);   // off-limits ground (the forest round the grove)
   // keep only cells reachable from the plaza
   const reach = new Uint8Array(N), Q = new Int32Array(N); let qh = 0, qt = 0;
   const s0 = navIdx(0, 14); reach[s0] = 1; Q[qt++] = s0;
@@ -2175,7 +2342,7 @@ function navTarget(x, z, out) {
   }
   navCenter(k, out); return D[k] !== NAV_INF;
 }
-function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, 76)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
+function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
 // a spawn point out of sight, 26–60 m of walking from the player
 function navSpawnPoint(minD = 26, maxD = 62) {
   let best = null, bestScore = -1;
@@ -2240,6 +2407,15 @@ function updateAmbient(dt) {
     if (Math.random() < dt * 30) emit(f.x + rand(-0.2, 0.2), f.y, f.z + rand(-0.2, 0.2), rand(-0.15, 0.15), rand(1.2, 2.2), rand(-0.15, 0.15), rand(0.3, 0.6), [2.6, 1 + Math.random() * 0.5, 0.15], rand(0.2, 0.4), -1, 1, -0.3);
     if (Math.random() < dt * 4) emit(f.x, f.y + 0.6, f.z, rand(-0.2, 0.2), rand(1, 1.6), rand(-0.2, 0.2), 1.6, [0.05, 0.045, 0.045], -0.4, -0.2, 0.5, 0.8, 0.4);
   }
+  // cherry blossom petals drifting down from nearby canopies
+  for (const t of WORLD.petals) {
+    const dx = t[0] - px, dz = t[2] - pz; if (dx * dx + dz * dz > 45 * 45) continue;
+    if (Math.random() < dt * 7) { const a = Math.random() * TAU, r = Math.random() * t[3];
+      emit(t[0] + Math.cos(a) * r, t[1] + rand(-0.4, 0.3), t[2] + Math.sin(a) * r, rand(0.2, 0.7), rand(-0.5, -0.2), rand(-0.3, 0.3), rand(5, 8), [1.0, 0.5 + Math.random() * 0.15, 0.68], rand(0.04, 0.07), 0.25, 0.9, 0, 0.95); }
+  }
+  // wading through a pond: little splashes round the ankles
+  if (PLAYER.y < 0.05 && inPond(px, pz) && Math.hypot(PLAYER.vx, PLAYER.vz) > 1 && Math.random() < dt * 24)
+    emit(px + rand(-0.3, 0.3), 0.05, pz + rand(-0.3, 0.3), rand(-0.8, 0.8), rand(1, 2), rand(-0.8, 0.8), 0.35, [0.45, 0.55, 0.62], 0.04, 9, 0, 0, 0.7);
   // rain splashes on the ground around the camera
   const n = THEME.rain * dt * 90;
   for (let i = 0; i < n; i++) {
@@ -2253,7 +2429,7 @@ function updateAmbient(dt) {
 /* ---------------- minimap ---------------- */
 const MINI = { cv: null, scale: 2 };
 function buildMinimap() {
-  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((78 - NAV.z0) * s);
+  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
   const img = x.createImageData(W, H), D = img.data;
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
@@ -3437,6 +3613,8 @@ function buildWorld3() {
   const props = new THREE.Mesh(WORLD.meshProps, MAT.static); props.castShadow = true; props.receiveShadow = true; props.matrixAutoUpdate = false; scene.add(props);
   const near = new THREE.Mesh(WORLD.mesh, MAT.static); near.castShadow = false; near.receiveShadow = true; near.matrixAutoUpdate = false; scene.add(near);
   const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
+  const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
+  const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
   R3.built = true;
 }
@@ -3446,7 +3624,7 @@ function buildWorld3() {
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 488;   // covers x -154..154, z -154..90
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 616;   // covers x -154..154, z -154..154
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;
@@ -4259,7 +4437,8 @@ function updatePlayer(dt) {
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
   const drawing = BOW.state === 'drawing';
   const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
-  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1);
+  const wading = P.y < 0.05 && inPond(P.x, P.z);   // knee-deep in the koi pond
+  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (wading ? 0.62 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
   const acc = P.grounded ? 12 : 3;
@@ -4273,6 +4452,7 @@ function updatePlayer(dt) {
   else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
+  if (P.z > 75.5) P.x = clamp(P.x, -31, 31);   // the grove's treeline
   const hs = Math.hypot(P.vx, P.vz);
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
