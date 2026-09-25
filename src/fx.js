@@ -35,24 +35,8 @@ function updateParticles(dt) {
   }
   PART.n = n;
 }
-const PVAO = gl.createVertexArray(), PVBO = gl.createBuffer();
-gl.bindVertexArray(PVAO); gl.bindBuffer(gl.ARRAY_BUFFER, PVBO); gl.bufferData(gl.ARRAY_BUFFER, MAXP * 32, gl.DYNAMIC_DRAW);
-gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
-gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 12);
-gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 32, 28);
-gl.bindVertexArray(null);
-
-// rain
+// particle + rain GPU objects live in r3.js
 const RAIN_N = 2600;
-const RAINVAO = (function () {
-  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-  const a = new Float32Array(RAIN_N * 2 * 5);
-  for (let i = 0; i < RAIN_N; i++) { const x = Math.random() * 50, z = Math.random() * 50, y = Math.random() * 36, s = Math.random(); for (let e = 0; e < 2; e++) { const o = (i * 2 + e) * 5; a[o] = x; a[o + 1] = z; a[o + 2] = y; a[o + 3] = s; a[o + 4] = e; } }
-  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, a, gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 20, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 20, 16);
-  gl.bindVertexArray(null); return vao;
-})();
 
 // dynamic lights (short-lived flashes + attached)
 const DLIGHTS = [];

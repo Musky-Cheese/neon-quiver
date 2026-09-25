@@ -125,7 +125,7 @@ function updateProjectiles(dt) {
     const A = ARROWS[a.type]; const tc = A.glow;
     for (let k = 0; k < (a.type === 0 ? 1 : 3); k++) { const t = Math.random(); emit(lerp(a.x, nx, t), lerp(a.y, ny, t), lerp(a.z, nz, t), rand(-0.2, 0.2), rand(-0.1, 0.3), rand(-0.2, 0.2), a.type === 0 ? 0.25 : 0.5, [tc[0] * 0.5, tc[1] * 0.5, tc[2] * 0.5], a.type === 0 ? 0.05 : 0.12, 0, 2, a.type === 1 ? 0.3 : 0.05, a.type === 0 ? 0.5 : 1); }
     // --- find earliest hit
-    let best = 1.01, hitKind = null, hitZ = null, hitPart = null;
+    let best = 1.01, hitKind = null, hitZ = null, hitPart = null; const segL = Math.hypot(nx - a.x, ny - a.y, nz - a.z) || 1e-3;
     // zombies
     for (const z of ZOMBIES) {
       if (z.dead || z.state === 'drop' || a.hits.includes(z)) continue;
@@ -136,7 +136,9 @@ function updateProjectiles(dt) {
       if (!z.headless) { const hr = 0.19 * sc * (z.type === 'boss' ? 0.8 : 1); if (segPointDist2(_seg0, _seg1, z.head, _so) < hr * hr && _so.s < best) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'head'; } }
       if (z.type === 'boss') { const cr = 0.16 * sc; if (segPointDist2(_seg0, _seg1, z.core, _so) < cr * cr && _so.s < best) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'core'; } }
       const br = (z.type === 'brute' ? 0.33 : z.type === 'boss' ? 0.3 : 0.24) * sc, lr = (z.type === 'brute' ? 0.11 : 0.085) * sc;
-      if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
+      // a clean line through the head wins over grazing the top of the torso capsule
+      const mg = hitZ === z && hitPart === 'head' ? Math.max(0.02, 0.3 / segL) : 0.02;
+      if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - mg) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
       for (const [p0, p1] of [[z.hipL, z.knL], [z.knL, z.ftL], [z.hipR, z.knR], [z.knR, z.ftR]]) if (segSegDist2(_seg0, _seg1, p0, p1, _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
     }
     // ground
@@ -204,21 +206,6 @@ function rayWorld(ox, oy, oz, dx, dy, dz, maxD) {
   }
   return best;
 }
-function drawDecals(cam) {
-  if (!DECALS.length) return;
-  const T = PROG.tex.u; gl.useProgram(PROG.tex.p);
-  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
-  gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-2, -2);
-  gl.bindVertexArray(QUAD); gl.uniform1f(T.uMode, 0); gl.uniform1f(T.uSeed, 0); gl.uniform3f(T.uCol, 1, 1, 1);
-  const m = _decalM;
-  for (const d of DECALS) {
-    const a = Math.min(1, d.t * 6) * (d.t > 38 ? Math.max(0, 1 - (d.t - 38) / 7) : 1);
-    M4.trs(m, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1);
-    gl.bindTexture(gl.TEXTURE_2D, DECAL_TEX[d.v]); gl.uniformMatrix4fv(T.uModel, false, m); gl.uniform1f(T.uA, a * 0.92); gl.drawArrays(gl.TRIANGLES, 0, 6);
-  }
-  gl.disable(gl.POLYGON_OFFSET_FILL); gl.uniform1f(T.uA, 1);
-}
-const _decalM = M4.create();
 const FIRES = [];
 function updateFires(dt) {
   for (let i = FIRES.length - 1; i >= 0; i--) {
@@ -568,8 +555,7 @@ function updatePlayer(dt) {
 }
 
 let lastT = performance.now() / 1000, acc = 0;
-const _projVM = M4.create(), camM = M4.create(), viewM = M4.create(), projM = M4.create(), invVP = M4.create();
-const _LP = new Float32Array(MAX_LIGHTS * 4), _LC = new Float32Array(MAX_LIGHTS * 3);
+const camM = M4.create();
 function step(dt) {
   GAME.time += dt; STEPN.n++;
   const t = GAME.time;
@@ -577,7 +563,7 @@ function step(dt) {
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') {
-    updateZombies(dt, t); updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+    updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) poseZombieRig(z, dt, t); } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   GAME.update(dt);
@@ -624,116 +610,18 @@ function render(time) {
   let dpr = Math.min(2, devicePixelRatio || 1); if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
   if (window.__NQ_CAPTURE) dpr = window.__NQ_CAPTURE_DPR || 1;
   const W = Math.max(1, Math.round(cw * dpr)), H = Math.max(1, Math.round(ch * dpr));
-  if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-  resizeTargets(W, H);
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
   const cam = setCamera(time);
-  M4.invertRigid(viewM, camM);
-  const fov = (GAME.state === 'title' ? 70 : PLAYER.fov) * Math.PI / 180;
-  M4.perspective(projM, fov, W / H, 0.03, 1400);
-  M4.mul(_vp, projM, viewM); M4.invert(invVP, _vp);
-  // ---- lights
-  const L = [];
-  for (const l of WORLD.lights) { const k = l.kind === 'lamp' ? THEME.lamp : l.kind === 'fountain' ? THEME.fountain : null; L.push(k ? { p: l.p, r: l.r, c: k } : l.shop ? { p: l.p, r: l.r, c: l.c.map(v => v * THEME.shop) } : l); }
-  const dyn = [];
-  for (const d of DLIGHTS) { const k = d.life / d.max; dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
-  for (const a of PROJ) if (!a.stuck && a.type !== 0) dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
-  for (const f of FIRES) dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const z of ZOMBIES) if (z.burn > 0) dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
-  if (GAME.boss && !GAME.boss.dead) dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
-  for (const p of PICKUPS) dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
-  dyn.sort((a, b) => Math.hypot(a.p[0] - cam[0], a.p[2] - cam[2]) - Math.hypot(b.p[0] - cam[0], b.p[2] - cam[2]));
-  if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; L.push({ p: [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.1, BOW.handWorld[2] || cam[2]], r: 2.2, c: [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18] }); }
-  for (const d of dyn) { if (L.length >= MAX_LIGHTS) break; L.push(d); }
-  for (let i = 0; i < MAX_LIGHTS; i++) { const l = L[i]; if (!l) break; _LP[i * 4] = l.p[0]; _LP[i * 4 + 1] = l.p[1]; _LP[i * 4 + 2] = l.p[2]; _LP[i * 4 + 3] = l.r; _LC[i * 3] = l.c[0]; _LC[i * 3 + 1] = l.c[1]; _LC[i * 3 + 2] = l.c[2]; }
+  const fov = GAME.state === 'title' ? 70 : PLAYER.fov;
   // ---- collect draws
+  if (ZRIG.ready) syncRigs();
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
   drawProjectiles(); drawPickups(time);
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
-
-  // ---- scene pass
-  gl.bindFramebuffer(gl.FRAMEBUFFER, RT.msFB); gl.viewport(0, 0, W, H);
-  gl.clearColor(THEME.fog[0], THEME.fog[1], THEME.fog[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE);
-  // sky
-  gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
-  gl.useProgram(PROG.sky.p); gl.uniformMatrix4fv(PROG.sky.u.uInvVP, false, invVP); gl.uniform1f(PROG.sky.u.uTime, time); gl.uniform3fv(PROG.sky.u.uFogCol, THEME.fog); applyThemeSky(PROG.sky.u);
-  gl.bindVertexArray(emptyVAO); gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.enable(gl.DEPTH_TEST); gl.depthMask(true); gl.depthFunc(gl.LEQUAL);
-  // main
-  const U = PROG.main.u; gl.useProgram(PROG.main.p);
-  gl.uniformMatrix4fv(U.uProj, false, projM); gl.uniformMatrix4fv(U.uView, false, viewM); gl.uniform3fv(U.uCam, cam);
-  gl.uniform1f(U.uTime, time); gl.uniform3fv(U.uFogCol, THEME.fog); gl.uniform1f(U.uFogDen, THEME.fogDen); applyThemeMain(U, false);
-  gl.uniform1i(U.uNL, Math.min(L.length, MAX_LIGHTS)); gl.uniform4fv(U.uLP, _LP); gl.uniform3fv(U.uLC, _LC);
-  const I = M4.create();
-  gl.uniformMatrix4fv(U.uModel, false, I); gl.uniform4f(U.uTint, 1, 1, 1, 1); gl.uniform3f(U.uEmit, 0, 0, 0); gl.uniform1f(U.uFlash, 0); gl.uniform1f(U.uRim, 1);
-  if (!DBG.noCity) { gl.bindVertexArray(WORLD.mesh.vao); gl.drawElements(gl.TRIANGLES, WORLD.mesh.count, WORLD.mesh.type, 0); }
-  if (!DBG.noItems) drawList(WORLD_ITEMS, U);
-  // signs
-  const T = PROG.tex.u; gl.useProgram(PROG.tex.p);
-  gl.uniformMatrix4fv(T.uProj, false, projM); gl.uniformMatrix4fv(T.uView, false, viewM); gl.uniform3fv(T.uCam, cam); gl.uniform3fv(T.uFogCol, THEME.fog); gl.uniform1f(T.uFogDen, THEME.fogDen); gl.uniform1f(T.uTime, time);
-  gl.bindVertexArray(QUAD); gl.activeTexture(gl.TEXTURE0); gl.uniform1i(T.uTex, 0); gl.uniform1f(T.uA, 1);
-  for (const pass of [false, true]) {
-    if (pass) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); }
-    for (const s of WORLD.signs) { if (s.add !== pass) continue; gl.bindTexture(gl.TEXTURE_2D, s.tex); gl.uniformMatrix4fv(T.uModel, false, s.m); gl.uniform3f(T.uCol, s.col[0] * THEME.sign, s.col[1] * THEME.sign, s.col[2] * THEME.sign); gl.uniform1f(T.uMode, s.mode); gl.uniform1f(T.uSeed, s.seed); gl.drawArrays(gl.TRIANGLES, 0, 6); }
-  }
-  // particles
-  drawDecals(cam);
-  gl.enable(gl.BLEND); gl.depthMask(false); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  if (PART.n > 0) {
-    gl.useProgram(PROG.pt.p); gl.uniformMatrix4fv(PROG.pt.u.uProj, false, projM); gl.uniformMatrix4fv(PROG.pt.u.uView, false, viewM); gl.uniform1f(PROG.pt.u.uH, H / (2 * Math.tan(fov / 2)));
-    gl.bindVertexArray(PVAO); gl.bindBuffer(gl.ARRAY_BUFFER, PVBO); gl.bufferSubData(gl.ARRAY_BUFFER, 0, PART.data, 0, PART.n * 8);
-    gl.drawArrays(gl.POINTS, 0, PART.n);
-  }
-  // rain
-  gl.useProgram(PROG.rain.p); gl.uniformMatrix4fv(PROG.rain.u.uProj, false, projM); gl.uniformMatrix4fv(PROG.rain.u.uView, false, viewM); gl.uniform3fv(PROG.rain.u.uCam, cam); gl.uniform1f(PROG.rain.u.uTime, time); gl.uniform1f(PROG.rain.u.uAlpha, THEME.rain); gl.uniform3fv(PROG.rain.u.uRainCol, THEME.rainCol);
-  gl.blendFunc(gl.ONE, gl.ONE); gl.bindVertexArray(RAINVAO); gl.drawArrays(gl.LINES, 0, RAIN_N * 2);
-  gl.disable(gl.BLEND); gl.depthMask(true);
-  // viewmodel
-  if (VM_ITEMS.n && !DBG.noVM) {
-    gl.clear(gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(PROG.main.p);
-    M4.perspective(_projVM, VM_FOV * Math.PI / 180, W / H, 0.02, 50); gl.uniformMatrix4fv(U.uProj, false, _projVM); gl.uniform1f(U.uRim, 0.25); applyThemeMain(U, true);
-    drawList(VM_ITEMS, U);
-  }
-  // ---- resolve MSAA
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, RT.msFB); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, RT.sceneFB);
-  gl.blitFramebuffer(0, 0, W, H, 0, 0, W, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-  // ---- bloom
-  gl.disable(gl.DEPTH_TEST); gl.bindVertexArray(emptyVAO);
-  const fsPass = (fb, w, h, prog, tex, setup) => { gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, w, h); gl.useProgram(prog.p); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(prog.u.uTex, 0); if (setup) setup(prog.u); gl.drawArrays(gl.TRIANGLES, 0, 3); };
-  fsPass(RT.f1, RT.hw, RT.hh, PROG.bright, RT.sceneTex, (u) => gl.uniform1f(u.uThr, HDR ? THEME.thr : THEME.thr * 0.7));
-  fsPass(RT.f2, RT.hw, RT.hh, PROG.blur, RT.t1, (u) => gl.uniform2f(u.uDir, 1 / RT.hw, 0));
-  fsPass(RT.f1, RT.hw, RT.hh, PROG.blur, RT.t2, (u) => gl.uniform2f(u.uDir, 0, 1 / RT.hh));
-  fsPass(RT.f3, RT.qw, RT.qh, PROG.blur, RT.t1, (u) => gl.uniform2f(u.uDir, 1.5 / RT.hw, 0));
-  fsPass(RT.f4, RT.qw, RT.qh, PROG.blur, RT.t3, (u) => gl.uniform2f(u.uDir, 0, 2 / RT.qh));
-  fsPass(RT.f3, RT.qw, RT.qh, PROG.blur, RT.t4, (u) => gl.uniform2f(u.uDir, 2.5 / RT.qw, 0));
-  fsPass(RT.f4, RT.qw, RT.qh, PROG.blur, RT.t3, (u) => gl.uniform2f(u.uDir, 0, 2.5 / RT.qh));
-  // ---- composite
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
-  const C = PROG.comp.u; gl.useProgram(PROG.comp.p);
-  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, RT.sceneTex); gl.uniform1i(C.uScene, 0);
-  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, RT.t1); gl.uniform1i(C.uB1, 1);
-  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, RT.t4); gl.uniform1i(C.uB2, 2);
-  gl.uniform1f(C.uTime, time); gl.uniform1f(C.uDmg, PLAYER.dmgFlash); gl.uniform1f(C.uLow, GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0);
-  gl.uniform1f(C.uBloom, THEME.bloom); gl.uniform1f(C.uExpo, THEME.expo); gl.uniform1f(C.uSat, THEME.sat); gl.uniform3fv(C.uGrade, THEME.grade); gl.uniform3fv(C.uLift, THEME.lift); gl.uniform1f(C.uAberr, BOW.state === 'drawing' ? BOW.draw * 0.002 : 0);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-  gl.activeTexture(gl.TEXTURE0);
+  render3(time, W, H, fov, cam);
 }
-function drawList(list, U) {
-  let lastVao = null, lastSkin = null;
-  for (let i = 0; i < list.n; i++) {
-    const it = list.a[i];
-    if (it.mesh.vao !== lastVao) { gl.bindVertexArray(it.mesh.vao); lastVao = it.mesh.vao; }
-    gl.uniformMatrix4fv(U.uModel, false, it.m); gl.uniform4f(U.uTint, it.col[0], it.col[1], it.col[2], 1); gl.uniform3fv(U.uEmit, it.emit); gl.uniform1f(U.uFlash, it.flash);
-    if (it.skin !== lastSkin) { gl.uniform3fv(U.uSkin, it.skin); lastSkin = it.skin; }
-    gl.drawElements(gl.TRIANGLES, it.mesh.count, it.mesh.type, 0);
-  }
-}
-
 /* ---------------- UI wiring ---------------- */
 function syncMusicBtn() { const b = $('musicBtn'); if (b) b.textContent = 'Music: ' + (SETTINGS.music ? 'On' : 'Off'); const p = $('musicBtn2'); if (p) p.textContent = 'Music: ' + (SETTINGS.music ? 'On' : 'Off'); }
 function wireUI() {
@@ -761,7 +649,8 @@ function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
-  buildCity();
+  buildCity(); buildWorld3();
+  await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb');
   wireUI();
   toTitle();
   $('loading').hidden = true;
@@ -770,7 +659,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, ZRIG, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },

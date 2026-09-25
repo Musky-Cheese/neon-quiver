@@ -14,7 +14,7 @@ const PANTS = [[0.1, 0.11, 0.16], [0.16, 0.14, 0.12], [0.08, 0.08, 0.09], [0.2, 
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
-function ensurePose(z) { if (z._ps !== STEPN.n) drawZombieFramesOnly(z); }
+function ensurePose(z) { if (z._ps !== STEPN.n) { if (ZRIG.ready) poseZombieRig(z, 0, GAME.time); else drawZombieFramesOnly(z); } }
 let groanCd = 0;
 const V0 = () => [0, 0, 0];
 
@@ -208,6 +208,7 @@ function updateZombies(dt, time) {
     let spd = z.speed * slow * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
+    z.mv = spd;
     let mx = Math.sin(z.yaw) * spd, mz = Math.cos(z.yaw) * spd;
     if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
     z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
@@ -270,8 +271,10 @@ function mpart(F, mesh, sx, sy, sz, tint, skin, emitC, flash, x = 0, y = 0, z = 
 }
 const ARMOUR_DARK = [0.09, 0.09, 0.11], ARMOUR_PLATE = [0.21, 0.2, 0.23];
 
-function drawZombie(z, time) {
-  z._ps = STEPN.n;
+/* procedural pose: joint angles for gait, attacks, reactions, crawling and death.
+   The legacy renderer builds frames from these directly; the rigged renderer blends them over the Blender clips. */
+const _ZP = {};
+function zPose(z, time) {
   const s = z.scale, T = z.type, fl = z.flash > 0 ? 0.55 : 0, R = z.R;
   const burnK = z.burn > 0 ? 0.4 : 1;
   const sk = T === 'boss' ? [0.44, 0.34, 0.5] : z.skin; const skin = [sk[0] * burnK, sk[1] * burnK, sk[2] * burnK];
@@ -334,17 +337,29 @@ function drawZombie(z, time) {
       if (Math.abs(z.pitch) > 1.3) { hipLa *= 0.3; hipRa *= 0.3; knLa = Math.min(knLa, 0.4); knRa = Math.min(knRa, 0.25); }
     }
   }
-  M4.trs(_F.root, z.x, z.y, z.z, 0, z.yaw, 0, s, s, s);
-  if (rootRx || rootRz) fr(_F.root, _F.root, 0, 0, 0, rootRx, 0, rootRz);
-  fr(_F.pel, _F.root, 0, hipY, 0, pelRx, twist, 0);
-  fr(_F.tor, _F.pel, 0, 0.08, 0, lean, -twist * 1.5 + torYaw, Math.sin(p * 0.5) * 0.05 * moving);
   const roll = T === 'walker' && !dying ? Math.sin(time * 2.1 + z.seed) * 0.18 + 0.12 : Math.sin(time * 3 + z.seed) * 0.05 * (dying ? 0 : 1);
-  fr(_F.neck, _F.tor, 0, 0.6, 0.02, headRx + Math.sin(time * 5 + z.seed) * 0.05 * (dying ? 0 : 1), 0, roll);
-  fr(_F.jaw, _F.neck, 0, 0.085, 0.02, 0.15 + z.jaw * 0.45 + (dying ? 0.4 : 0), 0, 0);
-  fr(_F.shL, _F.tor, -0.27, 0.52, 0, shL, 0, -spread); fr(_F.shR, _F.tor, 0.27, 0.52, 0, shR, 0, spread);
-  fr(_F.elL, _F.shL, 0, -0.32, 0, elL, 0, 0); fr(_F.elR, _F.shR, 0, -0.32, 0, elR, 0, 0);
-  fr(_F.hipL, _F.pel, -0.11, -0.02, 0, hipLa, 0, 0.03); fr(_F.hipR, _F.pel, 0.11, -0.02, 0, hipRa, 0, -0.03);
-  fr(_F.knL, _F.hipL, 0, -0.45, 0, knLa, 0, 0); fr(_F.knR, _F.hipR, 0, -0.45, 0, knRa, 0, 0);
+  const P = _ZP;
+  P.rootRx = rootRx; P.rootRz = rootRz; P.hipY = hipY; P.pelRx = pelRx; P.twist = twist; P.lean = lean; P.torYaw = torYaw; P.spRz = Math.sin(p * 0.5) * 0.05 * moving;
+  P.headRx = headRx + Math.sin(time * 5 + z.seed) * 0.05 * (dying ? 0 : 1); P.roll = roll; P.jaw = 0.15 + z.jaw * 0.45 + (dying ? 0.4 : 0);
+  P.shL = shL; P.shR = shR; P.spread = spread; P.elL = elL; P.elR = elR; P.hipLa = hipLa; P.hipRa = hipRa; P.knLa = knLa; P.knRa = knRa;
+  P.moving = moving; P.fl = fl; P.skin = skin; P.cloth = cloth; P.pants = pants; P.dying = dying;
+  return P;
+}
+function drawZombie(z, time) {
+  if (ZRIG.ready) return drawZombieRig(z, time);
+  z._ps = STEPN.n;
+  const s = z.scale, T = z.type, fl = z.flash > 0 ? 0.55 : 0;
+  const P = zPose(z, time), skin = P.skin, cloth = P.cloth, pants = P.pants, dying = P.dying;
+  M4.trs(_F.root, z.x, z.y, z.z, 0, z.yaw, 0, s, s, s);
+  if (P.rootRx || P.rootRz) fr(_F.root, _F.root, 0, 0, 0, P.rootRx, 0, P.rootRz);
+  fr(_F.pel, _F.root, 0, P.hipY, 0, P.pelRx, P.twist, 0);
+  fr(_F.tor, _F.pel, 0, 0.08, 0, P.lean, -P.twist * 1.5 + P.torYaw, P.spRz);
+  fr(_F.neck, _F.tor, 0, 0.6, 0.02, P.headRx, 0, P.roll);
+  fr(_F.jaw, _F.neck, 0, 0.085, 0.02, P.jaw, 0, 0);
+  fr(_F.shL, _F.tor, -0.27, 0.52, 0, P.shL, 0, -P.spread); fr(_F.shR, _F.tor, 0.27, 0.52, 0, P.shR, 0, P.spread);
+  fr(_F.elL, _F.shL, 0, -0.32, 0, P.elL, 0, 0); fr(_F.elR, _F.shR, 0, -0.32, 0, P.elR, 0, 0);
+  fr(_F.hipL, _F.pel, -0.11, -0.02, 0, P.hipLa, 0, 0.03); fr(_F.hipR, _F.pel, 0.11, -0.02, 0, P.hipRa, 0, -0.03);
+  fr(_F.knL, _F.hipL, 0, -0.45, 0, P.knLa, 0, 0); fr(_F.knR, _F.hipR, 0, -0.45, 0, P.knRa, 0, 0);
   // ---------- meshes ----------
   const thin = T === 'runner' ? 0.86 : 1, wide = T === 'brute' ? 1.22 : T === 'boss' ? 1.2 : 1;
   const armS = T === 'runner' ? 0.85 : T === 'brute' ? 1.35 : 1;
@@ -403,9 +418,13 @@ function drawDebris() {
   }
 }
 // convert world hit to local (for stuck arrows): stored in torso/head frame
+function zFrame(z, part) { // 'head' -> neck frame, else torso frame (world matrices, column-major)
+  if (ZRIG.ready && z.rig) return (part === 'head' ? z.rig.B.neck : z.rig.B.spine).matrixWorld.elements;
+  return part === 'head' ? _F.neck : _F.tor;
+}
 function localize(z, part, pw, dir) {
-  drawZombieFramesOnly(z);
-  const F = part === 'head' ? _F.neck : _F.tor;
+  if (ZRIG.ready) ensurePose(z); else drawZombieFramesOnly(z);
+  const F = zFrame(z, part);
   const inv = M4.invert(M4.create(), F); if (!inv) return null;
   return { lp: M4.pt(inv, pw[0], pw[1], pw[2], [0, 0, 0]), ld: M4.dir(inv, dir[0], dir[1], dir[2], [0, 0, 0]) };
 }

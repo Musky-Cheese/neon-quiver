@@ -59,14 +59,13 @@ const THEMES = {
 };
 const THEME_ORDER = ['noir', 'smog', 'amber', 'dawn', 'blackout', 'neon'];
 let THEME = THEMES.noir;
-function setTheme(k) { THEME = THEMES[k] || THEMES.noir; }
+function setTheme(k) { const prev = THEME; THEME = THEMES[k] || THEMES.noir; if (prev !== THEME && typeof onThemeChanged === 'function') onThemeChanged(); }
 const _n3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
-function applyThemeMain(U, vm) {
+// pushes the current look into the shared shader uniforms (lights, sky and post are handled in r3.js)
+function applyThemeUniforms() {
   const T = THEME;
-  gl.uniform3fv(U.uAmbLo, T.ambLo); gl.uniform3fv(U.uAmbHi, T.ambHi); gl.uniform3fv(U.uSunCol, T.sun); gl.uniform3fv(U.uSunDir, _n3(T.sunDir)); gl.uniform3fv(U.uRimCol, T.rim);
-  gl.uniform1f(U.uNeon, T.neon); gl.uniform1f(U.uWin, T.win); gl.uniform1f(U.uWinWarm, T.winWarm); gl.uniform1f(U.uGrid, T.grid); gl.uniform1f(U.uDyn, vm ? 0.5 + 0.5 * Math.max(T.neon, 0.2) : T.dyn); gl.uniform1f(U.uWet, T.wet);
-}
-function applyThemeSky(U) {
-  const T = THEME;
-  gl.uniform3fv(U.uZen, T.zen); gl.uniform3fv(U.uMid, T.mid); gl.uniform3fv(U.uGlow, T.glow); gl.uniform3fv(U.uCloud, T.cloud); gl.uniform3fv(U.uDiscCol, T.disc); gl.uniform3fv(U.uDiscDir, T.discDir); gl.uniform1f(U.uStars, T.stars);
+  NQU.uFogCol.value.setRGB(T.fog[0], T.fog[1], T.fog[2]); NQU.uFogDen.value = T.fogDen;
+  NQU.uNeon.value = T.neon; NQU.uWin.value = T.win; NQU.uWinWarm.value = T.winWarm; NQU.uGrid.value = T.grid; NQU.uWet.value = T.wet;
+  NQU.uDyn.value = T.dyn; NQU.uDynVM.value = 0.5 + 0.5 * Math.max(T.neon, 0.2);
+  NQU.uRimCol.value.setRGB(T.rim[0], T.rim[1], T.rim[2]);
 }

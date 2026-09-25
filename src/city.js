@@ -66,14 +66,14 @@ function billboardTexture(kind) {
 function buildCity() {
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
-  const g = new Geo();
+  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
   const M = M4.create();
   const B = (x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0) => g.box(M4.trs(M, x, y, z, 0, ry, 0, sx, sy, sz), c, e, mat);
   const solid = (x0, x1, y0, y1, z0, z1) => WORLD.boxes.push({ x0, x1, y0, y1, z0, z1 });
   const addSign = (tex, x, y, z, ry, w, h, col, mode = 0, add = true) => WORLD.signs.push({ tex, m: M4.trs(M4.create(), x, y, z, 0, ry, 0, w, h, 1), col, mode, seed: R() * 100, add });
 
   // ---------- ground ----------
-  g.quad(null, [-900, -0.04, 900], [900, -0.04, 900], [900, -0.04, -900], [-900, -0.04, -900], [0, 1, 0], [0.045, 0.045, 0.06], 0, 3);
+  gFar.quad(null, [-900, -0.04, 900], [900, -0.04, 900], [900, -0.04, -900], [-900, -0.04, -900], [0, 1, 0], [0.045, 0.045, 0.06], 0, 3);
   g.quad(null, [-PLAZA, 0.02, PLAZA], [PLAZA, 0.02, PLAZA], [PLAZA, 0.02, -PLAZA], [-PLAZA, 0.02, -PLAZA], [0, 1, 0], [0.085, 0.085, 0.115], 0, 2);
   // curbs / sidewalks around plaza (visual only)
   const curbC = [0.12, 0.12, 0.15];
@@ -170,6 +170,7 @@ function buildCity() {
       }
     }
   }
+  g = gFar;
   // street walls further out, flanking the 4 corridors (so the streets read as streets)
   for (const axis of ['x', 'z']) for (const s of [-1, 1]) for (const hside of [-1, 1]) {
     let a = PLAZA + 32; while (a < 150) {
@@ -215,6 +216,7 @@ function buildCity() {
   B(0, 23.5, -24, 1000, 0.1, 0.3, NEON.cyan, 2.5);
   for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4);
 
+  g = gProps;
   // ---------- plaza props ----------
   const metal = [0.13, 0.13, 0.16];
   // holo fountain
@@ -287,7 +289,7 @@ function buildCity() {
   // spawn points deep in the 4 avenues
   for (const d of [62, 80, 100]) { WORLD.spawns.push([0, d], [0, -d], [d, 0], [-d, 0]); }
 
-  WORLD.mesh = g.build();
+  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build();
   // pick the brightest few shop lights so we stay within budget
   const shops = WORLD.lights.filter(l => l.shop).sort(() => R() - 0.5).slice(0, 5);
   WORLD.lights = WORLD.lights.filter(l => !l.shop).concat(shops);

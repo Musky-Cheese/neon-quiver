@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================
-   NEON QUIVER — tiny WebGL2 engine (math, meshes, shaders, post)
+   NEON QUIVER — math + geometry helpers on top of three.js
    ============================================================ */
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -95,29 +95,181 @@ const M4 = {
 };
 const _t4a = M4.create(), _t4b = M4.create(), _t4c = M4.create();
 
-/* ---------------- GL context ---------------- */
+/* ---------------- renderer ---------------- */
 const canvas = document.getElementById('gl');
-const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!window.__NQ_CAPTURE });
-if (!gl) { document.getElementById('nogl').hidden = false; throw new Error('WebGL2 unavailable'); }
-const extCBF = gl.getExtension('EXT_color_buffer_float');
-gl.getExtension('EXT_color_buffer_half_float');
-gl.getExtension('OES_texture_float_linear');
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!window.__NQ_CAPTURE });
+  if (!renderer.capabilities.isWebGL2) throw new Error('WebGL2 unavailable');
+} catch (e) { document.getElementById('nogl').hidden = false; throw e; }
+renderer.setPixelRatio(1);
+renderer.autoClear = false;
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma
+renderer.toneMapping = THREE.NoToneMapping;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false;
+const scene = new THREE.Scene();
+scene.matrixWorldAutoUpdate = true;
+const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.03, 1400); camera.matrixAutoUpdate = false; camera.matrixWorldAutoUpdate = false;
+const vmCamera = new THREE.PerspectiveCamera(60, 16 / 9, 0.02, 50); vmCamera.matrixAutoUpdate = false; vmCamera.matrixWorldAutoUpdate = false; vmCamera.layers.set(1);
+scene.add(camera); scene.add(vmCamera);
+const LAYER_VM = 1;
 
-function compile(type, src) {
-  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { const log = gl.getShaderInfoLog(s); console.error(log, src); throw new Error('shader: ' + log); }
-  return s;
-}
-function program(vs, fs) {
-  const p = gl.createProgram();
-  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
-  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
-  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); const name = info.name.replace(/\[0\]$/, ''); u[name] = gl.getUniformLocation(p, info.name); }
-  return { p, u };
-}
+/* ---------------- shared shader uniforms (theme + time) ---------------- */
+const NQU = {
+  uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
+  uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
+  uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 },
+};
+const NOISE_GLSL = `
+float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
+  return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
+`;
 
+/* One physically-based material family for everything solid.
+   Static geometry carries   color = albedo (or ao/cloth/blood masks for sculpts), nqm = (emissive k, material id).
+   Instanced items carry     iTint (rgb + flash), iEmit, iSkin per instance.
+   Skinned zombies carry     color = (ao, cloth, blood, glow) and a per-vertex part id that indexes per-zombie uniform arrays. */
+const ZPARTS = 10;
+function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 });
+  m.defines = {};
+  if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
+  if (kind === 'vm') m.defines.NQ_VM = 1;
+  if (kind === 'zombie') m.defines.NQ_Z = 1;
+  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 } } : {};
+  m.userData.u = own;
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, NQU, own);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
+#ifdef NQ_INST
+attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
+#endif
+#ifdef NQ_Z
+attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart;
+#else
+attribute vec2 nqm;
+#endif`)
+      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+{ vec4 w = vec4(transformed, 1.0); vec3 wn = objectNormal;
+#ifdef USE_INSTANCING
+  w = instanceMatrix * w; wn = mat3(instanceMatrix) * wn;
+#endif
+  w = modelMatrix * w; vNqW = w.xyz; vNqN = normalize(mat3(modelMatrix) * wn); }
+#ifdef NQ_Z
+  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part;
+  int pi = int(part + 0.5); if (uHide[pi] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+#else
+  vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
+#endif
+#ifdef NQ_INST
+  vITint = iTint; vIEmit = iEmit; vISkin = iSkin;
+#endif`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
+uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK; uniform vec3 uFogCol, uRimCol;
+#ifdef NQ_INST
+varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
+#endif
+#ifdef NQ_Z
+varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash;
+#endif
+${NOISE_GLSL}`)
+      .replace('#include <color_fragment>', `
+  vec3 tint = vec3(1.0), skin = vec3(0.5), iemit = vec3(0.0); float flash = 0.0;
+#ifdef NQ_INST
+  tint = vITint.rgb; flash = vITint.a; iemit = vIEmit; skin = vISkin;
+#endif
+#ifdef NQ_Z
+  { int pi = int(vPart + 0.5); tint = uPT[pi]; skin = uPS[pi]; iemit = uPE[pi]; flash = uFlash; }
+#endif
+#ifdef NQ_VM
+  float dynK = uDynVM;
+#else
+  float dynK = uDyn;
+#endif
+  float mat = vNqM.y;
+  vec3 base = vNqC.rgb * tint;
+  vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
+  float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
+  vec3 N0 = normalize(vNqN);
+  if (mat > 0.5 && mat < 1.5) {            // facade with windows
+    if (abs(N0.y) < 0.5) {
+      vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
+      vec2 cell = fc / vec2(2.4, 3.3); vec2 id = floor(cell); vec2 f = fract(cell);
+      float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
+      float bseed = h21(floor(vNqW.xz/37.) + N0.xz*3.1);
+      float seed = h21(id*1.37 + bseed*91.);
+      float lit = step(0.7 - bseed*0.22, seed) * step(1.2, vNqW.y);
+      float flick = step(0.997, h21(id + floor(uTime*4.)));
+      vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
+      wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
+      emis += win*lit*(1.-flick)*wc*uWin;
+      // mullions and a faint panel texture on the concrete
+      float panel = 0.85 + 0.15*vn(fc*vec2(0.9,0.35) + bseed*17.);
+      base = mix(base*panel, vec3(0.015,0.02,0.04), win);
+      rough = mix(0.82, 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6, 1.6, win);
+    }
+  } else if (mat > 1.5 && mat < 2.5) {      // plaza tiles, wet
+    vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
+    vec2 l2 = 1. - smoothstep(vec2(0.012), vec2(0.012)+fw*1.5, gd);
+    float line = max(l2.x,l2.y) * (0.35 + 0.65*clamp(0.02/max(fw.x,fw.y),0.,1.));
+    float pud = smoothstep(0.52,0.66, vn(vNqW.xz*0.18));
+    float tileV = 0.9 + 0.2*h21(floor(q));
+    emis += vec3(0.1,0.55,1.0)*line*uGrid*(1.-pud*0.6);
+    base = mix(base*tileV*(1.-line*0.5), base*0.35, pud);
+    rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*2.0*uWet);
+  } else if (mat > 2.5 && mat < 3.5) {      // asphalt
+    float pud = smoothstep(0.5,0.7, vn(vNqW.xz*0.12));
+    float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
+    float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
+    emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
+    base *= (1.-pud*0.6) * (0.85 + 0.3*vn(vNqW.xz*3.1));
+    rough = mix(0.8, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*2.0*uWet);
+  } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
+    rough = 0.34; metal = 0.65; rimK = 1.0;
+  } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
+    float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
+    base = mix(skin, tint, clm);
+    base = mix(base, vec3(0.13,0.008,0.006), bl*0.92);
+    base *= ao;
+    emis = iemit * vNqM.x * dynK;
+    float armour = step(6.5, mat);
+#ifdef NQ_Z
+    armour = step(6.5, vPart) * step(vPart, 8.5);
+#endif
+    rough = mix(mix(0.58, 0.2, bl), 0.32, armour); metal = armour*0.7; rimK = 1.0;
+  } else if (mat > 4.5 && mat < 5.5) {      // hologram
+    float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
+    emis += base*sl*1.6; base *= 0.0;
+  } else { rimK = 1.0; }
+  diffuseColor.rgb = base;`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = rough;')
+      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = metal;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+  { float rim = pow(1. - clamp(dot(normal, normalize(vViewPosition)), 0., 1.), 3.);
+#ifdef NQ_VM
+    rim *= 0.25;
+#endif
+    totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK; }`)
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25; radiance *= envK;')
+      .replace('#include <fog_fragment>', `
+  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
+    fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0,0.95,0.9)*1.5, flash); }`);
+  };
+  m.customProgramCacheKey = () => 'nq-' + kind;
+  return m;
+}
+const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMaterial('vm') };
+
+/* ---------------- Geometry builder ---------------- */
 /* ---------------- Geometry builder ---------------- */
 // vertex layout: pos3 nor3 col3 mat2 => 11 floats
 class Geo {
@@ -188,243 +340,17 @@ class Geo {
     for (let s = 0; s < seg; s++) for (let t = 0; t < tube; t++) { const a = base + s * (tube + 1) + t, b = a + tube + 1; this.i.push(a, b, a + 1, a + 1, b, b + 1); }
   }
   build() {
-    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(this.v), gl.STATIC_DRAW);
-    const big = this.n > 65535;
-    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, big ? new Uint32Array(this.i) : new Uint16Array(this.i), gl.STATIC_DRAW);
-    const S = 44;
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);
-    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, S, 24);
-    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, S, 36);
-    gl.bindVertexArray(null);
-    return { vao, count: this.i.length, type: big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
+    const n = this.n, v = this.v;
+    const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) { const o = i * 11; pos.set(v.slice(o, o + 3), i * 3); nor.set(v.slice(o + 3, o + 6), i * 3); col.set(v.slice(o + 6, o + 9), i * 3); nqm[i * 2] = v[o + 9]; nqm[i * 2 + 1] = v[o + 10]; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+    g.setIndex(n > 65535 ? new THREE.BufferAttribute(new Uint32Array(this.i), 1) : new THREE.BufferAttribute(new Uint16Array(this.i), 1));
+    g.computeBoundingSphere();
+    return g;
   }
 }
-
-/* ---------------- Shaders ---------------- */
-const NOISE_GLSL = `
-float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
-  return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y); }
-`;
-const MAX_LIGHTS = 16;
-const MAIN_VS = `#version 300 es
-layout(location=0) in vec3 aPos; layout(location=1) in vec3 aNor; layout(location=2) in vec3 aCol; layout(location=3) in vec2 aMat;
-uniform mat4 uProj, uView, uModel;
-out vec3 vW; out vec3 vN; out vec3 vC; out vec2 vM;
-void main(){ vec4 w=uModel*vec4(aPos,1.); vW=w.xyz; vN=mat3(uModel)*aNor; vC=aCol; vM=aMat; gl_Position=uProj*uView*w; }`;
-const MAIN_FS = `#version 300 es
-precision highp float;
-in vec3 vW; in vec3 vN; in vec3 vC; in vec2 vM;
-uniform vec3 uCam; uniform vec4 uTint; uniform vec3 uEmit; uniform float uTime; uniform float uFlash; uniform float uRim; uniform vec3 uSkin;
-uniform vec3 uFogCol; uniform float uFogDen;
-uniform vec3 uAmbLo, uAmbHi, uSunCol, uSunDir, uRimCol; uniform float uNeon, uWin, uWinWarm, uGrid, uDyn, uWet;
-uniform int uNL; uniform vec4 uLP[${MAX_LIGHTS}]; uniform vec3 uLC[${MAX_LIGHTS}];
-out vec4 o;
-${NOISE_GLSL}
-void main(){
-  vec3 N=normalize(vN);
-  vec3 base=vC*uTint.rgb;
-  float mat=vM.y;
-  vec3 emis=base*vM.x*uNeon + uEmit*uDyn;
-  vec3 V=normalize(uCam-vW);
-  float spec=0.12, rough=24.;
-  if(mat>0.5 && mat<1.5){ // facade with windows
-    if(abs(N.y)<0.5){
-      vec2 fc = abs(N.x)>0.5 ? vec2(vW.z, vW.y) : vec2(vW.x, vW.y);
-      vec2 cell = fc/vec2(2.4,3.3); vec2 id=floor(cell); vec2 f=fract(cell);
-      float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
-      float bseed = h21(floor(vW.xz/37.)+N.xz*3.1);
-      float seed = h21(id*1.37 + bseed*91.);
-      float lit = step(0.7 - bseed*0.22, seed) * step(1.2, vW.y);
-      float flick = step(0.997, h21(id+floor(uTime*4.)));
-      vec3 wc = seed>0.93? vec3(1.0,0.25,0.6) : seed>0.84? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
-      wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
-      emis += win*lit*(1.-flick)*wc*uWin;
-      base = mix(base, vec3(0.015,0.02,0.04), win);
-      spec = 0.1+0.8*win; rough = 40.+win*60.;
-    }
-  } else if(mat>1.5 && mat<2.5){ // plaza tiles, wet
-    vec2 q = vW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
-    vec2 l2 = 1. - smoothstep(vec2(0.012), vec2(0.012)+fw*1.5, gd);
-    float line = max(l2.x,l2.y) * (0.35 + 0.65*clamp(0.02/max(fw.x,fw.y),0.,1.));
-    float pud = smoothstep(0.52,0.66, vn(vW.xz*0.18));
-    emis += vec3(0.1,0.55,1.0)*line*uGrid*(1.-pud*0.6);
-    base = mix(base*(1.-line*0.5), base*0.35, pud);
-    spec = 0.35 + pud*1.6*uWet; rough = 30.+pud*260.;
-  } else if(mat>2.5 && mat<3.5){ // asphalt
-    float pud = smoothstep(0.5,0.7, vn(vW.xz*0.12));
-    float lane = step(abs(abs(vW.x)-0.0),0.12)*step(0.5,fract(vW.z/6.)) * step(abs(vW.z),1e5)*step(abs(vW.x),6.);
-    float lane2 = step(abs(vW.z),0.12)*step(0.5,fract(vW.x/6.))*step(abs(vW.z),6.);
-    emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vW.x),abs(vW.z)));
-    base *= 1.-pud*0.6; spec=0.2+pud*1.4*uWet; rough=20.+pud*200.;
-  } else if(mat>3.5 && mat<4.5){ // metal panel
-    spec=0.7; rough=48.;
-  } else if(mat>5.5 && mat<7.5){ // sculpted characters / armour: vC = (ao, cloth mask, blood mask), vM.x = glow mask
-    float ao=vC.r, clm=vC.g, bl=vC.b;
-    base = mix(uSkin, uTint.rgb, clm);
-    base = mix(base, vec3(0.13,0.008,0.006), bl*0.92);
-    base *= ao;
-    emis = uEmit*vM.x*uDyn;
-    float armour = step(6.5, mat);
-    spec = mix(0.18 + bl*0.9, 0.9, armour); rough = mix(18. + bl*60., 60., armour);
-  } else if(mat>4.5 && mat<5.5){ // hologram (unlit, scanlines)
-    float sl = 0.65+0.35*sin(vW.y*60.+uTime*8.);
-    o=vec4(base*sl*1.6+emis, 1.);
-    float d=length(vW-uCam); o.rgb=mix(o.rgb,uFogCol,clamp(1.-exp(-d*uFogDen*0.6),0.,1.)); return;
-  }
-  float hemi = N.y*0.5+0.5;
-  vec3 amb = mix(uAmbLo, uAmbHi, hemi);
-  vec3 L = uSunDir;
-  vec3 col = base*(amb + uSunCol*max(dot(N,L),0.));
-  vec3 H0=normalize(L+V); vec3 sp = uSunCol*1.15*pow(max(dot(N,H0),0.),rough)*spec;
-  for(int i=0;i<${MAX_LIGHTS};i++){
-    if(i>=uNL) break;
-    vec3 d=uLP[i].xyz-vW; float dist=length(d); float r=uLP[i].w;
-    float att=clamp(1.-dist/r,0.,1.); att*=att;
-    if(att<=0.) continue;
-    vec3 l=d/max(dist,1e-3);
-    col += base*uLC[i]*max(dot(N,l),0.)*att;
-    vec3 H=normalize(l+V); sp += uLC[i]*pow(max(dot(N,H),0.),rough)*att*spec;
-  }
-  if(mat<0.5 || (mat>3.5 && mat<4.5) || mat>5.5){ float rim=pow(1.-clamp(dot(N,V),0.,1.),3.); col += (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*uRim; }
-  col += sp + emis;
-  col = mix(col, vec3(1.0,0.95,0.9), uFlash);
-  float dist=length(vW-uCam);
-  float fog = 1.-exp(-dist*uFogDen);
-  fog *= mix(1.0, 0.55, clamp(vW.y/180.,0.,1.)); // tall towers poke through the haze
-  col = mix(col, uFogCol, clamp(fog,0.,1.));
-  o=vec4(col, uTint.a);
-}`;
-
-const SKY_VS = `#version 300 es
-const vec2 P[3]=vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3));
-out vec2 vP; void main(){ vP=P[gl_VertexID]; gl_Position=vec4(vP,0.9999,1.); }`;
-const SKY_FS = `#version 300 es
-precision highp float; in vec2 vP; uniform mat4 uInvVP; uniform float uTime; uniform vec3 uFogCol; uniform vec3 uZen, uMid, uGlow, uCloud, uDiscCol, uDiscDir; uniform float uStars; out vec4 o;
-${NOISE_GLSL}
-void main(){
-  vec4 a=uInvVP*vec4(vP,1.,1.); vec4 b=uInvVP*vec4(vP,-1.,1.);
-  vec3 d=normalize(a.xyz/a.w-b.xyz/b.w);
-  float h=d.y;
-  vec3 zen=uZen, mid=uMid, hor=uFogCol*1.25;
-  vec3 c=mix(hor, mid, smoothstep(0.0,0.18,h)); c=mix(c, zen, smoothstep(0.15,0.7,h));
-  // city glow near horizon
-  c += uGlow*exp(-max(h,0.)*14.)*0.5;
-  // clouds lit from below
-  vec2 uv=d.xz/max(h+0.08,0.02);
-  float cl = vn(uv*0.9+vec2(uTime*0.01,0.)) * vn(uv*2.3-vec2(uTime*0.02,uTime*0.01));
-  cl = smoothstep(0.15,0.6,cl)*smoothstep(0.02,0.25,h)*(1.-smoothstep(0.5,0.9,h));
-  c = mix(c, uCloud, cl*0.7);
-  // stars
-  vec2 sp = floor(vec2(atan(d.z,d.x)*180., h*180.));
-  float st = step(0.9975, h21(sp)) * smoothstep(0.25,0.6,h) * (1.-cl);
-  c += vec3(0.8,0.85,1.)*st*uStars*(0.5+0.5*sin(uTime*3.+sp.x));
-  // moon
-  vec3 md=normalize(uDiscDir);
-  float m=dot(d,md);
-  c += uDiscCol*smoothstep(0.9993,0.9996,m)*1.6;
-  c += uDiscCol*0.4*pow(max(m,0.),220.)*0.8 + uDiscCol*0.08*pow(max(m,0.),8.);
-  o=vec4(c,1.);
-}`;
-
-const PT_VS = `#version 300 es
-layout(location=0) in vec3 aPos; layout(location=1) in vec4 aCol; layout(location=2) in float aSize;
-uniform mat4 uProj, uView; uniform float uH; out vec4 vC; out float vBlend;
-void main(){ vec4 v=uView*vec4(aPos,1.); gl_Position=uProj*v; gl_PointSize=clamp(abs(aSize)*uH/max(-v.z,0.05),1.,256.); vC=aCol; vBlend=aSize<0.?1.:0.; }`;
-const PT_FS = `#version 300 es
-precision mediump float; in vec4 vC; in float vBlend; out vec4 o;
-void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); float a=smoothstep(0.5,0.0,d);
-  if(vBlend>0.5){ float s=smoothstep(0.5,0.3,d)*vC.a; o=vec4(vC.rgb*s, s); } else { a*=a; o=vec4(vC.rgb*a*vC.a, 0.); } }`;
-
-const RAIN_VS = `#version 300 es
-layout(location=0) in vec4 aP; // x z y seed
-layout(location=1) in float aEnd;
-uniform mat4 uProj, uView; uniform vec3 uCam; uniform float uTime;
-out float vA;
-void main(){
-  float S=50.;
-  float x = mod(aP.x - uCam.x, S) - S*0.5 + uCam.x;
-  float z = mod(aP.y - uCam.z, S) - S*0.5 + uCam.z;
-  float y = mod(aP.z - uTime*(24.+aP.w*8.), 36.) - 6. + uCam.y;
-  vec3 p = vec3(x + aEnd*0.18, y + aEnd*0.9, z + aEnd*0.05);
-  vA = aEnd;
-  gl_Position = uProj*uView*vec4(p,1.);
-}`;
-const RAIN_FS = `#version 300 es
-precision mediump float; in float vA; uniform float uAlpha; uniform vec3 uRainCol; out vec4 o;
-void main(){ o=vec4(uRainCol*uAlpha*(0.3+vA*0.7),0.); }`;
-
-const TEX_VS = `#version 300 es
-layout(location=0) in vec3 aPos; layout(location=1) in vec2 aUV;
-uniform mat4 uProj, uView, uModel; out vec2 vUV; out vec3 vW;
-void main(){ vec4 w=uModel*vec4(aPos,1.); vW=w.xyz; vUV=aUV; gl_Position=uProj*uView*w; }`;
-const TEX_FS = `#version 300 es
-precision highp float; in vec2 vUV; in vec3 vW; uniform sampler2D uTex; uniform vec3 uCol; uniform float uTime; uniform float uMode;
-uniform vec3 uCam; uniform vec3 uFogCol; uniform float uFogDen; uniform float uSeed; uniform float uA; out vec4 o;
-${NOISE_GLSL}
-void main(){
-  vec2 uv=vUV;
-  float flick=1.;
-  if(uMode>0.5){ // holo billboard: glitch rows + scanlines
-    float row=floor(uv.y*24.); float g=step(0.93,h21(vec2(row,floor(uTime*6.)+uSeed)));
-    uv.x += g*(h21(vec2(row,uTime))-0.5)*0.08;
-    flick = 0.8+0.2*sin(uv.y*300.+uTime*20.);
-  } else {
-    flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
-  }
-  vec4 t=texture(uTex,uv);
-  vec3 c=t.rgb*uCol*flick;
-  float d=length(vW-uCam); c=mix(c,uFogCol,clamp((1.-exp(-d*uFogDen))*0.8,0.,1.));
-  o=vec4(c, t.a*uA);
-}`;
-
-const FS_VS = `#version 300 es
-const vec2 P[3]=vec2[3](vec2(-1,-1),vec2(3,-1),vec2(-1,3));
-out vec2 vUV; void main(){ vUV=P[gl_VertexID]*0.5+0.5; gl_Position=vec4(P[gl_VertexID],0.,1.); }`;
-const BRIGHT_FS = `#version 300 es
-precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform float uThr; out vec4 o;
-void main(){ vec3 c=texture(uTex,vUV).rgb; float l=max(max(c.r,c.g),c.b); o=vec4(c*smoothstep(uThr,uThr+0.6,l),1.); }`;
-const BLUR_FS = `#version 300 es
-precision highp float; in vec2 vUV; uniform sampler2D uTex; uniform vec2 uDir; out vec4 o;
-void main(){ vec3 c=texture(uTex,vUV).rgb*0.227;
-  c+=texture(uTex,vUV+uDir*1.385).rgb*0.316; c+=texture(uTex,vUV-uDir*1.385).rgb*0.316;
-  c+=texture(uTex,vUV+uDir*3.231).rgb*0.07; c+=texture(uTex,vUV-uDir*3.231).rgb*0.07; o=vec4(c,1.); }`;
-const COMP_FS = `#version 300 es
-precision highp float; in vec2 vUV; uniform sampler2D uScene, uB1, uB2; uniform float uTime, uDmg, uLow, uBloom, uExpo, uAberr, uSat; uniform vec3 uGrade, uLift; out vec4 o;
-${NOISE_GLSL}
-vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
-void main(){
-  vec2 uv=vUV; vec2 cc=uv-0.5; float r2=dot(cc,cc);
-  float ab = (0.0015 + uDmg*0.006 + uAberr)*r2*4.;
-  vec3 s; s.r=texture(uScene,uv+cc*ab).r; s.g=texture(uScene,uv).g; s.b=texture(uScene,uv-cc*ab).b;
-  vec3 b=texture(uB1,uv).rgb*0.9 + texture(uB2,uv).rgb*1.1;
-  vec3 c = s + b*uBloom;
-  c *= uExpo;
-  float lum=dot(c,vec3(0.3,0.59,0.11));
-  c = mix(c, vec3(lum)*vec3(1.1,0.9,0.9), uLow*0.55);
-  c = aces(c);
-  c *= uGrade; float lm=dot(c,vec3(0.3,0.59,0.11)); c = mix(vec3(lm), c, uSat); c += uLift*(1.-c);
-  c = pow(clamp(c,0.,1.), vec3(1./2.2));
-  // vignette + damage
-  float vig = smoothstep(0.85,0.2,sqrt(r2)*1.25);
-  c *= mix(0.72,1.,vig);
-  float edge = smoothstep(0.25,0.75,sqrt(r2)*1.4);
-  c = mix(c, vec3(0.75,0.02,0.08), edge*clamp(uDmg,0.,1.)*0.75);
-  c = mix(c, vec3(0.5,0.0,0.05), edge*uLow*(0.25+0.2*sin(uTime*6.)));
-  // grain + scan
-  c += (h21(uv*vec2(1920.,1080.)+fract(uTime)*100.)-0.5)*0.035;
-  c *= 0.985+0.015*sin(uv.y*900.);
-  o=vec4(c,1.);
-}`;
-
-const PROG = {
-  main: program(MAIN_VS, MAIN_FS), sky: program(SKY_VS, SKY_FS), pt: program(PT_VS, PT_FS), rain: program(RAIN_VS, RAIN_FS),
-  tex: program(TEX_VS, TEX_FS), bright: program(FS_VS, BRIGHT_FS), blur: program(FS_VS, BLUR_FS), comp: program(FS_VS, COMP_FS),
-};
-const emptyVAO = gl.createVertexArray();
 
 /* ---------------- Unit meshes ---------------- */
 const MESH = {};
@@ -432,69 +358,19 @@ const MESH = {};
   const W = [1, 1, 1];
   let g = new Geo(); g.box(null, W); MESH.box = g.build();
   g = new Geo(); g.cyl(null, W, 0, 0, 14); MESH.cyl = g.build();
-  g = new Geo(); g.sphere(null, W, 0, 0, 12, 8); MESH.sphere = g.build();
-  g = new Geo(); g.cyl(null, W, 0, 0, 4, 0.0, 0.5, true); MESH.cone = g.build(); // pyramid-ish tip
+  g = new Geo(); g.sphere(null, W, 0, 0, 16, 10); MESH.sphere = g.build();
+  g = new Geo(); g.cyl(null, W, 0, 0, 4, 0.0, 0.5, true); MESH.cone = g.build();
   g = new Geo(); g.box(null, W, 0, 4); MESH.metal = g.build();
   g = new Geo(); g.ring(null, W, 0, 0, 1, 0.04, 40, 5); MESH.ring = g.build();
 })();
 
-/* ---------------- Render targets ---------------- */
-const RT = { w: 0, h: 0 };
-function makeTex(w, h, hdr) {
-  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
-  if (hdr) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-  else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  return t;
-}
-function makeFB(tex) { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0); return f; }
-let HDR = !!extCBF;
-function resizeTargets(w, h) {
-  if (RT.w === w && RT.h === h) return;
-  for (const k of ['sceneTex', 't1', 't2', 't3', 't4']) if (RT[k]) gl.deleteTexture(RT[k]);
-  for (const k of ['msFB', 'sceneFB', 'f1', 'f2', 'f3', 'f4']) if (RT[k]) gl.deleteFramebuffer(RT[k]);
-  if (RT.msColor) gl.deleteRenderbuffer(RT.msColor); if (RT.msDepth) gl.deleteRenderbuffer(RT.msDepth);
-  RT.w = w; RT.h = h;
-  const fmt = HDR ? gl.RGBA16F : gl.RGBA8;
-  const samples = Math.min(4, gl.getParameter(gl.MAX_SAMPLES) || 0);
-  RT.msFB = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, RT.msFB);
-  RT.msColor = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, RT.msColor);
-  gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, fmt, w, h);
-  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, RT.msColor);
-  RT.msDepth = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, RT.msDepth);
-  gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.DEPTH_COMPONENT24, w, h);
-  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, RT.msDepth);
-  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-    if (HDR) { HDR = false; RT.w = 0; return resizeTargets(w, h); }
-  }
-  RT.sceneTex = makeTex(w, h, HDR); RT.sceneFB = makeFB(RT.sceneTex);
-  const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1), qw = Math.max(1, w >> 2), qh = Math.max(1, h >> 2);
-  RT.t1 = makeTex(hw, hh, HDR); RT.f1 = makeFB(RT.t1); RT.t2 = makeTex(hw, hh, HDR); RT.f2 = makeFB(RT.t2);
-  RT.t3 = makeTex(qw, qh, HDR); RT.f3 = makeFB(RT.t3); RT.t4 = makeTex(qw, qh, HDR); RT.f4 = makeFB(RT.t4);
-  RT.hw = hw; RT.hh = hh; RT.qw = qw; RT.qh = qh;
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-}
-
 /* ---------------- Canvas textures ---------------- */
 function canvasTex(cv) {
-  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = 4;
+  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   return t;
 }
-// textured quad mesh (unit plane in XY facing +Z)
-const QUAD = (function () {
-  const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-.5, -.5, 0, 0, 1, .5, -.5, 0, 1, 1, .5, .5, 0, 1, 0, -.5, -.5, 0, 0, 1, .5, .5, 0, 1, 0, -.5, .5, 0, 0, 0]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 12);
-  gl.bindVertexArray(null); return vao;
-})();
 
 /* ---------------- sculpted models (built in Blender, packed by tools/pack_models.py) ---------------- */
 const MODEL = {};
@@ -507,23 +383,17 @@ async function loadModels() {
     const m = MODEL_MANIFEST[name], vc = m.vc;
     const P = new Uint16Array(buf, m.p, vc * 3), N = new Int8Array(buf, m.n, vc * 3), C = new Uint8Array(buf, m.c, vc * 4);
     const mat = name.startsWith('g_') || name.startsWith('brute_') ? 7 : 6;
-    const v = new Float32Array(vc * 11);
+    const pos = new Float32Array(vc * 3), nor = new Float32Array(vc * 3), col = new Float32Array(vc * 3), nqm = new Float32Array(vc * 2);
     for (let i = 0; i < vc; i++) {
-      const o = i * 11;
-      for (let k = 0; k < 3; k++) { v[o + k] = m.min[k] + P[i * 3 + k] / 65535 * m.sc[k]; v[o + 3 + k] = N[i * 3 + k] / 127; }
-      v[o + 6] = C[i * 4] / 255; v[o + 7] = C[i * 4 + 1] / 255; v[o + 8] = C[i * 4 + 2] / 255; v[o + 9] = C[i * 4 + 3] / 255; v[o + 10] = mat;
+      for (let k = 0; k < 3; k++) { pos[i * 3 + k] = m.min[k] + P[i * 3 + k] / 65535 * m.sc[k]; nor[i * 3 + k] = N[i * 3 + k] / 127; col[i * 3 + k] = C[i * 4 + k] / 255; }
+      nqm[i * 2] = C[i * 4 + 3] / 255; nqm[i * 2 + 1] = mat;
     }
     const idx = m.i32 ? new Uint32Array(buf, m.i, m.ic) : new Uint16Array(buf, m.i, m.ic);
-    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
-    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
-    const S = 44;
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);
-    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, S, 24);
-    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, S, 36);
-    gl.bindVertexArray(null);
-    MODEL[name] = { vao, count: m.ic, type: m.i32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+    g.setIndex(new THREE.BufferAttribute(idx.slice(), 1)); g.computeBoundingSphere();
+    MODEL[name] = g;
   }
   return true;
 }
