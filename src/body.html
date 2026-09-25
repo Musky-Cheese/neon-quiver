@@ -1,0 +1,107 @@
+<div id="game">
+  <canvas id="gl"></canvas>
+  <canvas id="hud2d"></canvas>
+
+  <div id="hud" hidden>
+    <div class="hud-tl"><div class="lbl">Score</div><div id="score" class="num">0</div><div id="combo"></div></div>
+    <div class="hud-tc">
+      <div class="wave"><span class="lbl">Wave</span><span id="waveNum">1</span></div>
+      <div id="remain"></div>
+      <div id="bossbar" hidden><div class="bossname">THE WARDEN</div><div class="bosstrack"><div id="bossFill"></div></div></div>
+    </div>
+    <div class="hud-tr"><div class="lbl">Credits</div><div id="cash" class="num">¢0</div></div>
+    <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div></div></div></div>
+    <div class="hud-br"><div id="quiver"></div><div class="hint">1–4 or wheel to switch · Q for last</div></div>
+  </div>
+
+  <section id="scr-title" class="screen">
+    <div class="t-main">
+      <div class="eyebrow">Sector 7 · Quarantine day 41</div>
+      <canvas id="logo" aria-label="Neon Quiver"></canvas>
+      <p class="tagline">One bow. One sealed plaza. <b>The whole infected city</b> is coming through the streets. Hold the line for as many waves as you can.</p>
+      <div class="row">
+        <button class="btn primary" id="playBtn" type="button">Enter the plaza</button>
+      </div>
+      <div class="touch-note">Neon Quiver needs a keyboard and mouse. Open it on a desktop browser to play.</div>
+      <div class="settings">
+        <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
+        <label for="look">Look <select id="look"></select></label>
+        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option></select></label>
+        <button class="linkbtn" id="musicBtn" type="button">Music: On</button>
+      </div>
+      <div class="bests">
+        <div><span class="lbl">Best score</span><b id="bestScore">—</b></div>
+        <div><span class="lbl">Best wave</span><b id="bestWave">—</b></div>
+      </div>
+    </div>
+    <div class="t-side">
+      <div class="card-p">
+        <h3>Controls</h3>
+        <div class="keys">
+          <kbd>Mouse</kbd><span>Aim</span>
+          <kbd>Hold left click</kbd><span>Draw the bow</span>
+          <kbd>Release</kbd><span>Loose the arrow</span>
+          <kbd>Right click</kbd><span>Let the string down</span>
+          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
+          <kbd>1 – 4</kbd><span>Switch arrows (or mouse wheel)</span>
+          <kbd>P / Esc</kbd><span>Pause · <kbd>M</kbd> music</span>
+        </div>
+      </div>
+      <div class="card-p">
+        <h3>Quiver</h3>
+        <div class="arrows-legend">
+          <div style="--c:#dff3ff"><i></i><p style="margin:0"><b>Carbon</b><span>Unlimited. A full draw and a headshot kills most walkers.</span></p></div>
+          <div style="--c:#ffb52e"><i></i><p style="margin:0"><b>Incendiary</b><span>Sets targets and the ground on fire.</span></p></div>
+          <div style="--c:#ff3df0"><i></i><p style="margin:0"><b>Plasma Charge</b><span>Detonates on impact. Clears crowds.</span></p></div>
+          <div style="--c:#37f3ff"><i></i><p style="margin:0"><b>Rail Piercer</b><span>Flies flat and passes through five bodies.</span></p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-pause" class="screen" hidden>
+    <div class="center-panel">
+      <canvas id="pauseLogo" class="big-canvas"></canvas>
+      <p class="muted">The infected are waiting.</p>
+      <div class="row" style="justify-content:center">
+        <button class="btn primary" id="resumeBtn" type="button">Resume</button>
+        <button class="btn ghost" id="quitBtn" type="button">Quit to title</button>
+      </div>
+      <div class="settings" style="justify-content:center">
+        <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
+        <label for="look2">Look <select id="look2"></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option></select></label>
+        <button class="linkbtn" id="musicBtn2" type="button">Music: On</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-shop" class="screen" hidden>
+    <div class="terminal">
+      <div class="term-head">
+        <div><h2>ARMORY TERMINAL</h2><p class="muted" id="shopWave">Wave cleared</p></div>
+        <div class="wallet"><div><span class="lbl">Vitals</span><b id="shopHp">100</b></div><div><span class="lbl">Credits</span><b id="shopCash">¢0</b></div></div>
+      </div>
+      <div id="shopGrid"></div>
+      <div class="term-foot">
+        <p class="muted">Upgrades last for the whole run. Special arrows also drop from the infected.</p>
+        <button class="btn primary" id="nextWaveBtn" type="button">Start next wave</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-over" class="screen" hidden>
+    <div class="center-panel">
+      <canvas id="goLogo" class="big-canvas"></canvas>
+      <div class="newbest" id="goBest" hidden>NEW BEST SCORE</div>
+      <div class="stats" id="goStats"></div>
+      <div class="row" style="justify-content:center">
+        <button class="btn primary" id="againBtn" type="button">Run it back</button>
+        <button class="btn ghost" id="menuBtn" type="button">Title screen</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="loading">Unsealing Sector 7…</div>
+  <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
+</div>
