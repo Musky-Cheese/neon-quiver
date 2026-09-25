@@ -13,7 +13,7 @@ import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 '''
-js = IMPORTS + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
+js = IMPORTS + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'

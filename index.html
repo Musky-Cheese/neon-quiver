@@ -597,6 +597,33 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     float rust = smoothstep(0.55, 0.8, vn(fcW * 1.3 + N0.xz * 5.) + streak * 0.4);
     base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
     bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
+  } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
+    base *= 0.35; rough = 0.04 + streak * 0.14 * uWet; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
+  } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
+    float scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
+    float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
+    base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
+    rough = mix(0.24, 0.75, dirt) + streak * 0.05 * uWet; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
+  } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
+    float rid = abs(vn(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
+    float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
+    base = mix(base * (0.55 + 0.6 * rid), vec3(0.05, 0.09, 0.03), moss * 0.7);
+    bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
+  } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
+    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vn(vNqW.xz * 23.) * 0.5;
+    base *= (0.7 + 0.45 * gr) * mix(1., 0.72, uWet * step(0.5, N0.y));
+    bumpH = gr * 0.002; rough = mix(0.62, 0.35, uWet * step(0.5, N0.y)); rimK = 0.5;
+  } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
+    base *= 0.65 + 0.55 * vn(vNqW.xz * 6. + vNqW.y * 6.);
+    emis += base * uNeon * 0.3; rough = 0.62; rimK = 1.2; bumpH = vn(vNqW.xz * 17. + vNqW.y * 13.) * 0.006;
+  } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
+    base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
+  } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
+    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vn(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
+    float pit = smoothstep(0.78, 0.9, vn(vNqW.xz * 31. + vNqW.y * 29.));
+    float top = step(0.5, N0.y);
+    base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, uWet * top);
+    bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, uWet * top * 0.8); rimK = 0.3;
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);
@@ -721,6 +748,132 @@ class Geo {
     }
     for (let s = 0; s < seg; s++) for (let t = 0; t < tube; t++) { const a = base + s * (tube + 1) + t, b = a + tube + 1; this.i.push(a, b, a + 1, a + 1, b, b + 1); }
   }
+  /* ---- modeling kit for props (m must be rigid: rotation + translation only) ---- */
+  // re-orient triangles [i0, i1) so each faces along its vertices' normals
+  _fixWinding(i0) {
+    const I = this.i, v = this.v;
+    for (let k = i0; k < I.length; k += 3) {
+      const a = I[k] * 11, b = I[k + 1] * 11, c = I[k + 2] * 11;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      if (nx * (v[a + 3] + v[b + 3] + v[c + 3]) + ny * (v[a + 4] + v[b + 4] + v[c + 4]) + nz * (v[a + 5] + v[b + 5] + v[c + 5]) < 0) { const t = I[k + 1]; I[k + 1] = I[k + 2]; I[k + 2] = t; }
+    }
+  }
+  // box with rounded edges: size sx,sy,sz, edge radius r, s steps per bevel. taper = top face scale [tx, tz]
+  rbox(m, sx, sy, sz, r, c, e = 0, mat = 0, s = 2, taper = null) {
+    if (r <= 0.012 && !taper) { this.box(M4.mul(_t4c, m, M4.trs(_t4b, 0, 0, 0, 0, 0, 0, sx, sy, sz)), c, e, mat); return; }   // too small to see a bevel: 12 triangles
+    const H = [sx / 2, sy / 2, sz / 2]; r = Math.min(r, H[0] * 0.98, H[1] * 0.98, H[2] * 0.98);
+    const i0 = this.i.length, P = [0, 0, 0];
+    const co = (h) => { const a = []; for (let k = 0; k <= s; k++) a.push(-h + r * k / s); for (let k = 0; k <= s; k++) a.push(h - r + r * k / s); return a; };
+    for (let ax = 0; ax < 3; ax++) for (const sg of [-1, 1]) {
+      const u = (ax + 1) % 3, w = (ax + 2) % 3, U = co(H[u]), W = co(H[w]), base = this.n;
+      for (let j = 0; j < W.length; j++) for (let i = 0; i < U.length; i++) {
+        P[ax] = sg * H[ax]; P[u] = U[i]; P[w] = W[j];
+        let ox = 0, oy = 0, oz = 0; const q = [0, 0, 0];
+        for (let k = 0; k < 3; k++) q[k] = Math.max(-(H[k] - r), Math.min(H[k] - r, P[k]));
+        ox = P[0] - q[0]; oy = P[1] - q[1]; oz = P[2] - q[2]; const L = Math.hypot(ox, oy, oz) || 1;
+        let x = q[0] + ox / L * r, y = q[1] + oy / L * r, z = q[2] + oz / L * r;
+        if (taper) { const t = (y + H[1]) / sy; x *= 1 + (taper[0] - 1) * t; z *= 1 + (taper[1] - 1) * t; }
+        this._vert(m, x, y, z, ox / L, oy / L, oz / L, c, e, mat);
+      }
+      const nu = U.length;
+      for (let j = 0; j < W.length - 1; j++) for (let i = 0; i < nu - 1; i++) { const a = base + j * nu + i; this.i.push(a, a + 1, a + nu + 1, a, a + nu + 1, a + nu); }
+    }
+    this._fixWinding(i0);
+  }
+  // surface of revolution around local Y. prof: [[r, y, color?, emissive?], ...] bottom to top; a repeated point makes a hard edge
+  lathe(m, prof, c, e = 0, mat = 0, seg = 16, capTop = true, capBot = false) {
+    const i0 = this.i.length, n = prof.length, NR = [];
+    const segN = (a, b) => { const dr = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dr, dy) || 1; return [dy / L, -dr / L]; };
+    for (let k = 0; k < n; k++) {
+      const p = prof[k], pv = prof[k - 1], nx = prof[k + 1];
+      const hardPrev = pv && pv[0] === p[0] && pv[1] === p[1], hardNext = nx && nx[0] === p[0] && nx[1] === p[1];
+      let a = null, b = null;
+      if (pv && !hardPrev) a = segN(pv, p); if (nx && !hardNext) b = segN(p, nx);
+      const nn = a && b ? [a[0] + b[0], a[1] + b[1]] : (a || b || [1, 0]); const L = Math.hypot(nn[0], nn[1]) || 1; NR.push([nn[0] / L, nn[1] / L]);
+    }
+    const base = this.n;
+    for (let k = 0; k < n; k++) {
+      const [r, y] = prof[k], cc = prof[k][2] || c, ee = prof[k][3] !== undefined ? prof[k][3] : e;
+      for (let sI = 0; sI <= seg; sI++) { const a = sI / seg * TAU, ca = Math.cos(a), sa = Math.sin(a); this._vert(m, ca * r, y, sa * r, ca * NR[k][0], NR[k][1], sa * NR[k][0], cc, ee, mat); }
+    }
+    for (let k = 0; k < n - 1; k++) {
+      if (prof[k][0] === prof[k + 1][0] && prof[k][1] === prof[k + 1][1]) continue;
+      for (let sI = 0; sI < seg; sI++) { const a = base + k * (seg + 1) + sI, b = a + seg + 1; this.i.push(a, a + 1, b + 1, a, b + 1, b); }
+    }
+    const cap = (p, up) => { const cc = p[2] || c, ee = p[3] !== undefined ? p[3] : e; const ct = this._vert(m, 0, p[1], 0, 0, up, 0, cc, ee, mat), r0 = this.n;
+      for (let sI = 0; sI <= seg; sI++) { const a = sI / seg * TAU; this._vert(m, Math.cos(a) * p[0], p[1], Math.sin(a) * p[0], 0, up, 0, cc, ee, mat); }
+      for (let sI = 0; sI < seg; sI++) this.i.push(ct, r0 + sI, r0 + sI + 1); };
+    if (capTop && prof[n - 1][0] > 0) cap(prof[n - 1], 1); if (capBot && prof[0][0] > 0) cap(prof[0], -1);
+    this._fixWinding(i0);
+  }
+  // tube along world-space points with per-point radius (branches, pipes, rails). cols: optional per-point colours
+  tube(pts, rad, c, e = 0, mat = 0, sides = 6, capEnd = true, cols = null) {
+    const i0 = this.i.length, n = pts.length, base = this.n;
+    let T = [0, 1, 0], N = null;
+    for (let k = 0; k < n; k++) {
+      const p = pts[k], a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+      if (!N) { N = Math.abs(ty) < 0.9 ? [0, 1, 0] : [1, 0, 0]; }
+      // parallel transport: remove the tangent component from the previous normal
+      const d = N[0] * tx + N[1] * ty + N[2] * tz; N = [N[0] - d * tx, N[1] - d * ty, N[2] - d * tz]; const nl = Math.hypot(...N) || 1; N = N.map(v => v / nl);
+      const Bx = ty * N[2] - tz * N[1], By = tz * N[0] - tx * N[2], Bz = tx * N[1] - ty * N[0]; T = [tx, ty, tz];
+      const cc = cols ? cols[k] : c;
+      for (let sI = 0; sI <= sides; sI++) {
+        const an = sI / sides * TAU, ca = Math.cos(an), sa = Math.sin(an), ox = N[0] * ca + Bx * sa, oy = N[1] * ca + By * sa, oz = N[2] * ca + Bz * sa;
+        this._vert(null, p[0] + ox * rad[k], p[1] + oy * rad[k], p[2] + oz * rad[k], ox, oy, oz, cc, e, mat);
+      }
+    }
+    for (let k = 0; k < n - 1; k++) for (let sI = 0; sI < sides; sI++) { const a = base + k * (sides + 1) + sI, b = a + sides + 1; this.i.push(a, a + 1, b + 1, a, b + 1, b); }
+    if (capEnd && rad[n - 1] > 0.004) { const p = pts[n - 1], cc = cols ? cols[n - 1] : c, ct = this._vert(null, p[0] + T[0] * rad[n - 1] * 0.6, p[1] + T[1] * rad[n - 1] * 0.6, p[2] + T[2] * rad[n - 1] * 0.6, T[0], T[1], T[2], cc, e, mat); const r0 = base + (n - 1) * (sides + 1); for (let sI = 0; sI < sides; sI++) this.i.push(ct, r0 + sI, r0 + sI + 1); }
+    this._fixWinding(i0);
+  }
+  // lumpy organic ball (foliage, rubbish bags): sphere displaced by 3D value noise, smooth normals rebuilt
+  blob(m, rx, ry, rz, amp, seed, c, e = 0, mat = 0, seg = 12, rings = 8, emisMask = 0) {
+    const i0 = this.i.length, base = this.n;
+    const hsh = (x, y, z) => { const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 19.3) * 43758.5453; return s - Math.floor(s); };
+    const vn3 = (x, y, z) => { const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx = x - ix, fy = y - iy, fz = z - iz, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy), sz = fz * fz * (3 - 2 * fz);
+      const L = (a, b, t) => a + (b - a) * t; const h = (i, j, k) => hsh(ix + i, iy + j, iz + k);
+      return L(L(L(h(0, 0, 0), h(1, 0, 0), sx), L(h(0, 1, 0), h(1, 1, 0), sx), sy), L(L(h(0, 0, 1), h(1, 0, 1), sx), L(h(0, 1, 1), h(1, 1, 1), sx), sy), sz); };
+    for (let r = 0; r <= rings; r++) {
+      const vv = r / rings * Math.PI, sv = Math.sin(vv), cv = Math.cos(vv);
+      for (let sI = 0; sI <= seg; sI++) {
+        const u = (sI % seg) / seg * TAU, x = Math.cos(u) * sv, y = cv, z = Math.sin(u) * sv;
+        const nz = vn3(x * 2.1, y * 2.1, z * 2.1) * 0.65 + vn3(x * 5.3, y * 5.3, z * 5.3) * 0.35, k = 1 + (nz - 0.5) * 2 * amp;
+        const cv2 = 0.75 + 0.5 * vn3(x * 3.7 + 9, y * 3.7, z * 3.7);
+        const ee = emisMask ? e * Math.max(0, (vn3(x * 6 + 3, y * 6, z * 6) - 0.55) * 4) * (0.4 + 0.6 * Math.max(0, y)) : e;
+        this._vert(m, x * rx * k, y * ry * k, z * rz * k, 0, 0, 0, [c[0] * cv2, c[1] * cv2, c[2] * cv2], ee, mat);
+      }
+    }
+    for (let r = 0; r < rings; r++) for (let sI = 0; sI < seg; sI++) { const a = base + r * (seg + 1) + sI, b = a + seg + 1; this.i.push(a, a + 1, b, b, a + 1, b + 1); }
+    // smooth normals from the displaced shape (seam columns share a position, so average them too)
+    const v = this.v, acc = new Float32Array((this.n - base) * 3);
+    for (let k = i0; k < this.i.length; k += 3) {
+      const A = this.i[k], B = this.i[k + 1], C = this.i[k + 2], a = A * 11, b = B * 11, cI = C * 11;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], wx = v[cI] - v[a], wy = v[cI + 1] - v[a + 1], wz = v[cI + 2] - v[a + 2];
+      const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      for (const q of [A, B, C]) { const o = (q - base) * 3; acc[o] += nx; acc[o + 1] += ny; acc[o + 2] += nz; }
+    }
+    const cx = [0, 0, 0]; for (let q = base; q < this.n; q++) { cx[0] += v[q * 11]; cx[1] += v[q * 11 + 1]; cx[2] += v[q * 11 + 2]; } for (let k = 0; k < 3; k++) cx[k] /= this.n - base;
+    for (let r = 0; r <= rings; r++) { const a = (r * (seg + 1)) * 3, b = (r * (seg + 1) + seg) * 3; for (let k = 0; k < 3; k++) { const s = acc[a + k] + acc[b + k]; acc[a + k] = acc[b + k] = s; } }
+    for (let q = base; q < this.n; q++) {
+      const o = (q - base) * 3; let nx = acc[o], ny = acc[o + 1], nz = acc[o + 2];
+      const ox = v[q * 11] - cx[0], oy = v[q * 11 + 1] - cx[1], oz = v[q * 11 + 2] - cx[2];
+      if (nx * ox + ny * oy + nz * oz < 0) { nx = -nx; ny = -ny; nz = -nz; }   // outward
+      const L = Math.hypot(nx, ny, nz) || 1; v[q * 11 + 3] = nx / L; v[q * 11 + 4] = ny / L; v[q * 11 + 5] = nz / L;
+    }
+    this._fixWinding(i0);
+  }
+  // convex 2D profile [[x, y], ...] (counter-clockwise) extruded along local Z, centred, flat-shaded
+  extrude(m, prof, len, c, e = 0, mat = 0) {
+    const i0 = this.i.length, n = prof.length, h = len / 2;
+    for (let k = 0; k < n; k++) {
+      const a = prof[k], b = prof[(k + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = dy / L, ny = -dx / L;
+      this.quad(m, [a[0], a[1], -h], [b[0], b[1], -h], [b[0], b[1], h], [a[0], a[1], h], [nx, ny, 0], c, e, mat);
+    }
+    for (const sz of [-1, 1]) { const b0 = this.n; for (const p of prof) this._vert(m, p[0], p[1], sz * h, 0, 0, sz, c, e, mat); for (let k = 1; k < n - 1; k++) this.i.push(b0, b0 + k, b0 + k + 1); }
+    this._fixWinding(i0);
+  }
   build() {
     const n = this.n, v = this.v;
     const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
@@ -778,6 +931,231 @@ async function loadModels() {
     MODEL[name] = g;
   }
   return true;
+}
+
+/* ============================================================
+   Street props, modelled in code with the Geo kit (rounded boxes, lathes, tubes, blobs).
+   Every builder keeps the collision footprint it replaced, so navigation is unchanged.
+   Material ids: 4 metal, 8 painted steel, 10 glass, 11 car paint, 12 bark, 13 wood,
+                 14 foliage, 15 plastic, 16 concrete.
+   ============================================================ */
+const PM = { a: M4.create(), b: M4.create(), c: M4.create() };
+// rigid transform: translate + rotate (ry yaw, rx pitch, rz roll)
+const pT = (m, x, y, z, ry = 0, rx = 0, rz = 0) => M4.trs(m, x, y, z, rx, ry, rz, 1, 1, 1);
+// parent * local rigid transform
+const pChild = (parent, x, y, z, ry = 0, rx = 0, rz = 0) => M4.mul(PM.c, parent, pT(PM.b, x, y, z, ry, rx, rz));
+const pPt = (parent, x, y, z) => M4.pt(parent, x, y, z, [0, 0, 0]);
+const DARK = [0.1, 0.1, 0.12], STEEL = [0.2, 0.2, 0.22], CONC = [0.3, 0.29, 0.28];
+// axis-aligned footprint of a local rectangle [x0,x1]x[z0,z1] turned by a quarter-turn yaw
+function pFoot(x, z, ry, lx0, lx1, lz0, lz1, y1) {
+  const c = Math.round(Math.cos(ry)), s = Math.round(Math.sin(ry)), xs = [], zs = [];
+  for (const lx of [lx0, lx1]) for (const lz of [lz0, lz1]) { xs.push(x + lx * c + lz * s); zs.push(z - lx * s + lz * c); }
+  WORLD.boxes.push({ x0: Math.min(...xs), x1: Math.max(...xs), y0: 0, y1, z0: Math.min(...zs), z1: Math.max(...zs) });
+}
+
+/* ---------- crashed hover-car: sculpted body, glass cabin, hover pods, damage ---------- */
+function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
+  const P = M4.trs(PM.a, x, 0, z, 0.06, ry, 0.08, 1, 1, 1), W = M4.create(); W.set(P);
+  const part = (lx, ly, lz, sx, sy, sz, r, c, e, mat, lry = 0, lrx = 0, lrz = 0, taper = null, s = 2) => g.rbox(pChild(W, lx, ly, lz, lry, lrx, lrz), sx, sy, sz, r, c, e, mat, s, taper);
+  const glass = [0.05, 0.08, 0.1], trim = [0.06, 0.06, 0.07];
+  // hull: belly, flanks, sloped hood and deck
+  part(0, 0.6, 0, 2.2, 0.56, 4.7, 0.24, paint, 0, 11);
+  part(0, 0.93, -1.72, 2.08, 0.34, 1.45, 0.17, paint, 0, 11, 0, -0.1 - (variant === 1 ? 0.14 : 0), variant === 1 ? 0.07 : 0);
+  part(0, 0.98, 1.82, 2.12, 0.4, 1.2, 0.18, paint, 0, 11, 0, 0.07);
+  part(0, 0.36, 0, 1.9, 0.14, 4.3, 0.06, trim, 0, 15);                                       // undertray
+  // cabin: tapered glass canopy, roof skin and pillars
+  part(0, 1.27, 0.12, 1.82, 0.62, 2.35, 0.27, variant === 2 ? [0.02, 0.03, 0.035] : glass, 0, 10, 0, 0, 0, [0.8, 0.72]);
+  part(0, 1.6, 0.2, 1.4, 0.07, 1.45, 0.035, paint, 0, 11);
+  for (const sx of [-1, 1]) {
+    part(sx * 0.8, 1.26, -0.95, 0.07, 0.6, 0.09, 0.03, paint, 0, 11, 0, 0.55, -sx * 0.13);
+    part(sx * 0.78, 1.28, 0.35, 0.07, 0.58, 0.1, 0.03, paint, 0, 11, 0, 0, -sx * 0.1);
+    // side light strip + skirt
+    part(sx * 1.1, 0.46, 0.1, 0.05, 0.06, 3.8, 0.02, NEON.cyan, variant === 1 && sx > 0 ? 0.2 : 2.4, 0);
+    part(sx * 1.06, 0.62, 0, 0.12, 0.2, 4.1, 0.08, trim, 0, 11);
+    // headlights and the tail bar
+    part(sx * 0.62, 0.86, -2.36, 0.52, 0.12, 0.12, 0.05, [1, 0.95, 0.85], variant === 1 && sx < 0 ? 0 : 3.2, 0);
+  }
+  part(0, 1.07, 2.43, 1.75, 0.07, 0.08, 0.03, NEON.red, 4, 0);
+  // spoiler on two struts
+  for (const sx of [-0.6, 0.6]) part(sx, 1.28, 2.2, 0.06, 0.26, 0.12, 0.02, trim, 0, 4, 0, 0.3);
+  part(0, 1.42, 2.28, 1.95, 0.05, 0.36, 0.02, paint, 0, 11, 0, 0.1);
+  // hover pods: turned housings with glowing emitters underneath (one dead on a wreck)
+  let k = 0;
+  for (const sx of [-0.98, 0.98]) for (const sz of [-1.55, 1.55]) {
+    const dead = variant > 0 && k === variant + 1; k++;
+    if (variant === 2 && k === 4) continue;   // this one was torn off (lies nearby)
+    g.lathe(pChild(W, sx, 0.3, sz), [[0.24, -0.16, dead ? DARK : NEON.cyan, dead ? 0 : 2.8], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
+  }
+  // damage: a door hanging open, a crumpled panel
+  if (variant === 1) part(1.35, 1.0, -0.35, 0.07, 0.58, 1.15, 0.03, paint, 0, 11, 0.95, 0, 0.12);
+  if (variant === 2) g.lathe(pT(PM.b, x + Math.cos(ry) * 2.6, 0.15, z - Math.sin(ry) * 2.6, 0.4, 1.2, 0.3), [[0.24, -0.16, DARK, 0], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
+  const s = Math.sin(ry), co = Math.cos(ry);
+  WORLD.circles.push({ x: x + s * 1.3, z: z + co * 1.3, r: 1.3, h: 1.7 }, { x: x - s * 1.3, z: z - co * 1.3, r: 1.3, h: 1.7 });
+}
+
+/* ---------- bioluminescent tree: branching trunk in a concrete planter, glowing canopy ---------- */
+function propTree(g, R, x, z, col) {
+  const r = (a, b) => a + (b - a) * R();
+  // planter with a lip, soil, and a thin light ring
+  g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
+  g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.035, 0.03, 0.025], 0, 16, 24);
+  g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), col, 2.2, 0, 1.415, 0.018, 40, 4);
+  const bark = [0.13, 0.1, 0.085], leaf = [col[0] * 0.22 + 0.03, col[1] * 0.22 + 0.06, col[2] * 0.22 + 0.04];
+  // roots flaring over the soil
+  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, 1.1, z], [x + Math.cos(a) * 0.35, 0.86, z + Math.sin(a) * 0.35], [x + Math.cos(a) * 0.7, 0.78, z + Math.sin(a) * 0.7]], [0.12, 0.07, 0.02], bark, 0, 12, 5); }
+  const tips = [];
+  function grow(p, d, len, rad, depth) {
+    const pts = [p], rr = [rad]; let q = p, dir = d.slice();
+    for (let s = 1; s <= 3; s++) {
+      dir = [dir[0] + r(-0.18, 0.18), dir[1] + 0.12 * (depth > 0 ? 1 : -0.3), dir[2] + r(-0.18, 0.18)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
+      q = [q[0] + dir[0] * len / 3, q[1] + dir[1] * len / 3, q[2] + dir[2] * len / 3]; pts.push(q); rr.push(rad * (1 - s * 0.12));
+    }
+    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 7 : 5, depth === 0);
+    if (depth === 0) { tips.push(q); return; }
+    const n = depth >= 2 ? 3 : 2, a0 = r(0, TAU);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + i / n * TAU + r(-0.3, 0.3), spread = r(0.45, 0.8);
+      const nd = [dir[0] * (1 - spread) + Math.cos(a) * spread, dir[1] * (1 - spread * 0.6) + 0.25, dir[2] * (1 - spread) + Math.sin(a) * spread];
+      grow(q, nd, len * r(0.62, 0.78), rad * 0.62, depth - 1);
+    }
+    if (depth === 1) tips.push(q);
+  }
+  grow([x, 0.8, z], [r(-0.08, 0.08), 1, r(-0.08, 0.08)], 2.3, 0.2, 2);
+  // canopy: lumpy leaf clusters with glowing speckles, plus a few hanging fruit
+  for (const t of tips) {
+    g.blob(pT(PM.a, t[0], t[1] + 0.15, t[2], r(0, TAU)), r(0.6, 0.85), r(0.45, 0.6), r(0.6, 0.85), 0.42, r(0, 99), leaf, 3.6, 14, 14, 10, 1);
+    for (let i = 0; i < 2; i++) { const a = r(0, TAU); g.blob(pT(PM.a, t[0] + Math.cos(a) * 0.6, t[1] + r(-0.25, 0.3), t[2] + Math.sin(a) * 0.6, r(0, TAU)), r(0.32, 0.48), r(0.28, 0.4), r(0.32, 0.48), 0.45, r(0, 99), leaf, 3.6, 14, 10, 7, 1); }
+  }
+  for (let i = 0; i < 4; i++) { const t = tips[Math.floor(R() * tips.length)]; const fx = t[0] + r(-0.6, 0.6), fz = t[2] + r(-0.6, 0.6), fy = t[1] - r(0.5, 0.9);
+    g.tube([[fx, t[1] - 0.1, fz], [fx, fy + 0.1, fz]], [0.008, 0.008], DARK, 0, 0, 3, false); g.sphere(M4.trs(PM.a, fx, fy, fz, 0, 0, 0, 0.16, 0.2, 0.16), col, 3.2, 0, 8, 6); }
+  WORLD.halos.push({ p: [x, 4.2, z], s: 3.2, c: [col[0] * 0.25, col[1] * 0.25, col[2] * 0.25] });
+  WORLD.circles.push({ x, z, r: 1.45, h: 0.86 }, { x, z, r: 0.3, h: 5 });
+}
+
+/* ---------- park bench: bent steel frame, wooden slats. face: '+z' '-z' '+x' '-x' (direction a sitter looks) ---------- */
+function propBench(g, R, x, z, face, len = 1.9) {
+  const ry = { '+z': 0, '-z': Math.PI, '+x': Math.PI / 2, '-x': -Math.PI / 2 }[face];
+  const P = pT(M4.create(), x, 0, z, ry), wood = [0.27 + R() * 0.05, 0.15, 0.08], frame = [0.07, 0.07, 0.08], h = len / 2;
+  for (const sx of [-h + 0.14, h - 0.14]) {
+    const path = [[sx, 0.02, 0.24], [sx, 0.42, 0.22], [sx, 0.44, 0.1], [sx, 0.45, -0.18], [sx, 0.55, -0.26], [sx, 0.92, -0.33]].map(p => pPt(P, ...p));
+    g.tube(path, [0.028, 0.028, 0.028, 0.028, 0.028, 0.025], frame, 0, 4, 6, true);
+    g.tube([[sx, 0.45, -0.18], [sx, 0.2, -0.22], [sx, 0.02, -0.26]].map(p => pPt(P, ...p)), [0.026, 0.026, 0.026], frame, 0, 4, 6, true);
+    g.rbox(pChild(P, sx, 0.012, 0), 0.1, 0.024, 0.62, 0.01, frame, 0, 4, 1);
+    // armrest
+    g.tube([[sx, 0.45, 0.12], [sx, 0.66, 0.1], [sx, 0.68, -0.12], [sx, 0.6, -0.22]].map(p => pPt(P, ...p)), [0.022, 0.022, 0.022, 0.022], frame, 0, 4, 6, true);
+  }
+  for (let i = 0; i < 5; i++) g.rbox(pChild(P, 0, 0.475, 0.19 - i * 0.092), len, 0.04, 0.078, 0.014, wood, 0, 13, 1);
+  for (let i = 0; i < 3; i++) g.rbox(pChild(P, 0, 0.62 + i * 0.11, -0.25 - i * 0.025, 0, -0.22), len, 0.04, 0.09, 0.014, wood, 0, 13, 1);
+  pFoot(x, z, ry, -h, h, -0.2, 0.25, 0.52);          // seat: stand on it
+  pFoot(x, z, ry, -h, h, -0.36, -0.2, 0.95);         // backrest: stops you walking off the back
+}
+
+/* ---------- litter bin ---------- */
+function propBin(g, R, x, z, col = [0.08, 0.12, 0.1]) {
+  g.lathe(pT(PM.a, x, 0, z), [[0.22, 0], [0.26, 0.05], [0.28, 0.8], [0.3, 0.82], [0.3, 0.86], [0.26, 0.86], [0.26, 0.86, [0.02, 0.02, 0.02]], [0, 0.84, [0.02, 0.02, 0.02]]], col, 0, 15, 16, false, false);
+  g.ring(M4.trs(PM.a, x, 0.7, z, 0, 0, 0, 1, 1, 1), NEON.lime, 1.4, 0, 0.285, 0.008, 24, 3);
+  WORLD.circles.push({ x, z, r: 0.3, h: 0.86 });
+}
+
+/* ---------- street lamp: turned post, collar, blade head with diffuser ---------- */
+function propLamp(g, x, z) {
+  g.lathe(pT(PM.a, x, 0, z), [[0.24, 0], [0.24, 0.12], [0.16, 0.2], [0.1, 0.55], [0.085, 5.8], [0.1, 5.85], [0.1, 6.0], [0.075, 6.05], [0.065, 6.95], [0.1, 7.0]], [0.09, 0.09, 0.11], 0, 4, 12, true, false);
+  g.rbox(pT(PM.a, x, 7.05, z), 1.7, 0.18, 0.46, 0.08, [0.08, 0.08, 0.1], 0, 4, 2);
+  g.rbox(pT(PM.a, x, 6.94, z), 1.46, 0.04, 0.32, 0.02, [0.8, 0.95, 1.0], 4, 0, 1);
+  g.rbox(pT(PM.a, x, 7.16, z), 0.5, 0.06, 0.2, 0.03, NEON.cyan, 1.5, 0, 1);
+  WORLD.circles.push({ x, z, r: 0.25, h: 7 });
+  WORLD.lights.push({ p: [x, 6.4, z], r: 20, c: [1.2, 1.5, 2.0], kind: 'lamp' });
+  WORLD.halos.push({ p: [x, 6.8, z], s: 2.6, c: [-1, 0, 0] });
+}
+
+/* ---------- jersey barrier: cast profile, reflector strips ---------- */
+function propBarrier(g, x, z, rot) {
+  const prof = [[-0.35, 0], [0.35, 0], [0.34, 0.07], [0.13, 0.3], [0.1, 0.98], [0.08, 1.0], [-0.08, 1.0], [-0.1, 0.98], [-0.13, 0.3], [-0.34, 0.07]];
+  const m = pT(PM.a, x, 0, z, rot ? 0 : Math.PI / 2);
+  g.extrude(m, prof, 3.16, CONC, 0, 16);
+  for (const sx of [-1, 1]) g.rbox(pChild(pT(M4.create(), x, 0, z, rot ? 0 : Math.PI / 2), sx * 0.113, 0.74, 0, 0, sx * 0.03), 0.012, 0.1, 2.9, 0.004, NEON.amber, 1.8, 0, 1);
+  const sx = rot ? 0.7 : 3.2, sz = rot ? 3.2 : 0.7;
+  WORLD.boxes.push({ x0: x - sx / 2, x1: x + sx / 2, y0: 0, y1: 1.0, z0: z - sz / 2, z1: z + sz / 2 });
+}
+
+/* ---------- vending machine: glass front with lit product rows ---------- */
+function propVend(g, R, x, z, fx, fz, c) {
+  const P = pT(M4.create(), x, 0, z, Math.atan2(fx, fz)), body = [0.11, 0.11, 0.13];
+  // shell with a recessed display window on the left and a control column on the right
+  g.rbox(pChild(P, 0, 1.1, -0.08), 1.18, 2.2, 0.72, 0.05, body, 0, 4, 2);
+  g.rbox(pChild(P, 0.41, 1.1, 0.36), 0.36, 2.2, 0.18, 0.03, body, 0, 4, 1);
+  g.rbox(pChild(P, -0.56, 1.1, 0.36), 0.06, 2.2, 0.18, 0.02, body, 0, 4, 1);
+  g.rbox(pChild(P, -0.15, 2.1, 0.36), 0.76, 0.2, 0.18, 0.02, body, 0, 4, 1);
+  g.rbox(pChild(P, -0.15, 0.26, 0.36), 0.76, 0.52, 0.18, 0.02, body, 0, 4, 1);
+  g.rbox(pChild(P, -0.15, 1.3, 0.29), 0.76, 1.5, 0.02, 0.005, [0.5, 0.5, 0.55], 0.5, 15, 1);   // lit back wall
+  for (let row = 0; row < 5; row++) {
+    g.rbox(pChild(P, -0.15, 0.6 + row * 0.28, 0.36), 0.76, 0.02, 0.14, 0.006, [0.3, 0.3, 0.32], 0.3, 4, 1);   // shelf
+    for (let i = 0; i < 5; i++) { const pc = [0.3 + R() * 0.7, 0.2 + R() * 0.6, 0.2 + R() * 0.7]; g.rbox(pChild(P, -0.45 + i * 0.15, 0.7 + row * 0.28, 0.36), 0.1, 0.17, 0.08, 0.01, pc, 0.4 + R() * 0.6, 15, 1); }
+  }
+  for (const [fx0, fy0, fw, fh] of [[-0.15, 2.02, 0.8, 0.04], [-0.15, 0.54, 0.8, 0.04], [-0.54, 1.28, 0.03, 1.5], [0.24, 1.28, 0.03, 1.5]]) g.rbox(pChild(P, fx0, fy0, 0.45), fw, fh, 0.03, 0.01, [0.2, 0.2, 0.22], 0, 4, 1);
+  g.rbox(pChild(P, 0.41, 1.45, 0.455), 0.24, 0.46, 0.02, 0.01, c, 1.8, 0, 1);                       // lit panel
+  for (let i = 0; i < 4; i++) g.rbox(pChild(P, 0.41, 1.08 - i * 0.07, 0.455), 0.14, 0.04, 0.02, 0.008, [0.9, 0.9, 0.9], i === 0 ? 2.4 : 0.6, 0, 1);
+  g.rbox(pChild(P, -0.15, 0.3, 0.455), 0.6, 0.18, 0.02, 0.02, [0.01, 0.01, 0.01], 0, 4, 1);         // pickup slot
+  for (const sx of [-0.59, 0.59]) g.rbox(pChild(P, sx, 1.1, 0.3), 0.02, 2.1, 0.03, 0.008, c, 2.4, 0, 1);
+  WORLD.boxes.push({ x0: x - 0.6, x1: x + 0.6, y0: 0, y1: 2.2, z0: z - 0.6, z1: z + 0.6 });
+}
+
+/* ---------- district props ---------- */
+function propDumpster(g, R, x, z, ry, solid) {
+  const c = R() < 0.5 ? [0.06, 0.14, 0.09] : [0.07, 0.09, 0.16], P = pT(M4.create(), x, 0, z, ry);
+  g.rbox(pChild(P, 0, 0.72, 0), 1.9, 1.16, 1.12, 0.07, c, 0, 8, 2, [1.06, 1.1]);
+  g.rbox(pChild(P, 0, 1.36, -0.05, 0, -0.18), 2.04, 0.06, 1.26, 0.025, [0.04, 0.04, 0.05], 0, 15, 1);
+  for (const sx of [-1.02, 1.02]) g.rbox(pChild(P, sx, 0.95, 0), 0.08, 0.1, 0.9, 0.02, [0.05, 0.05, 0.05], 0, 4, 1);
+  for (const sx of [-0.8, 0.8]) for (const sz of [-0.42, 0.42]) g.lathe(pChild(P, sx, 0.07, sz, 0, 0, Math.PI / 2), [[0.08, -0.03], [0.08, 0.03]], [0.02, 0.02, 0.02], 0, 15, 10, true, true);
+  const hx = Math.abs(Math.cos(ry)) > 0.5 ? 1.0 : 0.62, hz = Math.abs(Math.cos(ry)) > 0.5 ? 0.62 : 1.0;
+  solid(x - hx, x + hx, 0, 1.3, z - hz, z + hz);
+  for (let i = 0; i < 4; i++) g.blob(pT(PM.a, x + (R() - 0.5) * 2.8, 0.26, z + (R() - 0.5) * 2.8, R() * 6), 0.34 + R() * 0.12, 0.28, 0.32, 0.18, R() * 99, [0.025, 0.025, 0.03], 0, 15, 10, 6);
+}
+function propCrate(g, x, y, z, s, ry) {
+  const P = pT(M4.create(), x, y, z, ry), wood = [0.24, 0.16, 0.08], edge = [0.17, 0.11, 0.06], t = 0.07, h = s / 2 - t / 2;
+  g.rbox(P, s - 0.04, s - 0.04, s - 0.04, 0.02, wood, 0, 13, 1);
+  for (const a of [-h, h]) for (const b of [-h, h]) {
+    g.rbox(pChild(P, 0, a, b), s, t, t, 0.012, edge, 0, 13, 1);
+    g.rbox(pChild(P, a, 0, b), t, s, t, 0.012, edge, 0, 13, 1);
+    g.rbox(pChild(P, a, b, 0), t, t, s, 0.012, edge, 0, 13, 1);
+  }
+}
+function propCrates(g, R, x, z, solid) {
+  for (let i = 0; i < 3; i++) { const s = 0.8 + R() * 0.3; propCrate(g, x + (i % 2) * 1.0, s / 2 + (i === 2 ? 1.0 : 0), z + (i === 1 ? 0.2 : 0), s, (R() - 0.5) * 0.4); }
+  solid(x - 0.55, x + 1.55, 0, 1.2, z - 0.55, z + 0.75);
+}
+function propBurnBarrel(g, x, z) {
+  const rust = [0.16, 0.08, 0.045];
+  g.lathe(pT(PM.a, x, 0, z), [[0.3, 0], [0.33, 0.03], [0.33, 0.28], [0.345, 0.3], [0.33, 0.32], [0.33, 0.66], [0.345, 0.68], [0.33, 0.7], [0.33, 0.97], [0.35, 1.0], [0.31, 1.0], [0.31, 1.0, [0.02, 0.01, 0.005]], [0.0, 0.92, [0.3, 0.1, 0.02], 1.5]], rust, 0, 8, 20, false, false);
+  for (let i = 0; i < 7; i++) { const a = i / 7 * TAU; g.rbox(pT(PM.a, x + Math.cos(a) * 0.335, 0.16 + (i % 2) * 0.06, z + Math.sin(a) * 0.335, -a), 0.02, 0.05, 0.05, 0.01, [1.0, 0.45, 0.1], 3.2, 0, 1); }
+  WORLD.circles.push({ x, z, r: 0.45, h: 1.0 });
+  WORLD.fires.push({ x, y: 1.0, z }); WORLD.halos.push({ p: [x, 1.5, z], s: 2.4, c: [0.9, 0.4, 0.08] });
+}
+// market food cart with a round table and stools around it
+function propFoodCart(g, R, x, z, awningCol, solid) {
+  const P = pT(M4.create(), x, 0, z);
+  g.rbox(pChild(P, 0, 0.72, 0), 2.2, 0.96, 1.2, 0.08, [0.22, 0.22, 0.24], 0, 4, 2);
+  g.rbox(pChild(P, 0, 1.24, 0), 2.32, 0.08, 1.32, 0.035, [0.14, 0.14, 0.15], 0, 4, 1);
+  g.rbox(pChild(P, 0, 0.8, 0.61), 1.6, 0.42, 0.02, 0.01, awningCol, 1.4, 0, 1);                        // lit menu board
+  for (const sx of [-0.8, 0.8]) g.lathe(pChild(P, sx, 0.2, -0.62, 0, 0, Math.PI / 2), [[0.2, -0.05], [0.2, 0.05]], [0.03, 0.03, 0.03], 0, 15, 14, true, true);
+  g.lathe(pChild(P, 0.6, 1.28, -0.3), [[0.2, 0], [0.22, 0.02], [0.22, 0.22], [0.2, 0.24]], [0.3, 0.3, 0.32], 0, 4, 14, true, false);   // stock pot
+  g.cyl(M4.trs(PM.a, x, 1.9, z, 0, 0, 0, 0.06, 1.3, 0.06), [0.1, 0.1, 0.1], 0, 4, 6);
+  g.lathe(pT(PM.a, x, 2.45, z), [[1.5, 0], [1.48, 0.04], [0.02, 0.5]], awningCol, 0.3, 15, 16, false, false);
+  g.lathe(pT(PM.a, x, 2.44, z), [[0.02, 0.49], [1.47, 0.03]], [awningCol[0] * 0.5, awningCol[1] * 0.5, awningCol[2] * 0.5], 0.5, 15, 16, false, false);   // underside
+  solid(x - 1.15, x + 1.15, 0, 1.3, z - 0.65, z + 0.65); WORLD.steam.push([x + 0.6, 1.4, z]);
+  WORLD.lights.push({ p: [x, 2.2, z], r: 8, c: [1.8, 0.9, 0.4], shop: true });
+  for (let k = 0; k < 2; k++) {
+    const tx = x + (R() - 0.5) * 8, tz = z + (k ? 4.5 : -4.5);
+    g.lathe(pT(PM.a, tx, 0, tz), [[0.3, 0], [0.3, 0.03], [0.06, 0.06], [0.05, 0.72], [0.55, 0.74], [0.55, 0.78], [0.5, 0.8]], [0.1, 0.1, 0.11], 0, 4, 16, true, false);
+    g.cyl(M4.trs(PM.a, tx, 0.795, tz, 0, 0, 0, 1.12, 0.03, 1.12), [0.3, 0.2, 0.11], 0, 13, 20);
+    WORLD.circles.push({ x: tx, z: tz, r: 0.55, h: 0.8 });
+    for (let s = 0; s < 3; s++) {
+      const a = s / 3 * TAU + R(), sx = tx + Math.cos(a) * 0.95, sz = tz + Math.sin(a) * 0.95;
+      g.lathe(pT(PM.a, sx, 0, sz), [[0.16, 0], [0.16, 0.02], [0.03, 0.04], [0.03, 0.43], [0.19, 0.44], [0.19, 0.48], [0.17, 0.49]], [0.1, 0.1, 0.11], 0, 4, 12, true, false);
+      g.cyl(M4.trs(PM.a, sx, 0.49, sz, 0, 0, 0, 0.36, 0.03, 0.36), [0.35, 0.08, 0.06], 0, 15, 12);
+      WORLD.circles.push({ x: sx, z: sz, r: 0.19, h: 0.5 });
+    }
+  }
 }
 
 /* ============================================================
@@ -1012,6 +1390,7 @@ const AUD = {
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
   hit(head, pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o); this.tone('sine', 120, 50, 0.12, 0.35, o); if (head) { this.tone('sine', 1650, 1600, 0.25, 0.14, o); this.tone('sine', 2475, 2450, 0.18, 0.06, o); } },
   thunk() { if (!this.ctx) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2); this.tone('triangle', 300, 120, 0.06, 0.1); },
+  land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
   kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04); this.tone('square', 990, 990, 0.08, 0.04, this.sfx, this.now() + 0.05); },
   explode(dist) {
     if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);
@@ -1456,53 +1835,26 @@ function buildCity() {
   g.cyl(M4.trs(M, 0, 1.4, 0, 0, 0, 0, 1.4, 1.2, 1.4), [0.08, 0.08, 0.1], 0, 4, 16);
   WORLD.circles.push({ x: 0, z: 0, r: 4.3, h: 1.0 }, { x: 0, z: 0, r: 0.8, h: 2.1 });
   WORLD.lights.push({ p: [0, 3.5, 0], r: 18, c: [0.4, 1.6, 2.2], kind: 'fountain' });
-  // crashed hover-cars
-  function hoverCar(x, z, ry, c) {
-    const m = M4.trs(M4.create(), x, 0, z, 0.06, ry, 0.08, 1, 1, 1);
-    const part = (px, py, pz, sx, sy, sz, cc, e = 0, mt = 0) => { M4.trs(_t4b, px, py, pz, 0, 0, 0, sx, sy, sz); M4.mul(_t4c, m, _t4b); g.box(_t4c, cc, e, mt); };
-    part(0, 0.75, 0, 2.3, 0.8, 4.8, c, 0, 4); part(0, 1.35, -0.3, 1.9, 0.55, 2.4, [0.05, 0.1, 0.15], 0.6); part(0, 0.3, 0, 2.0, 0.2, 4.2, NEON.cyan, 1.5);
-    part(-0.8, 0.85, 2.42, 0.5, 0.18, 0.05, NEON.red, 4); part(0.8, 0.85, 2.42, 0.5, 0.18, 0.05, NEON.red, 4);
-    part(-0.8, 0.85, -2.42, 0.5, 0.14, 0.05, [1, 0.95, 0.85], 3); part(0.8, 0.85, -2.42, 0.5, 0.14, 0.05, [1, 0.95, 0.85], 3);
-    const s = Math.sin(ry), co = Math.cos(ry);
-    WORLD.circles.push({ x: x + s * 1.3, z: z + co * 1.3, r: 1.3, h: 1.7 }, { x: x - s * 1.3, z: z - co * 1.3, r: 1.3, h: 1.7 });
-  }
-  hoverCar(15, -17, 0.55, [0.25, 0.05, 0.12]);
-  hoverCar(-21, 12, -1.1, [0.05, 0.12, 0.22]);
-  hoverCar(24, 22, 2.2, [0.18, 0.18, 0.2]);
+  // crashed hover-cars (props.js)
+  propHoverCar(g, R, 15, -17, 0.55, [0.25, 0.05, 0.12], 1);
+  propHoverCar(g, R, -21, 12, -1.1, [0.05, 0.12, 0.22], 0);
+  propHoverCar(g, R, 24, 22, 2.2, [0.18, 0.18, 0.2], 2);
   // jersey barriers
-  function barrier(x, z, rot) {
-    const sx = rot ? 0.7 : 3.2, sz = rot ? 3.2 : 0.7;
-    B(x, 0.5, z, sx, 1.0, sz, [0.16, 0.16, 0.18], 0, 4);
-    B(x, 0.75, z, sx + 0.04, 0.12, sz + 0.04, NEON.amber, 1.8);
-    WORLD.boxes.push({ x0: x - sx / 2, x1: x + sx / 2, y0: 0, y1: 1.0, z0: z - sz / 2, z1: z + sz / 2 });
-  }
+  function barrier(x, z, rot) { propBarrier(g, x, z, rot); }
   barrier(-9, 24, 0); barrier(-5.5, 24.6, 0); barrier(11, -26, 0); barrier(27, 5, 1); barrier(-28, -9, 1); barrier(-5, -30, 0); barrier(6, 30, 0); barrier(30, -12, 1);
   // vending machines / kiosks
-  function vend(x, z, ry, c) {
-    B(x, 1.1, z, ry ? 0.9 : 1.2, 2.2, ry ? 1.2 : 0.9, metal, 0, 4);
-    const off = 0.46; const fx = ry === 0 ? 0 : ry > 0 ? off : -off, fz = ry === 0 ? -off * Math.sign(z) : 0;
-    B(x + fx, 1.3, z + fz, ry ? 0.04 : 1.0, 1.4, ry ? 1.0 : 0.04, c, 1.6);
-    WORLD.boxes.push({ x0: x - 0.6, x1: x + 0.6, y0: 0, y1: 2.2, z0: z - 0.6, z1: z + 0.6 });
-  }
+  function vend(x, z, ry, c) { const fx = ry === 0 ? 0 : ry > 0 ? 1 : -1, fz = ry === 0 ? -Math.sign(z) : 0; propVend(g, R, x, z, fx, fz, c); }
   vend(-14, 38.8, 0, NEON.cyan); vend(-12.6, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
-  // bioluminescent trees in planters
-  function tree(x, z, c) {
-    g.cyl(M4.trs(M, x, 0.4, z, 0, 0, 0, 2.6, 0.8, 2.6), [0.1, 0.1, 0.12], 0, 4, 16);
-    g.cyl(M4.trs(M, x, 2.2, z, 0, 0, 0.05, 0.3, 3.6, 0.3), [0.12, 0.08, 0.08], 0, 0, 8);
-    for (let i = 0; i < 7; i++) { const a = i / 7 * TAU; g.sphere(M4.trs(M, x + Math.cos(a) * r(0.4, 1.1), r(3.4, 4.6), z + Math.sin(a) * r(0.4, 1.1), 0, 0, 0, r(1.0, 1.6), r(0.9, 1.3), r(1.0, 1.6)), [c[0] * 0.3, c[1] * 0.3, c[2] * 0.3], 3.6, 0, 8, 6); }
-    WORLD.circles.push({ x, z, r: 1.35, h: 5 });
-  }
+  // bioluminescent trees in planters (props.js)
+  const tree = (x, z, c) => propTree(g, R, x, z, c);
   tree(-17, -19, NEON.cyan); tree(18, 16, NEON.mag); tree(-26, 26, NEON.violet); tree(28, -27, NEON.cyan);
   // street lamps
-  function lamp(x, z) {
-    B(x, 3.5, z, 0.22, 7, 0.22, [0.1, 0.1, 0.12], 0, 4);
-    B(x, 7, z, 1.6, 0.25, 0.4, [0.1, 0.1, 0.12], 0, 4);
-    B(x, 6.85, z, 1.4, 0.06, 0.3, [0.8, 0.95, 1.0], 4);
-    WORLD.circles.push({ x, z, r: 0.25, h: 7 });
-    WORLD.lights.push({ p: [x, 6.4, z], r: 20, c: [1.2, 1.5, 2.0], kind: 'lamp' });
-    WORLD.halos.push({ p: [x, 6.8, z], s: 2.6, c: [-1, 0, 0] });
-  }
+  function lamp(x, z) { propLamp(g, x, z); }
   lamp(-32, -32); lamp(32, 32); lamp(-32, 32); lamp(32, -32);
+  // benches facing the fountain, with bins between them
+  for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
+  propBench(g, R, 12.5, -3.4, '-x');
+  for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
   // holo barriers across the 4 street mouths
   const holoTex = (function () {
     const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const x = cv.getContext('2d');
@@ -1649,22 +2001,10 @@ function buildDistricts(C) {
     WORLD.lights.push({ p: [x, 11.6, z], r: 24, c: [1.5, 1.5, 1.6], kind: 'lamp' });
     WORLD.halos.push({ p: [x, 11.85, z], s: 3.4, c: [-1, 0, 0] });
   }
-  function burnBarrel(x, z) {
-    B(x, 0.5, z, 0.7, 1.0, 0.7, [0.14, 0.08, 0.05], 0, 8);
-    WORLD.circles.push({ x, z, r: 0.45, h: 1.0 });
-    WORLD.fires.push({ x, y: 1.0, z }); WORLD.halos.push({ p: [x, 1.5, z], s: 2.4, c: [0.9, 0.4, 0.08] });
-  }
-  function dumpster(x, z, ry) {
-    const c = R() < 0.5 ? [0.06, 0.14, 0.09] : [0.07, 0.09, 0.16];
-    B(x, 0.65, z, 1.9, 1.3, 1.15, c, 0, 8, ry); B(x, 1.34, z, 2.0, 0.08, 1.25, [0.04, 0.04, 0.05], 0, 4, ry + 0.02);
-    const hx = Math.abs(Math.cos(ry)) > 0.5 ? 1.0 : 0.62, hz = Math.abs(Math.cos(ry)) > 0.5 ? 0.62 : 1.0;
-    solid(x - hx, x + hx, 0, 1.3, z - hz, z + hz);
-    for (let i = 0; i < 3; i++) C.getG().sphere(M4.trs(M, x + r(-1.4, 1.4), 0.28, z + r(-1.4, 1.4), 0, r(0, 3), 0, r(0.5, 0.8), r(0.45, 0.6), r(0.5, 0.8)), [0.03, 0.03, 0.035], 0, 0, 8, 6);
-  }
-  function crates(x, z) {
-    for (let i = 0; i < 3; i++) { const s = r(0.8, 1.1); B(x + (i % 2) * 1.0, s / 2 + (i === 2 ? 1.0 : 0), z + (i === 1 ? 0.2 : 0), s, s, s, [0.22, 0.15, 0.08], 0, 8, r(-0.2, 0.2)); }
-    solid(x - 0.55, x + 1.55, 0, 1.2, z - 0.55, z + 0.75);
-  }
+  const burnBarrel = (x, z) => propBurnBarrel(C.getG(), x, z);
+  const dumpster = (x, z, ry) => propDumpster(C.getG(), R, x, z, ry, solid);
+  const crates = (x, z) => propCrates(C.getG(), R, x, z, solid);
+  const bench = (x, z, face, len) => propBench(C.getG(), R, x, z, face, len);
 
   /* ---------------- RAIL YARD (north) ---------------- */
   setG('near');
@@ -1695,6 +2035,7 @@ function buildDistricts(C) {
   flood(-20, -95); flood(20, -122); flood(20, -80);
   barrier(-4, -90, 0); barrier(12, -104, 1); barrier(-18, -122, 0);
   crates(14, -97); crates(-24, -110);
+  bench(-6, -77, '+z'); bench(16, -77, '+z');
   // yard signage
   addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), 0, 9, -74.3, Math.PI, 12, 3, [1.3, 1.3, 1.3], 0, true);
   WORLD.supplies.push({ kind: 'terminal', x: -22, z: -79, ry: 0.4, d: 'yard' }, { kind: 'cache', x: 25, z: -104, d: 'yard' }, { kind: 'cache', x: -12, z: -135, d: 'yard' });
@@ -1726,14 +2067,9 @@ function buildDistricts(C) {
   }
   for (let x = 82; x <= 134; x += 6.5) cable(x, 5.2, -12.4, x + 1.5, 5.4, 12.4, 1.2, true, R() < 0.5 ? [1, 0.25, 0.1] : [1, 0.6, 0.15]);
   // food carts + tables in the central lane
-  for (const [x, z] of [[88, -4], [104, 5], [121, -6], [131, 4]]) {
-    B(x, 0.7, z, 2.2, 1.0, 1.2, [0.2, 0.2, 0.22], 0, 4); B(x, 1.25, z, 2.3, 0.1, 1.3, [0.12, 0.12, 0.13], 0, 4);
-    C.getG().cyl(M4.trs(M, x, 1.9, z, 0, 0, 0, 0.06, 1.3, 0.06), [0.1, 0.1, 0.1], 0, 4, 6);
-    C.getG().cyl(M4.trs(M, x, 2.7, z, 0, 0, 0, 3.0, 0.5, 3.0), awn[Math.floor(R() * awn.length)], 0.3, 0, 12, 0.02, 0.5, true);
-    solid(x - 1.15, x + 1.15, 0, 1.3, z - 0.65, z + 0.65); WORLD.steam.push([x + 0.6, 1.4, z]);
-    WORLD.lights.push({ p: [x, 2.2, z], r: 8, c: [1.8, 0.9, 0.4], shop: true });
-    for (let k = 0; k < 2; k++) { const tx = x + r(-4, 4), tz = z + (k ? 4.5 : -4.5); C.getG().cyl(M4.trs(M, tx, 0.38, tz, 0, 0, 0, 1.1, 0.06, 1.1), [0.15, 0.14, 0.13], 0, 4, 12); C.getG().cyl(M4.trs(M, tx, 0.2, tz, 0, 0, 0, 0.12, 0.38, 0.12), [0.1, 0.1, 0.1], 0, 4, 6); WORLD.circles.push({ x: tx, z: tz, r: 0.55, h: 0.8 }); }
-  }
+  for (const [x, z] of [[88, -4], [104, 5], [121, -6], [131, 4]]) propFoodCart(C.getG(), R, x, z, awn[Math.floor(R() * awn.length)], solid);
+  for (const x of [84, 110, 127]) bench(x, -11.2, '+z');
+  for (const x of [93, 116]) bench(x, 11.2, '-z');
   // entrance arch
   for (const az of [-6.5, 6.5]) { B(76, 3.5, az, 0.5, 7, 0.5, [0.25, 0.05, 0.05], 0, 4); WORLD.circles.push({ x: 76, z: az, r: 0.35, h: 7 }); }
   B(76, 7.2, 0, 0.6, 0.5, 14.5, [0.25, 0.05, 0.05], 0, 4);
@@ -1764,6 +2100,7 @@ function buildDistricts(C) {
   cable(-110, 7, 1.5, -94, 7.5, -1.5, 1, true, [0.9, 0.2, 0.6]);
   for (const [x, z] of [[-113, -4], [-135, 22], [-90, 18], [-113, 30], [-128, -30]]) { B(x, 3.6, z, 0.18, 0.18, 0.9, [0.1, 0.1, 0.1], 0, 4); B(x, 3.5, z, 0.5, 0.1, 0.5, [1, 0.8, 0.55], 3.5); WORLD.halos.push({ p: [x, 3.45, z], s: 1.6, c: [0.6, 0.42, 0.22] }); WORLD.lights.push({ p: [x, 3.2, z], r: 11, c: [1.6, 1.1, 0.55], shop: true }); }
   lamp(-80, -20); lamp(-88, 22);
+  bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 
 }
@@ -2241,7 +2578,7 @@ function spawnZombie(type, x, z, wave) {
 /* -------- collision helpers -------- */
 function pushOutCircle(o, rad) {
   for (const b of WORLD.boxes) {
-    if (o.y > b.y1) continue;
+    if (o.y > b.y1 - 0.02) continue;   // standing on top of it
     const cx = clamp(o.x, b.x0, b.x1), cz = clamp(o.z, b.z0, b.z1);
     const dx = o.x - cx, dz = o.z - cz, d2 = dx * dx + dz * dz;
     if (d2 < rad * rad) {
@@ -2253,7 +2590,7 @@ function pushOutCircle(o, rad) {
     }
   }
   for (const c of WORLD.circles) {
-    if (o.y > c.h) continue;
+    if (o.y > c.h - 0.02) continue;
     const dx = o.x - c.x, dz = o.z - c.z, d2 = dx * dx + dz * dz, R = rad + c.r;
     if (d2 < R * R && d2 > 1e-8) { const d = Math.sqrt(d2), k = (R - d) / d; o.x += dx * k; o.z += dz * k; }
   }
@@ -3563,6 +3900,22 @@ function updateProjectiles(dt) {
     }
   }
 }
+/* height of the highest walkable top under a footprint of radius rad. Only tops you are already level
+   with (or just below, so a jump that clips an edge still lands) count; taller things stay walls. */
+function groundAt(x, z, y, rad) {
+  let h = 0; const lim = y + 0.32;
+  for (const b of WORLD.boxes) {
+    if (b.y1 > lim || b.y1 > 2.5 || b.y1 <= h) continue;
+    if (x + rad < b.x0 || x - rad > b.x1 || z + rad < b.z0 || z - rad > b.z1) continue;
+    h = b.y1;
+  }
+  for (const c of WORLD.circles) {
+    if (c.h > lim || c.h > 2.5 || c.h <= h) continue;
+    const dx = x - c.x, dz = z - c.z, R = c.r + rad * 0.5;
+    if (dx * dx + dz * dz < R * R) h = c.h;
+  }
+  return h;
+}
 /* ray vs static world (boxes + cylinders); returns distance or null */
 function rayWorld(ox, oy, oz, dx, dy, dz, maxD) {
   const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
@@ -3913,7 +4266,11 @@ function updatePlayer(dt) {
   P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
   P.x += P.vx * dt; P.z += P.vz * dt;
   if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
-  P.vy -= 20 * dt; P.y += P.vy * dt; if (P.y <= 0) { P.y = 0; P.vy = 0; P.grounded = true; }
+  P.vy -= 20 * dt; P.y += P.vy * dt;
+  // land on whatever is under your feet: benches, planters, barriers, the fountain rim
+  const gy = groundAt(P.x, P.z, P.y, 0.26);
+  if (P.y <= gy && P.vy <= 0) { if (!P.grounded && P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); P.y = gy; P.vy = 0; P.grounded = true; }
+  else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
   const hs = Math.hypot(P.vx, P.vz);
