@@ -3180,16 +3180,31 @@ function renderReflection(r) {
 }
 
 /* ---------------- post: passes ---------------- */
+// Anti-aliasing lives in its own multisampled target that is copied into the (plain) composer buffer:
+// some GPUs (ANGLE / D3D) output pure black when the bloom pass writes back into a multisampled buffer.
+let msRT = null;
+const copyMat = new THREE.ShaderMaterial({ uniforms: { tDiffuse: { value: null } }, depthTest: false, depthWrite: false,
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }`,
+  fragmentShader: `varying vec2 vUv; uniform sampler2D tDiffuse; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }` });
+const copyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copyMat); copyQuad.frustumCulled = false;
+const copyScene = new THREE.Scene(); copyScene.add(copyQuad); const copyCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 class ScenePass extends Pass {
   constructor(cam, first) { super(); this.cam = cam; this.first = first; this.needsSwap = false; }
   render(r, writeBuffer, readBuffer) {
-    r.setRenderTarget(this.renderToScreen ? null : readBuffer);
+    const out = this.renderToScreen ? null : readBuffer;
     if (this.first) {
       if (SETTINGS.quality >= 1 && THEME.wet > 0.2) renderReflection(r); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; }
-      r.setRenderTarget(this.renderToScreen ? null : readBuffer);
+      const tgt = msRT || out;
+      r.setRenderTarget(tgt);
       const f = THEME.fog; r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false); renderer.shadowMap.needsUpdate = true;
+      r.render(scene, this.cam);
+      if (msRT) {
+        if (this.withVM) { r.clearDepth(); r.render(scene, vmCamera); }
+        copyMat.uniforms.tDiffuse.value = msRT.texture; r.setRenderTarget(out); r.render(copyScene, copyCam);
+      }
+      return;
     }
-    else r.clearDepth();
+    r.setRenderTarget(out); r.clearDepth();
     r.render(scene, this.cam);
   }
 }
@@ -3225,7 +3240,9 @@ void main(){
 let composer = null, worldPass, gtaoPass, vmPass, bloomPass, gradePass;
 function buildComposer(W, H, q) {
   if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); if (gtaoPass) gtaoPass.dispose(); bloomPass.dispose(); }
-  const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: q >= 1 ? 4 : 0 });
+  if (msRT) { msRT.dispose(); msRT = null; }
+  if (q >= 1) msRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: 4 });
+  const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType });
   composer = new EffectComposer(renderer, rt); composer.setPixelRatio(1);
   worldPass = new ScenePass(camera, true); composer.addPass(worldPass);
   gtaoPass = null;
@@ -3244,7 +3261,7 @@ function applyQuality3(q) {
 /* ---------------- per-frame sync + render ---------------- */
 function render3(time, W, H, fov, cam) {
   if (!composer || R3.quality !== SETTINGS.quality) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
-  if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); R3.W = W; R3.H = H; }
+  if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); if (msRT) msRT.setSize(W, H); R3.W = W; R3.H = H; }
   if (canvas.width !== W || canvas.height !== H) renderer.setSize(W, H, false);
   // cameras
   camera.matrixWorld.fromArray(camM); camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
@@ -3273,7 +3290,9 @@ function render3(time, W, H, fov, cam) {
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H);
   bloomPass.strength = T.bloom * (T.bloomK || 0.32); bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
-  vmPass.enabled = VM_ITEMS.n > 0 && !DBG.noVM;
+  const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
+  worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
+  vmPass.enabled = vmOn && !worldPass.withVM;
   composer.render();
 }
 
