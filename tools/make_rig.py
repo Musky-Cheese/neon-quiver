@@ -1,5 +1,6 @@
 # Neon Quiver — rig + animate the zombie in Blender and export models/zombie.glb
-# Run in Blender's Python console (after make_models.py has written models/*.json):
+# Run in Blender's Python console (after make_models.py has written tools/sculpts/*.json),
+# then shrink it for the web with: python tools/optimize_glb.py models/zombie.glb models/zombie.glb
 #   exec(open(r"C:\Users\fouad\Downloads\neon-quiver\tools\make_rig.py").read())
 #
 # Game space is used as-is: +Y up, +Z forward. Every bone has an identity rest basis
@@ -61,7 +62,7 @@ def make_armature():
 
 # ---------- meshes from the sculpt JSON ----------
 def load_part(name):
-    d = json.load(open(os.path.join(MOD, name + '.json')))
+    d = json.load(open(os.path.join(ROOT, 'tools', 'sculpts', name + '.json')))
     P = d['pos']; C = d['col']; E = d['emi']; I = d['idx']
     verts = [(P[i], P[i + 1], P[i + 2]) for i in range(0, len(P), 3)]
     faces = [(I[i], I[i + 1], I[i + 2]) for i in range(0, len(I), 3)]

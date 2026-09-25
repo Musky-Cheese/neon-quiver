@@ -12,7 +12,7 @@ import bpy, bmesh, json, math, os, random, time, traceback
 from mathutils import Vector, noise
 from mathutils.bvhtree import BVHTree
 
-OUT = globals().get('NQ_OUT') or r"C:\Users\fouad\Downloads\neon-quiver\models"
+OUT = globals().get("NQ_OUT") or r"C:\Users\fouad\Downloads\neon-quiver\tools\sculpts"
 os.makedirs(OUT, exist_ok=True)
 LOG = []
 def log(*a):

@@ -7,8 +7,10 @@ def add(arr):
     global off
     b = arr.tobytes(); pad = (-len(b)) % 4; b += b'\0' * pad
     o = off; chunks.append(b); off += len(b); return o
-for f in sorted(glob.glob(os.path.join(root, 'models', '*.json'))):
+KEEP = ('g_right', 'g_left', 'g_forearm', 'jaw', 'brute_helmet')   # zombies themselves live in models/zombie.glb
+for f in sorted(glob.glob(os.path.join(root, 'tools', 'sculpts', '*.json'))):
     d = json.load(open(f)); name = d['name']
+    if name not in KEEP: continue
     P = np.array(d['pos'], np.float32).reshape(-1, 3); N = np.array(d['nor'], np.float32).reshape(-1, 3)
     C = np.array(d['col'], np.uint8).reshape(-1, 3); E = np.array(d['emi'], np.uint8); I = np.array(d['idx'], np.uint32)
     mn = P.min(0); mx = P.max(0); sc = np.maximum(mx - mn, 1e-6)
