@@ -63,7 +63,8 @@ function updateBow(dt, input) {
 
 // ---- viewmodel rendering -------------------------------------------------
 const _bc = M4.create(), _bm = M4.create(), _lm = M4.create(), _wm = M4.create(), _p0 = [0, 0, 0], _p1 = [0, 0, 0];
-function vm(mesh, local, col, emit) { const m = poolM(); M4.mul(m, _bm, local); drawItem(mesh, m, col, emit, 0, VM_ITEMS); return m; }
+function vm(mesh, local, col, emit, skin) { const m = poolM(); M4.mul(m, _bm, local); drawItem(mesh, m, col, emit, 0, VM_ITEMS, skin); return m; }
+const GAUNT_DARK = [0.075, 0.08, 0.095], GAUNT_PLATE = [0.2, 0.21, 0.24];
 function vmBox(x, y, z, sx, sy, sz, col, emit, rx = 0, ry = 0, rz = 0, mesh = MESH.box) { M4.trs(_lm, x, y, z, rx, ry, rz, sx, sy, sz); return vm(mesh, _lm, col, emit); }
 function vmSeg(a, b, w, t, col, emit, mesh = MESH.box, ref) { if (ref) M4.align(_lm, a[0], a[1], a[2], b[0], b[1], b[2], w, t, ref[0], ref[1], ref[2]); else M4.align(_lm, a[0], a[1], a[2], b[0], b[1], b[2], w, t, 1, 0, 0); return vm(mesh, _lm, col, emit); }
 
@@ -97,20 +98,11 @@ function drawArrowModel(nock, dir, type, up, alpha = 1, emitBoost = 1) {
 }
 
 function drawHand(pos, carrying, col, led) {
-  // right glove, knuckles hooked on the string at pos (drawn at 75% via local scale)
-  const glove = [0.07, 0.07, 0.085];
-  const S = 0.75, P0 = pos; pos = [0, 0, 0];
-  M4.trs(_hm, P0[0], P0[1], P0[2], 0, 0, 0, S, S, S); M4.copy(_bmSave, _bm); M4.mul(_bm, _bmSave, _hm);
-  vmBox(pos[0] + 0.028, pos[1] - 0.012, pos[2] + 0.035, 0.05, 0.075, 0.075, glove, null, 0.15, 0.25, 0.1);
-  for (let i = 0; i < 3; i++) vmBox(pos[0] + 0.004, pos[1] + 0.012 - i * 0.021, pos[2] + (carrying ? 0.0 : -0.004), 0.05, 0.018, 0.02, [0.09, 0.09, 0.11], null, 0, 0.4, 0);
-  vmBox(pos[0] + 0.05, pos[1] + 0.02, pos[2] + 0.03, 0.02, 0.05, 0.02, glove, null, 0.5, 0, -0.4); // thumb
-  vmBox(pos[0] + 0.052, pos[1] - 0.01, pos[2] + 0.04, 0.004, 0.05, 0.04, led, [led[0] * 2.2, led[1] * 2.2, led[2] * 2.2], 0.15, 0.25, 0.1);
-  const wrist = [pos[0] + 0.045, pos[1] - 0.03, pos[2] + 0.075];
-  const elbow = [pos[0] + 0.24, pos[1] - 0.22, pos[2] + 0.5];
-  vmSeg(wrist, elbow, 0.062, 0.062, [0.09, 0.08, 0.1], null, MESH.box, [0, 0, 1]);
-  vmSeg([wrist[0] + 0.012, wrist[1] + 0.02, wrist[2] + 0.02], [wrist[0] + 0.05, wrist[1] - 0.02, wrist[2] + 0.12], 0.068, 0.068, [0.14, 0.14, 0.17], null, MESH.metal, [0, 0, 1]);
-  vmSeg([wrist[0] + 0.03, wrist[1] + 0.028, wrist[2] + 0.05], [wrist[0] + 0.05, wrist[1] + 0.005, wrist[2] + 0.1], 0.006, 0.006, led, [led[0] * 2.5, led[1] * 2.5, led[2] * 2.5]);
-  M4.copy(_bm, _bmSave);
+  // right cyber gauntlet, fingers hooked on the string at pos; armoured forearm runs back out of view
+  const S = 0.9, g = [led[0] * 1.6, led[1] * 1.6, led[2] * 1.6];
+  M4.trs(_lm, pos[0], pos[1], pos[2], 0, 0, 0, S, S, S); vm(MODEL.g_right, _lm, GAUNT_PLATE, g, GAUNT_DARK);
+  const wrist = [pos[0] + 0.045 * S, pos[1] - 0.03 * S, pos[2] + 0.075 * S], elbow = [pos[0] + 0.24, pos[1] - 0.22, pos[2] + 0.5];
+  M4.align(_lm, wrist[0], wrist[1], wrist[2], elbow[0], elbow[1], elbow[2], 0.078, 0.072, 0, 0, 1); vm(MODEL.g_forearm, _lm, GAUNT_PLATE, [led[0] * 1.3, led[1] * 1.3, led[2] * 1.3], GAUNT_DARK);
 }
 const _hm = M4.create(), _bmSave = M4.create();
 
@@ -179,13 +171,9 @@ function drawBowViewmodel(camM, time, player) {
   // stabilizer
   vmSeg([0, -0.07, -0.02], [0, -0.075, -0.3], 0.012, 0.012, [0.08, 0.08, 0.09], null, MESH.cyl, [1, 0, 0]);
   vmSeg([0, -0.075, -0.3], [0, -0.076, -0.34], 0.028, 0.028, [0.12, 0.12, 0.14], A.glow.map(v => v * 0.35), MESH.cyl, [1, 0, 0]);
-  // ---- left hand on grip
-  const glove = [0.07, 0.07, 0.085];
-  vmBox(-0.006, -0.035, 0.018, 0.062, 0.1, 0.07, glove);
-  vmBox(0.002, -0.04, -0.028, 0.058, 0.085, 0.026, [0.09, 0.09, 0.11]);
-  vmBox(-0.036, -0.035, 0.02, 0.004, 0.07, 0.05, A.color, A.glow.map(v => v * 0.6));
-  vmSeg([-0.01, -0.075, 0.035], [-0.16, -0.34, 0.5], 0.064, 0.064, [0.09, 0.08, 0.1], null, MESH.box, [0, 0, 1]);
-  vmSeg([-0.015, -0.08, 0.04], [-0.05, -0.14, 0.13], 0.07, 0.07, [0.14, 0.14, 0.17], null, MESH.metal, [0, 0, 1]);
+  // ---- left cyber gauntlet wrapped round the grip
+  M4.trs(_lm, 0, -0.035, 0.012, 0, 0, 0, 1, 1, 1); vm(MODEL.g_left, _lm, GAUNT_PLATE, A.glow.map(v => v * 1.2), GAUNT_DARK);
+  M4.align(_lm, -0.006, -0.1, 0.035, -0.16, -0.34, 0.5, 0.08, 0.074, 0, 0, 1); vm(MODEL.g_forearm, _lm, GAUNT_PLATE, A.glow.map(v => v * 1.0), GAUNT_DARK);
 
   // ---- arrow + right hand
   const nock = [0.014, 0.02, nockZ];

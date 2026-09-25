@@ -4,11 +4,12 @@
 /* ---------------- draw lists ---------------- */
 const MPOOL = []; let mpi = 0;
 function poolM() { if (mpi >= MPOOL.length) MPOOL.push(new Float32Array(16)); return MPOOL[mpi++]; }
-class DrawList { constructor() { this.a = []; this.n = 0; } push(mesh, m, col, emit, flash) { let it = this.a[this.n]; if (!it) it = this.a[this.n] = {}; it.mesh = mesh; it.m = m; it.col = col; it.emit = emit; it.flash = flash; this.n++; } }
+class DrawList { constructor() { this.a = []; this.n = 0; } push(mesh, m, col, emit, flash, skin) { let it = this.a[this.n]; if (!it) it = this.a[this.n] = {}; it.mesh = mesh; it.m = m; it.col = col; it.emit = emit; it.flash = flash; it.skin = skin; this.n++; } }
 const WORLD_ITEMS = new DrawList(), VM_ITEMS = new DrawList();
 const DRAW_SUPPRESS = { on: false };
 const ZERO3 = [0, 0, 0];
-function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS) { if (DRAW_SUPPRESS.on) return; list.push(mesh, m, col, emit || ZERO3, flash || 0); }
+const DEF_SKIN = [0.5, 0.5, 0.5];
+function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
 const SETTINGS = { sens: 1, music: true, quality: 1, look: 'noir' };
@@ -134,8 +135,9 @@ function updateProjectiles(dt) {
       if (Math.abs(z.x - nx) > 12 && Math.abs(z.x - a.x) > 12) continue;
       if (!z.headless) { const hr = 0.19 * sc * (z.type === 'boss' ? 0.8 : 1); if (segPointDist2(_seg0, _seg1, z.head, _so) < hr * hr && _so.s < best) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'head'; } }
       if (z.type === 'boss') { const cr = 0.16 * sc; if (segPointDist2(_seg0, _seg1, z.core, _so) < cr * cr && _so.s < best) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'core'; } }
-      const br = (z.type === 'brute' ? 0.33 : z.type === 'boss' ? 0.3 : 0.25) * sc;
+      const br = (z.type === 'brute' ? 0.33 : z.type === 'boss' ? 0.3 : 0.24) * sc, lr = (z.type === 'brute' ? 0.11 : 0.085) * sc;
       if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
+      for (const [p0, p1] of [[z.hipL, z.knL], [z.knL, z.ftL], [z.hipR, z.knR], [z.knR, z.ftR]]) if (segSegDist2(_seg0, _seg1, p0, p1, _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
     }
     // ground
     if (ny <= 0.02) { const t = (a.y - 0.02) / (a.y - ny); if (t < best) { best = t; hitKind = 'w'; } }
@@ -164,10 +166,10 @@ function updateProjectiles(dt) {
       else GAME.hitMarker(false);
       GAME.hits++;
       // stick arrow into zombie (not rail)
-      if (a.type !== 3 && a.type !== 2 && z.stuck.length < 8) { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
-      const killed = damageZombie(z, dmg, hitPart, [hx, hy, hz], dir, a.type);
+      if (a.type !== 3 && a.type !== 2 && z.stuck.length < 8 && hitPart !== 'legs') { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
+      const killed = damageZombie(z, dmg, hitPart, [hx, hy, hz], dir, a.type, a.power);
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
-      burst(hx, hy, hz, hitPart === 'head' ? 26 : 14, [0.45, 1.3, 0.25], 4, 0.6, 0.09, 10, 1.2);
+      burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
       AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
       if (killed) { GAME.hitMarker(true, true); }
@@ -186,6 +188,37 @@ function updateProjectiles(dt) {
     }
   }
 }
+/* ray vs static world (boxes + cylinders); returns distance or null */
+function rayWorld(ox, oy, oz, dx, dy, dz, maxD) {
+  const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
+  let best = null; const o = [ox, oy, oz], d = [dx, dy, dz];
+  for (const b of WORLD.boxes) {
+    let t0 = 0, t1 = maxD, ok = true; const mn = [b.x0, b.y0, b.z0], mx = [b.x1, b.y1, b.z1];
+    for (let a = 0; a < 3 && ok; a++) { if (Math.abs(d[a]) < 1e-9) { if (o[a] < mn[a] || o[a] > mx[a]) ok = false; } else { let ta = (mn[a] - o[a]) / d[a], tb = (mx[a] - o[a]) / d[a]; if (ta > tb) { const q = ta; ta = tb; tb = q; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 > t1) ok = false; } }
+    if (ok && (best === null || t0 < best)) best = t0;
+  }
+  for (const c of WORLD.circles) {
+    const px = ox - c.x, pz = oz - c.z, A = dx * dx + dz * dz; if (A < 1e-9) continue;
+    const B = 2 * (px * dx + pz * dz), C = px * px + pz * pz - c.r * c.r, D = B * B - 4 * A * C; if (D < 0) continue;
+    const t = (-B - Math.sqrt(D)) / (2 * A); if (t < 0 || t > maxD) continue; if (oy + dy * t > c.h) continue; if (best === null || t < best) best = t;
+  }
+  return best;
+}
+function drawDecals(cam) {
+  if (!DECALS.length) return;
+  const T = PROG.tex.u; gl.useProgram(PROG.tex.p);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+  gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(-2, -2);
+  gl.bindVertexArray(QUAD); gl.uniform1f(T.uMode, 0); gl.uniform1f(T.uSeed, 0); gl.uniform3f(T.uCol, 1, 1, 1);
+  const m = _decalM;
+  for (const d of DECALS) {
+    const a = Math.min(1, d.t * 6) * (d.t > 38 ? Math.max(0, 1 - (d.t - 38) / 7) : 1);
+    M4.trs(m, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1);
+    gl.bindTexture(gl.TEXTURE_2D, DECAL_TEX[d.v]); gl.uniformMatrix4fv(T.uModel, false, m); gl.uniform1f(T.uA, a * 0.92); gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+  gl.disable(gl.POLYGON_OFFSET_FILL); gl.uniform1f(T.uA, 1);
+}
+const _decalM = M4.create();
 const FIRES = [];
 function updateFires(dt) {
   for (let i = FIRES.length - 1; i >= 0; i--) {
@@ -205,7 +238,7 @@ function explode(x, y, z) {
   for (const zz of ZOMBIES) {
     if (zz.dead) continue; const d = Math.hypot(zz.x - x, (zz.y + 1) - y, zz.z - z);
     if (d < R * (zz.type === 'boss' ? 1.4 : 1)) { const k = 1 - d / (R * 1.4); const dir = [(zz.x - x) / (d || 1), 0, (zz.z - z) / (d || 1)];
-      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', null, dir, 2); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
+      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
   }
   const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < 3.2 && GAME.state === 'playing') PLAYER.hurt(8, x, z);
 }
@@ -260,7 +293,7 @@ const GAME = {
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
-    ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; this.boss = null; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
+    ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.ammo = [Infinity, 4, 2, 4];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
@@ -544,9 +577,9 @@ function step(dt) {
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') {
-    updateZombies(dt, t); updateProjectiles(dt); updateFires(dt); updatePickups(dt);
+    updateZombies(dt, t); updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
-  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); }
+  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
   // fire arrow nocked: flames at tip
@@ -616,6 +649,7 @@ function render(time) {
   // ---- collect draws
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
+  drawDebris();
   drawProjectiles(); drawPickups(time);
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
 
@@ -640,13 +674,14 @@ function render(time) {
   // signs
   const T = PROG.tex.u; gl.useProgram(PROG.tex.p);
   gl.uniformMatrix4fv(T.uProj, false, projM); gl.uniformMatrix4fv(T.uView, false, viewM); gl.uniform3fv(T.uCam, cam); gl.uniform3fv(T.uFogCol, THEME.fog); gl.uniform1f(T.uFogDen, THEME.fogDen); gl.uniform1f(T.uTime, time);
-  gl.bindVertexArray(QUAD); gl.activeTexture(gl.TEXTURE0); gl.uniform1i(T.uTex, 0);
+  gl.bindVertexArray(QUAD); gl.activeTexture(gl.TEXTURE0); gl.uniform1i(T.uTex, 0); gl.uniform1f(T.uA, 1);
   for (const pass of [false, true]) {
     if (pass) { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE); gl.depthMask(false); }
     for (const s of WORLD.signs) { if (s.add !== pass) continue; gl.bindTexture(gl.TEXTURE_2D, s.tex); gl.uniformMatrix4fv(T.uModel, false, s.m); gl.uniform3f(T.uCol, s.col[0] * THEME.sign, s.col[1] * THEME.sign, s.col[2] * THEME.sign); gl.uniform1f(T.uMode, s.mode); gl.uniform1f(T.uSeed, s.seed); gl.drawArrays(gl.TRIANGLES, 0, 6); }
   }
   // particles
-  gl.blendFunc(gl.ONE, gl.ONE);
+  drawDecals(cam);
+  gl.enable(gl.BLEND); gl.depthMask(false); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   if (PART.n > 0) {
     gl.useProgram(PROG.pt.p); gl.uniformMatrix4fv(PROG.pt.u.uProj, false, projM); gl.uniformMatrix4fv(PROG.pt.u.uView, false, viewM); gl.uniform1f(PROG.pt.u.uH, H / (2 * Math.tan(fov / 2)));
     gl.bindVertexArray(PVAO); gl.bindBuffer(gl.ARRAY_BUFFER, PVBO); gl.bufferSubData(gl.ARRAY_BUFFER, 0, PART.data, 0, PART.n * 8);
@@ -654,7 +689,7 @@ function render(time) {
   }
   // rain
   gl.useProgram(PROG.rain.p); gl.uniformMatrix4fv(PROG.rain.u.uProj, false, projM); gl.uniformMatrix4fv(PROG.rain.u.uView, false, viewM); gl.uniform3fv(PROG.rain.u.uCam, cam); gl.uniform1f(PROG.rain.u.uTime, time); gl.uniform1f(PROG.rain.u.uAlpha, THEME.rain); gl.uniform3fv(PROG.rain.u.uRainCol, THEME.rainCol);
-  gl.bindVertexArray(RAINVAO); gl.drawArrays(gl.LINES, 0, RAIN_N * 2);
+  gl.blendFunc(gl.ONE, gl.ONE); gl.bindVertexArray(RAINVAO); gl.drawArrays(gl.LINES, 0, RAIN_N * 2);
   gl.disable(gl.BLEND); gl.depthMask(true);
   // viewmodel
   if (VM_ITEMS.n && !DBG.noVM) {
@@ -689,11 +724,12 @@ function render(time) {
   gl.activeTexture(gl.TEXTURE0);
 }
 function drawList(list, U) {
-  let lastVao = null;
+  let lastVao = null, lastSkin = null;
   for (let i = 0; i < list.n; i++) {
     const it = list.a[i];
     if (it.mesh.vao !== lastVao) { gl.bindVertexArray(it.mesh.vao); lastVao = it.mesh.vao; }
     gl.uniformMatrix4fv(U.uModel, false, it.m); gl.uniform4f(U.uTint, it.col[0], it.col[1], it.col[2], 1); gl.uniform3fv(U.uEmit, it.emit); gl.uniform1f(U.uFlash, it.flash);
+    if (it.skin !== lastSkin) { gl.uniform3fv(U.uSkin, it.skin); lastSkin = it.skin; }
     gl.drawElements(gl.TRIANGLES, it.mesh.count, it.mesh.type, 0);
   }
 }
@@ -715,7 +751,7 @@ function wireUI() {
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
 function toTitle() {
-  GAME.state = 'title'; ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true;
+  GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true;
   for (let i = 0; i < 9; i++) { const zz = spawnZombie(pick(['walker', 'walker', 'walker', 'runner', 'brute']), rand(-30, 30), rand(-30, 30), 1); zz.speed *= 0.5; }
   setScreen('title'); updateTitleStats(); drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); AUD.intensity = 0.35;
 }
@@ -724,6 +760,7 @@ function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best
 /* ---------------- boot ---------------- */
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
+  await loadModels(); makeDecalTextures();
   buildCity();
   wireUI();
   toTitle();
@@ -735,6 +772,9 @@ async function boot() {
 window.NQ = {
   DBG, GAME, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
+  killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
+  dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
+  decalCount() { return DECALS.length; },
   setTheme, THEMES,
   renderOnce() { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); },
   noLoop(b) { GAME.noLoop = b; },

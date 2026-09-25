@@ -6,7 +6,7 @@ for w, st, f in [(400, 'normal', 'heroscn-regular.woff'), (700, 'normal', 'heros
     b = base64.b64encode(open(os.path.join(root, 'fonts', f), 'rb').read()).decode()
     fonts += '@font-face{font-family:"Quiver Cn";font-weight:%d;font-style:%s;font-display:block;src:url(data:font/woff;base64,%s) format("woff");}\n' % (w, st, b)
 css = S('style.css').replace('/*__FONTS__*/', fonts)
-js = '\n'.join(S(f) for f in ['engine.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'bow.js', 'zombies.js', 'game.js'])
+js = '\n'.join(S(f) for f in ['models.js', 'engine.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'bow.js', 'zombies.js', 'game.js'])
 js = '(function(){\n' + js + '\n})();'
 body = S('body.html')
 title = '<title>Neon Quiver</title>'

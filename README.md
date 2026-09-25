@@ -34,7 +34,7 @@ Open `index.html` in a browser. Or serve the folder with `python3 -m http.server
 
 - **Bow viewmodel with real animation:** limbs flex and cams glow as you draw, the string snaps and oscillates on release, then the hand pulls back, reaches for the quiver and nocks the next arrow. Arrows fly with gravity drop.
 - **Four arrow types:** Carbon (unlimited), Incendiary (sets zombies and the ground on fire), Plasma Charge (explodes on impact) and Rail Piercer (flat, fast, passes through five bodies).
-- **The infected:** walkers, sprinting runners, armored brutes, and every 5th wave *The Warden*, a boss that drops from the sky, slams the ground (jump to dodge) and summons runners. Hit its glowing core for extra damage.
+- **The infected:** sculpted walkers, sprinting runners and armored brutes, with hit-location staggers, falls driven by the arrow's force, crawlers from leg shots, wall pinning and moderate gore. Every 5th wave brings *The Warden*, a boss that drops from the sky, slams the ground (jump to dodge) and summons runners. Hit its glowing core for extra damage.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier. Between waves, spend credits at the Armory Terminal on draw speed, damage, reload speed, max health, move speed, healing and special arrows.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain, wet reflective ground and bloom.
 - Best score and best wave are saved in the browser.
@@ -52,6 +52,17 @@ Open `index.html` in a browser. Or serve the folder with `python3 -m http.server
 | `app-icon-1024.png` | Store and app icon (`icon-512.png`, `icon-192.png` and `favicon-64.png` sit at the root) |
 
 If you host the game somewhere with a real domain, change the `og:image` meta tag in `index.html` to an absolute URL (for example `https://you.github.io/neon-quiver/ads/social-1200x628.png`). Link previews need an absolute URL.
+
+## Characters (built in Blender)
+
+The zombies, the Warden's growth, the brute armor and the player's cyber-armor gauntlets are sculpted by a Blender script, then packed into the game:
+
+1. In Blender (tested on 5.2), open the **Scripting** tab and run this in the Python console:
+   `exec(open(r"C:\path\to\neon-quiver\tools\make_models.py").read())`
+   It writes one JSON file per part into `models/`, plus `_log.txt`.
+2. Run `python3 tools/pack_models.py`, then `python3 build.py`.
+
+Each part is built from blended spheres, voxel-remeshed and smoothed, then sculpted with noise (brows, sockets, cheekbones, ribs, torn cloth). It is decimated and painted with vertex masks: ambient occlusion, cloth, blood and glow. The game tints each zombie's skin, clothes and hair from those masks, so every zombie looks different.
 
 ## Editing the game
 

@@ -218,7 +218,7 @@ void main(){ vec4 w=uModel*vec4(aPos,1.); vW=w.xyz; vN=mat3(uModel)*aNor; vC=aCo
 const MAIN_FS = `#version 300 es
 precision highp float;
 in vec3 vW; in vec3 vN; in vec3 vC; in vec2 vM;
-uniform vec3 uCam; uniform vec4 uTint; uniform vec3 uEmit; uniform float uTime; uniform float uFlash; uniform float uRim;
+uniform vec3 uCam; uniform vec4 uTint; uniform vec3 uEmit; uniform float uTime; uniform float uFlash; uniform float uRim; uniform vec3 uSkin;
 uniform vec3 uFogCol; uniform float uFogDen;
 uniform vec3 uAmbLo, uAmbHi, uSunCol, uSunDir, uRimCol; uniform float uNeon, uWin, uWinWarm, uGrid, uDyn, uWet;
 uniform int uNL; uniform vec4 uLP[${MAX_LIGHTS}]; uniform vec3 uLC[${MAX_LIGHTS}];
@@ -262,6 +262,14 @@ void main(){
     base *= 1.-pud*0.6; spec=0.2+pud*1.4*uWet; rough=20.+pud*200.;
   } else if(mat>3.5 && mat<4.5){ // metal panel
     spec=0.7; rough=48.;
+  } else if(mat>5.5 && mat<7.5){ // sculpted characters / armour: vC = (ao, cloth mask, blood mask), vM.x = glow mask
+    float ao=vC.r, clm=vC.g, bl=vC.b;
+    base = mix(uSkin, uTint.rgb, clm);
+    base = mix(base, vec3(0.13,0.008,0.006), bl*0.92);
+    base *= ao;
+    emis = uEmit*vM.x*uDyn;
+    float armour = step(6.5, mat);
+    spec = mix(0.18 + bl*0.9, 0.9, armour); rough = mix(18. + bl*60., 60., armour);
   } else if(mat>4.5 && mat<5.5){ // hologram (unlit, scanlines)
     float sl = 0.65+0.35*sin(vW.y*60.+uTime*8.);
     o=vec4(base*sl*1.6+emis, 1.);
@@ -281,7 +289,7 @@ void main(){
     col += base*uLC[i]*max(dot(N,l),0.)*att;
     vec3 H=normalize(l+V); sp += uLC[i]*pow(max(dot(N,H),0.),rough)*att*spec;
   }
-  if(mat<0.5 || (mat>3.5 && mat<4.5)){ float rim=pow(1.-clamp(dot(N,V),0.,1.),3.); col += (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*uRim; }
+  if(mat<0.5 || (mat>3.5 && mat<4.5) || mat>5.5){ float rim=pow(1.-clamp(dot(N,V),0.,1.),3.); col += (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*uRim; }
   col += sp + emis;
   col = mix(col, vec3(1.0,0.95,0.9), uFlash);
   float dist=length(vW-uCam);
@@ -324,11 +332,12 @@ void main(){
 
 const PT_VS = `#version 300 es
 layout(location=0) in vec3 aPos; layout(location=1) in vec4 aCol; layout(location=2) in float aSize;
-uniform mat4 uProj, uView; uniform float uH; out vec4 vC;
-void main(){ vec4 v=uView*vec4(aPos,1.); gl_Position=uProj*v; gl_PointSize=clamp(aSize*uH/max(-v.z,0.05),1.,256.); vC=aCol; }`;
+uniform mat4 uProj, uView; uniform float uH; out vec4 vC; out float vBlend;
+void main(){ vec4 v=uView*vec4(aPos,1.); gl_Position=uProj*v; gl_PointSize=clamp(abs(aSize)*uH/max(-v.z,0.05),1.,256.); vC=aCol; vBlend=aSize<0.?1.:0.; }`;
 const PT_FS = `#version 300 es
-precision mediump float; in vec4 vC; out vec4 o;
-void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); float a=smoothstep(0.5,0.0,d); a*=a; o=vec4(vC.rgb*a*vC.a, 0.); }`;
+precision mediump float; in vec4 vC; in float vBlend; out vec4 o;
+void main(){ vec2 c=gl_PointCoord-0.5; float d=length(c); float a=smoothstep(0.5,0.0,d);
+  if(vBlend>0.5){ float s=smoothstep(0.5,0.3,d)*vC.a; o=vec4(vC.rgb*s, s); } else { a*=a; o=vec4(vC.rgb*a*vC.a, 0.); } }`;
 
 const RAIN_VS = `#version 300 es
 layout(location=0) in vec4 aP; // x z y seed
@@ -354,7 +363,7 @@ uniform mat4 uProj, uView, uModel; out vec2 vUV; out vec3 vW;
 void main(){ vec4 w=uModel*vec4(aPos,1.); vW=w.xyz; vUV=aUV; gl_Position=uProj*uView*w; }`;
 const TEX_FS = `#version 300 es
 precision highp float; in vec2 vUV; in vec3 vW; uniform sampler2D uTex; uniform vec3 uCol; uniform float uTime; uniform float uMode;
-uniform vec3 uCam; uniform vec3 uFogCol; uniform float uFogDen; uniform float uSeed; out vec4 o;
+uniform vec3 uCam; uniform vec3 uFogCol; uniform float uFogDen; uniform float uSeed; uniform float uA; out vec4 o;
 ${NOISE_GLSL}
 void main(){
   vec2 uv=vUV;
@@ -369,7 +378,7 @@ void main(){
   vec4 t=texture(uTex,uv);
   vec3 c=t.rgb*uCol*flick;
   float d=length(vW-uCam); c=mix(c,uFogCol,clamp((1.-exp(-d*uFogDen))*0.8,0.,1.));
-  o=vec4(c, t.a);
+  o=vec4(c, t.a*uA);
 }`;
 
 const FS_VS = `#version 300 es
@@ -486,3 +495,35 @@ const QUAD = (function () {
   gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 12);
   gl.bindVertexArray(null); return vao;
 })();
+
+/* ---------------- sculpted models (built in Blender, packed by tools/pack_models.py) ---------------- */
+const MODEL = {};
+async function loadModels() {
+  const bin = Uint8Array.from(atob(MODEL_BLOB), c => c.charCodeAt(0));
+  let buf;
+  try { buf = await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer(); }
+  catch (e) { console.warn('model decompress failed', e); return false; }
+  for (const name in MODEL_MANIFEST) {
+    const m = MODEL_MANIFEST[name], vc = m.vc;
+    const P = new Uint16Array(buf, m.p, vc * 3), N = new Int8Array(buf, m.n, vc * 3), C = new Uint8Array(buf, m.c, vc * 4);
+    const mat = name.startsWith('g_') || name.startsWith('brute_') ? 7 : 6;
+    const v = new Float32Array(vc * 11);
+    for (let i = 0; i < vc; i++) {
+      const o = i * 11;
+      for (let k = 0; k < 3; k++) { v[o + k] = m.min[k] + P[i * 3 + k] / 65535 * m.sc[k]; v[o + 3 + k] = N[i * 3 + k] / 127; }
+      v[o + 6] = C[i * 4] / 255; v[o + 7] = C[i * 4 + 1] / 255; v[o + 8] = C[i * 4 + 2] / 255; v[o + 9] = C[i * 4 + 3] / 255; v[o + 10] = mat;
+    }
+    const idx = m.i32 ? new Uint32Array(buf, m.i, m.ic) : new Uint16Array(buf, m.i, m.ic);
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    const S = 44;
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, S, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, S, 12);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, S, 24);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, S, 36);
+    gl.bindVertexArray(null);
+    MODEL[name] = { vao, count: m.ic, type: m.i32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
+  }
+  return true;
+}
