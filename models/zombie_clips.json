@@ -1,1 +1,0 @@
-{"fps": 30, "clips": {"walk": [0, 36, true], "run": [42, 60, true], "heavy": [66, 110, true], "boss_walk": [116, 172, true], "idle": [178, 238, true], "attack": [244, 270, false], "crawl": [276, 316, true], "crawl_attack": [322, 346, false], "slam": [352, 400, false], "roar": [406, 448, false]}}
