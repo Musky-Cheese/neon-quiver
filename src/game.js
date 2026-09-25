@@ -550,7 +550,8 @@ function updatePlayer(dt) {
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
   const drawing = BOW.state === 'drawing';
   const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
-  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1);
+  const wading = P.y < 0.05 && inPond(P.x, P.z);   // knee-deep in the koi pond
+  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (wading ? 0.62 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
   const acc = P.grounded ? 12 : 3;
@@ -564,6 +565,7 @@ function updatePlayer(dt) {
   else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
+  if (P.z > 75.5) P.x = clamp(P.x, -31, 31);   // the grove's treeline
   const hs = Math.hypot(P.vx, P.vz);
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));

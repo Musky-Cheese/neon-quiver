@@ -219,6 +219,8 @@ function buildWorld3() {
   const props = new THREE.Mesh(WORLD.meshProps, MAT.static); props.castShadow = true; props.receiveShadow = true; props.matrixAutoUpdate = false; scene.add(props);
   const near = new THREE.Mesh(WORLD.mesh, MAT.static); near.castShadow = false; near.receiveShadow = true; near.matrixAutoUpdate = false; scene.add(near);
   const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
+  const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
+  const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
   R3.built = true;
 }
@@ -228,7 +230,7 @@ function buildWorld3() {
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 488;   // covers x -154..154, z -154..90
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 616;   // covers x -154..154, z -154..154
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;

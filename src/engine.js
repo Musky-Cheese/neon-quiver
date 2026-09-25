@@ -332,6 +332,22 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     float top = step(0.5, N0.y);
     base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, uWet * top);
     bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, uWet * top * 0.8); rimK = 0.3;
+  } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
+    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
+    base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
+    float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
+    base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
+    emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
+    bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(uWet, 0., 1.) * 0.6); rimK = 0.2;
+  } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
+    float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
+    vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
+    float koi = smoothstep(0.9, 0.96, vn(kp * 1.7));
+    base = mix(vec3(0.01, 0.03, 0.035), vec3(0.8, 0.35, 0.5), pet);
+    emis += vec3(1.0, 0.35, 0.08) * koi * 0.18 * (1. - pet);
+    bumpH = nqRipple(vNqW.xz * 2.2, uTime) * 0.003 * max(uRain, 0.25) + (vn(vNqW.xz * 1.3 + uTime * 0.2) - 0.5) * 0.004;
+    rough = mix(0.03, 0.6, pet); metal = 0.0; envK = uEnvK * 1.6; rimK = 0.0;
+    wetRefl = mix(0.85, 0.08, pet);
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);

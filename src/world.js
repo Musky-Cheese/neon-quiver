@@ -9,7 +9,7 @@ function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.
 function navCenter(k, out) { out[0] = NAV.x0 + (k % NAV.w + 0.5) * NAV.cell; out[1] = NAV.z0 + (Math.floor(k / NAV.w) + 0.5) * NAV.cell; return out; }
 
 function buildNav() {
-  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((78 - NAV.z0) / c);
+  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
   const N = NAV.w * NAV.h, B = new Uint8Array(N);
   const mark = (x0, x1, z0, z1) => {
     const i0 = Math.max(0, Math.floor((x0 - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((x1 - NAV.x0) / c));
@@ -19,6 +19,7 @@ function buildNav() {
   const pad = 0.35;
   for (const b of WORLD.boxes) if (b.y0 < 1.2 && b.y1 > 0.5) mark(b.x0 - pad, b.x1 + pad, b.z0 - pad, b.z1 + pad);
   for (const q of WORLD.circles) if (q.h > 0.5) mark(q.x - q.r - pad, q.x + q.r + pad, q.z - q.r - pad, q.z + q.r + pad);
+  for (const q of WORLD.navBlocks) mark(q.x0, q.x1, q.z0, q.z1);   // off-limits ground (the forest round the grove)
   // keep only cells reachable from the plaza
   const reach = new Uint8Array(N), Q = new Int32Array(N); let qh = 0, qt = 0;
   const s0 = navIdx(0, 14); reach[s0] = 1; Q[qt++] = s0;
@@ -68,7 +69,7 @@ function navTarget(x, z, out) {
   }
   navCenter(k, out); return D[k] !== NAV_INF;
 }
-function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, 76)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
+function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
 // a spawn point out of sight, 26–60 m of walking from the player
 function navSpawnPoint(minD = 26, maxD = 62) {
   let best = null, bestScore = -1;
@@ -133,6 +134,15 @@ function updateAmbient(dt) {
     if (Math.random() < dt * 30) emit(f.x + rand(-0.2, 0.2), f.y, f.z + rand(-0.2, 0.2), rand(-0.15, 0.15), rand(1.2, 2.2), rand(-0.15, 0.15), rand(0.3, 0.6), [2.6, 1 + Math.random() * 0.5, 0.15], rand(0.2, 0.4), -1, 1, -0.3);
     if (Math.random() < dt * 4) emit(f.x, f.y + 0.6, f.z, rand(-0.2, 0.2), rand(1, 1.6), rand(-0.2, 0.2), 1.6, [0.05, 0.045, 0.045], -0.4, -0.2, 0.5, 0.8, 0.4);
   }
+  // cherry blossom petals drifting down from nearby canopies
+  for (const t of WORLD.petals) {
+    const dx = t[0] - px, dz = t[2] - pz; if (dx * dx + dz * dz > 45 * 45) continue;
+    if (Math.random() < dt * 7) { const a = Math.random() * TAU, r = Math.random() * t[3];
+      emit(t[0] + Math.cos(a) * r, t[1] + rand(-0.4, 0.3), t[2] + Math.sin(a) * r, rand(0.2, 0.7), rand(-0.5, -0.2), rand(-0.3, 0.3), rand(5, 8), [1.0, 0.5 + Math.random() * 0.15, 0.68], rand(0.04, 0.07), 0.25, 0.9, 0, 0.95); }
+  }
+  // wading through a pond: little splashes round the ankles
+  if (PLAYER.y < 0.05 && inPond(px, pz) && Math.hypot(PLAYER.vx, PLAYER.vz) > 1 && Math.random() < dt * 24)
+    emit(px + rand(-0.3, 0.3), 0.05, pz + rand(-0.3, 0.3), rand(-0.8, 0.8), rand(1, 2), rand(-0.8, 0.8), 0.35, [0.45, 0.55, 0.62], 0.04, 9, 0, 0, 0.7);
   // rain splashes on the ground around the camera
   const n = THEME.rain * dt * 90;
   for (let i = 0; i < n; i++) {
@@ -146,7 +156,7 @@ function updateAmbient(dt) {
 /* ---------------- minimap ---------------- */
 const MINI = { cv: null, scale: 2 };
 function buildMinimap() {
-  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((78 - NAV.z0) * s);
+  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
   const img = x.createImageData(W, H), D = img.data;
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {

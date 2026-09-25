@@ -222,3 +222,141 @@ function propFoodCart(g, R, x, z, awningCol, solid) {
     }
   }
 }
+
+/* ============================================================
+   Sakura Gardens pieces
+   ============================================================ */
+// cherry blossom: short gnarled trunk, limbs spreading low and wide, a broad umbrella of pink clusters.
+// planter: sit it in a concrete planter (plaza) or straight in the lawn (garden). Returns canopy centre.
+function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
+  const r = (a, b) => a + (b - a) * R();
+  const base = planter ? 0.8 : 0.02;
+  if (planter) {
+    g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
+    g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.06, 0.03, 0.035], 0, 16, 24);
+    if (ringCol) g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), ringCol, 2.2, 0, 1.415, 0.018, 40, 4);
+  } else {
+    g.blob(pT(PM.a, x, 0.0, z, r(0, TAU)), 1.1 * s, 0.14, 1.1 * s, 0.3, r(0, 99), [0.05, 0.08, 0.03], 0, 17, 12, 5);   // moss mound
+  }
+  const bark = [0.075, 0.05, 0.05], tips = [];
+  const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
+  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, base + 0.35 * s, z], [x + Math.cos(a) * 0.4 * s, base + 0.06, z + Math.sin(a) * 0.4 * s], [x + Math.cos(a) * 0.8 * s, base - 0.02, z + Math.sin(a) * 0.8 * s]], [0.16 * s, 0.08 * s, 0.03 * s], bark, 0, 12, 5); }
+  function grow(p, d, len, rad, depth) {
+    const pts = [p], rr = [rad]; let q = p, dir = d.slice();
+    for (let k = 1; k <= 4; k++) {   // kinked, slightly drooping limbs
+      dir = [dir[0] + r(-0.3, 0.3), dir[1] + (depth >= 2 ? 0.05 : -0.06) + r(-0.12, 0.12), dir[2] + r(-0.3, 0.3)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
+      q = [q[0] + dir[0] * len / 4, q[1] + dir[1] * len / 4, q[2] + dir[2] * len / 4]; pts.push(q); rr.push(rad * (1 - k * 0.1));
+    }
+    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 8 : depth === 1 ? 6 : 4, depth === 0);
+    if (depth === 0) { tips.push(q); return; }
+    const n = depth === 2 ? 4 : 2 + (R() < 0.5 ? 1 : 0), a0 = r(0, TAU);
+    for (let i = 0; i < n; i++) {
+      const a = a0 + i / n * TAU + r(-0.35, 0.35), spread = depth === 2 ? r(0.7, 0.95) : r(0.45, 0.8);
+      const nd = [dir[0] * (1 - spread) + Math.cos(a) * spread, dir[1] * (1 - spread) * 0.6 + (depth === 2 ? 0.28 : 0.12), dir[2] * (1 - spread) + Math.sin(a) * spread];
+      grow(q, nd, len * r(0.65, 0.85), rad * 0.6, depth - 1);
+    }
+    if (depth === 1) tips.push(q);
+  }
+  grow([x, base, z], [r(-0.12, 0.12), 1, r(-0.12, 0.12)], 1.7 * s, 0.26 * s, 2);
+  // blossom: a big soft cluster at every tip plus smaller puffs around it, glowing faintly pink
+  let cx = 0, cy = 0, cz = 0;
+  for (const t of tips) {
+    cx += t[0]; cy += t[1]; cz += t[2];
+    g.blob(pT(PM.a, t[0], t[1] + 0.2, t[2], r(0, TAU)), r(0.75, 1.0) * s, r(0.5, 0.62) * s, r(0.75, 1.0) * s, 0.4, r(0, 99), blossom, 1.8, 14, 10, 7, 1);
+    for (let i = 0; i < 1; i++) { const a = r(0, TAU), d = r(0.5, 0.8) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
+  }
+  cx /= tips.length; cy /= tips.length; cz /= tips.length;
+  WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
+  WORLD.petals.push([cx, cy, cz, 2.6 * s]);
+  WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
+  if (planter) WORLD.circles.push({ x, z, r: 1.45, h: 0.86 });
+}
+// stone lantern (toro): turned pedestal, glowing fire box, pyramid roof
+function propToro(g, x, z, lit = true) {
+  const st = [0.24, 0.24, 0.23];
+  g.lathe(pT(PM.a, x, 0, z), [[0.36, 0], [0.36, 0.12], [0.14, 0.2], [0.11, 0.78], [0.3, 0.84], [0.3, 0.94]], st, 0, 16, 10, true, false);
+  g.rbox(pT(PM.a, x, 1.12, z), 0.44, 0.36, 0.44, 0.03, st, 0, 16, 1);
+  for (const [dx, dz] of [[0, 0.225], [0, -0.225], [0.225, 0], [-0.225, 0]]) g.rbox(pT(PM.a, x + dx, 1.12, z + dz, dx ? Math.PI / 2 : 0), 0.24, 0.22, 0.012, 0.004, [1, 0.72, 0.38], lit ? 2.6 : 0, 0, 1);
+  g.lathe(pT(PM.a, x, 0, z, Math.PI / 4), [[0.5, 1.3], [0.5, 1.33], [0.12, 1.55], [0, 1.6]], st, 0, 16, 4, false, false);
+  g.sphere(M4.trs(PM.a, x, 1.66, z, 0, 0, 0, 0.12, 0.14, 0.12), st, 0, 16, 8, 6);
+  WORLD.circles.push({ x, z, r: 0.36, h: 1.6 });
+  if (lit) { WORLD.lights.push({ p: [x, 1.2, z], r: 7, c: [1.5, 0.95, 0.5], shop: true }); WORLD.halos.push({ p: [x, 1.12, z], s: 1.4, c: [0.5, 0.32, 0.15] }); }
+}
+// torii gate across the avenue: two red pillars, black-capped curved top beam, tie beam, name plaque
+function propTorii(g, x, z, span = 8.4) {
+  const red = [0.5, 0.05, 0.035], blk = [0.03, 0.03, 0.035], h = span / 2;
+  for (const sx of [-h, h]) {
+    g.lathe(pT(PM.a, x + sx, 0, z), [[0.42, 0, blk], [0.42, 0.55, blk], [0.42, 0.55], [0.3, 0.6], [0.26, 6.0]], red, 0, 11, 16, false, false);
+    WORLD.circles.push({ x: x + sx, z, r: 0.42, h: 6.5 });
+  }
+  g.rbox(pT(PM.a, x, 5.15, z), span + 1.6, 0.34, 0.34, 0.05, red, 0, 11, 1);                                  // nuki
+  g.rbox(pT(PM.a, x, 6.05, z), span + 1.2, 0.36, 0.46, 0.05, red, 0, 11, 1);                                   // shimaki
+  for (const sx of [-1, 1]) g.rbox(pT(PM.a, x + sx * (h + 1.1), 6.42, z, 0, 0, -sx * 0.12), 2.6, 0.32, 0.7, 0.06, blk, 0, 11, 1);   // upswept ends
+  g.rbox(pT(PM.a, x, 6.36, z), span - 0.6, 0.3, 0.7, 0.06, blk, 0, 11, 1);                                      // kasagi
+  g.rbox(pT(PM.a, x, 5.6, z), 0.9, 0.9, 0.16, 0.04, blk, 0, 11, 1);                                             // plaque
+  g.rbox(pT(PM.a, x, 5.6, z), 0.76, 0.76, 0.18, 0.02, [1, 0.55, 0.72], 1.4, 0, 1);
+}
+// small shrine on a raised deck: two steps, vermilion posts, sweeping roof, hanging lanterns
+function propShrine(g, x, z, solid) {
+  const red = [0.5, 0.05, 0.035], wood = [0.2, 0.12, 0.07], roof = [0.07, 0.08, 0.08];
+  g.rbox(pT(PM.a, x, 0.3, z), 8, 0.6, 6, 0.04, wood, 0, 13, 1); solid(x - 4, x + 4, 0, 0.6, z - 3, z + 3);
+  g.rbox(pT(PM.a, x, 0.15, z - 3.4), 4, 0.3, 0.8, 0.03, [0.26, 0.25, 0.24], 0, 16, 1); solid(x - 2, x + 2, 0, 0.3, z - 3.8, z - 3);
+  for (const sx of [-3.5, 3.5]) for (const sz of [-2.5, 2.5]) { g.lathe(pT(PM.a, x + sx, 0.6, z + sz), [[0.2, 0], [0.18, 3.3]], red, 0, 11, 12, false, false); WORLD.circles.push({ x: x + sx, z: z + sz, r: 0.22, h: 4 }); }
+  g.rbox(pT(PM.a, x, 2.6, z + 2.4), 7, 2.0, 0.2, 0.03, [0.12, 0.07, 0.05], 0, 13, 1);                           // back wall
+  g.rbox(pT(PM.a, x, 1.4, z + 2.25), 2.2, 1.2, 0.06, 0.02, [1, 0.62, 0.4], 0.9, 0, 1);                          // glowing screen
+  solid(x - 3.5, x + 3.5, 0.6, 3.6, z + 2.3, z + 2.5);
+  g.rbox(pT(PM.a, x, 3.9, z), 8.6, 0.2, 6.6, 0.05, red, 0, 11, 1);
+  g.extrude(pT(PM.a, x, 4.0, z, Math.PI / 2), [[-4.3, 0], [4.3, 0], [4.6, 0.25], [2.5, 1.1], [0.35, 1.9], [-0.35, 1.9], [-2.5, 1.1], [-4.6, 0.25]], 10.2, roof, 0, 8);
+  g.rbox(pT(PM.a, x, 5.95, z), 10.6, 0.22, 0.5, 0.06, roof, 0, 8, 1);                                          // ridge
+  for (const sx of [-2.8, -0.9, 0.9, 2.8]) {
+    g.tube([[x + sx, 3.8, z - 3.2], [x + sx, 3.3, z - 3.2]], [0.01, 0.01], [0.03, 0.03, 0.03], 0, 0, 3, false);
+    g.lathe(pT(PM.a, x + sx, 2.75, z - 3.2), [[0.08, 0], [0.24, 0.12], [0.26, 0.3], [0.24, 0.48], [0.08, 0.58]], [1, 0.3, 0.18], 2.6, 15, 12, true, true);
+    WORLD.halos.push({ p: [x + sx, 3.05, z - 3.2], s: 1.5, c: [0.6, 0.12, 0.06] });
+  }
+  WORLD.lights.push({ p: [x, 2.8, z - 4], r: 10, c: [1.8, 0.6, 0.35], shop: true });
+}
+// irregular pond at water level with a muddy rim and bank stones. Returns the rim points.
+function propPond(g, R, cx, cz, rx, rz) {
+  const N = 40, pts = [];
+  for (let i = 0; i < N; i++) { const a = i / N * TAU, k = 1 + 0.12 * Math.sin(a * 3 + 1.3) + 0.07 * Math.sin(a * 5 + 0.4); pts.push([cx + Math.cos(a) * rx * k, cz + Math.sin(a) * rz * k]); }
+  const fan = (scale, y, c, mat) => { const i0 = g.i.length, c0 = g._vert(null, cx, y, cz, 0, 1, 0, c, 0, mat), r0 = g.n;
+    for (const [px, pz] of pts) g._vert(null, cx + (px - cx) * scale, y, cz + (pz - cz) * scale, 0, 1, 0, c, 0, mat);
+    for (let i = 0; i < N; i++) g.i.push(c0, r0 + (i + 1) % N, r0 + i); g._fixWinding(i0); };
+  fan(1.1, 0.014, [0.03, 0.03, 0.025], 16);          // wet mud band
+  fan(1.0, 0.02, [0.02, 0.04, 0.045], 18);            // water
+  for (let i = 0; i < N; i += 1) { if (R() < 0.35) continue; const [px, pz] = pts[i], s = 0.25 + R() * 0.35;
+    g.blob(pT(PM.a, cx + (px - cx) * 1.05, 0.05, cz + (pz - cz) * 1.05, R() * 6), s * 1.2, s * 0.55, s, 0.3, R() * 99, [0.2, 0.2, 0.19], 0, 16, 9, 6); }
+  WORLD.ponds.push({ x: cx, z: cz, rx: rx * 0.95, rz: rz * 0.95 });
+  return pts;
+}
+function propSteppingStone(g, R, x, z) {
+  g.blob(pT(PM.a, x, 0.08, z, R() * 6), 0.5, 0.16, 0.44, 0.15, R() * 99, [0.22, 0.22, 0.21], 0, 16, 10, 6);
+  WORLD.circles.push({ x, z, r: 0.42, h: 0.2 });
+}
+// flat stone path along a polyline (flagstones with gaps)
+function propPath(g, R, pts, w, y = 0.018) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1], L = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(L / 1.1));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n, px = ax + (bx - ax) * t, pz = az + (bz - az) * t, ry = Math.atan2(bx - ax, bz - az);
+      const sh = 0.85 + R() * 0.2, c = 0.19 + R() * 0.05;
+      g.rbox(pT(PM.a, px + (R() - 0.5) * 0.08, y, pz + (R() - 0.5) * 0.08, ry + (R() - 0.5) * 0.12), w * sh, 0.04, L / n * 0.9, 0.012, [c, c, c * 0.95], 0, 16, 1);
+    }
+  }
+}
+function inPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
+// background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
+function propSakuraFar(g, R, x, z, s = 1, detail = 1) {
+  const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
+  const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
+  const h = r(1.4, 1.9) * s, sides = detail >= 2 ? 6 : 4;
+  g.tube([[x, 0, z], [x + r(-0.2, 0.2), h * 0.6, z + r(-0.2, 0.2)], [x + r(-0.3, 0.3), h, z + r(-0.3, 0.3)]], [0.24 * s, 0.2 * s, 0.16 * s], bark, 0, 12, sides, false);
+  const n = detail >= 2 ? 5 : detail === 1 ? 3 : 2, a0 = r(0, TAU), seg = detail >= 2 ? 10 : detail === 1 ? 7 : 6, rings = detail >= 2 ? 7 : detail === 1 ? 5 : 4;
+  for (let i = 0; i < n; i++) {
+    const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
+    g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
+    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
+  }
+  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
+  if (detail >= 2 && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
+}

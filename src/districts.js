@@ -1,13 +1,14 @@
 /* ============================================================
-   Districts: the Rail Yard (north), the Night Market (east) and
-   the Warrens (west) hang off Sector 7 plaza. The south avenue is
-   sealed by the quarantine gate.
+   Districts: the Rail Yard (north), the Night Market (east), the
+   Warrens (west) and the Sakura Gardens (south, through the torii)
+   hang off Sector 7 plaza.
    ============================================================ */
 const DISTRICTS = [
   { id: 'hub', name: 'SECTOR 7 PLAZA', x0: -40, x1: 40, z0: -40, z1: 40, env: [0, 5, 10] },
   { id: 'yard', name: 'RAIL YARD', x0: -32, x1: 32, z0: -138, z1: -74, env: [0, 5, -104] },
   { id: 'market', name: 'NIGHT MARKET', x0: 74, x1: 138, z0: -32, z1: 32, env: [106, 5, 0] },
   { id: 'warrens', name: 'THE WARRENS', x0: -138, x1: -74, z0: -32, z1: 32, env: [-84, 5, 0] },
+  { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 74, z1: 138, env: [0, 5, 100] },
 ];
 function districtAt(x, z) {
   for (const d of DISTRICTS) if (x > d.x0 - 2 && x < d.x1 + 2 && z > d.z0 - 2 && z < d.z1 + 2) return d;
@@ -15,9 +16,10 @@ function districtAt(x, z) {
   if (Math.abs(x) < 8 && z < -40) return DISTRICTS[1];
   if (Math.abs(z) < 8 && x > 40) return DISTRICTS[2];
   if (Math.abs(z) < 8 && x < -40) return DISTRICTS[3];
+  if (Math.abs(x) < 8 && z > 40) return DISTRICTS[4];
   return DISTRICTS[0];
 }
-const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 74 };
+const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 136 };
 
 // terminals and ammo caches: static base geometry (the glow is drawn per frame in world.js)
 function supplyProp(g, sp) {
@@ -180,5 +182,42 @@ function buildDistricts(C) {
   lamp(-80, -20); lamp(-88, 22);
   bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
+
+
+  /* ---------------- SAKURA GARDENS (south) ---------------- */
+  // no buildings here: the grove is walled in by cherry forest that fades into the mist
+  setG('garden');
+  const G = C.getG();
+  quad(-110, 110, 74, 230, 0.012, [0.07, 0.11, 0.05], 17);
+  // the forest: lighter trees on a jittered grid all round the grove (you can't walk out there)
+  for (let fz = 77; fz < 200; fz += 8.5) for (let fx = -90; fx <= 90; fx += 8.5) {
+    const x = fx + (R() - 0.5) * 6, z = fz + (R() - 0.5) * 6;
+    if (Math.abs(x) < 33 && z < 137.5) continue;                 // the grove itself
+    if (z < 79 && Math.abs(x) > 60) continue;                    // tucked behind the corner towers anyway
+    const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;   // thins out into the mist
+    propSakuraFar(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, edge < 7 ? 2 : edge < 20 ? 1 : 0);
+  }
+  WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 76, z1: 150 }, { x0: 32, x1: 150, z0: 76, z1: 150 }, { x0: -150, x1: 150, z0: 137, z1: 150 });
+  // the torii marks the way in from the plaza
+  propTorii(G, 0, 77);
+  const gt = signTexture('SAKURA GARDENS', '#ff8fc8', 'font');
+  addSign(gt, 0, 4.45, 76.6, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
+  // flagstone path to the shrine and a loop round the koi pond
+  propPath(G, R, [[0, 75], [0, 90], [0.6, 104], [0, 118], [0, 122.4]], 2.2);
+  const loop = []; for (let i = 0; i <= 28; i++) { const a = i / 28 * TAU; loop.push([-11 + Math.cos(a) * 12.5, 102 + Math.sin(a) * 9]); }
+  propPath(G, R, loop, 1.3);
+  propPond(G, R, -11, 102, 9, 6.5);
+  for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + (i % 2 ? 0.35 : -0.35));
+  // cherry trees: [x, z, size]
+  for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
+    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 116.5, 0.95], [10, 117, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-11, 131, 1.3], [11, 132, 1.25]])
+    propSakura(G, R, x, z, s, false);
+  // stone lanterns along the paths and round the pond
+  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z);
+  propShrine(G, 0, 126, solid);
+  bench(-11, 113.2, '-z'); bench(3.6, 99, '-x'); bench(-26.3, 101, '+x');
+  setG('props');
+  lamp(-14, 77); lamp(14, 77);
+  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86, d: 'garden' }, { kind: 'cache', x: 26, z: 131, d: 'garden' });
 
 }

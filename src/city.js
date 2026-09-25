@@ -8,6 +8,9 @@ const WORLD = {
   signs: [],    // {tex,m,col,mode,seed,add}
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
+  petals: [],   // [x, y, z, radius] blossom canopies that shed petals
+  ponds: [],    // {x, z, rx, rz} shallow water you wade through
+  navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -66,7 +69,7 @@ function billboardTexture(kind) {
 function buildCity() {
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
-  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
+  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
   const M = M4.create();
   const B = (x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0) => g.box(M4.trs(M, x, y, z, 0, ry, 0, sx, sy, sz), c, e, mat);
   const solid = (x0, x1, y0, y1, z0, z1) => WORLD.boxes.push({ x0, x1, y0, y1, z0, z1 });
@@ -196,22 +199,6 @@ function buildCity() {
     B((x0 + x1) / 2, h / 2, (z0 + z1) / 2, x1 - x0, h, z1 - z0, facadeCols[Math.floor(R() * 5)], 0, 1); solid(x0, x1, 0, h, z0, z1);
   }
   g = gFar;
-  // street walls further out, flanking the 4 corridors (so the streets read as streets)
-  for (const axis of ['z']) for (const s of [1]) for (const hside of [-1, 1]) {
-    let a = PLAZA + 32; while (a < 150) {
-      const len = r(14, 26), h = r(30, 110), depth = r(14, 24);
-      const u0 = hside > 0 ? 7 : -7 - depth, u1 = hside > 0 ? 7 + depth : -7;
-      const v0 = s > 0 ? a : -a - len, v1 = s > 0 ? a + len : -a;
-      if (axis === 'z') { g.box(M4.trs(M, (u0 + u1) / 2, h / 2, (v0 + v1) / 2, 0, 0, 0, depth, h, len), facadeCols[Math.floor(R() * 5)], 0, 1); solid(u0, u1, 0, h, v0, v1);
-        const nc = neonPick(); B(hside > 0 ? u0 - 0.1 : u1 + 0.1, h / 2, (v0 + v1) / 2 + (R() - 0.5) * len * 0.6, 0.2, h, 0.25, nc, 2);
-        if (R() < 0.5) { B(hside > 0 ? u0 - 0.05 : u1 + 0.05, 1.8, (v0 + v1) / 2, 0.1, 2.6, len * 0.7, [0.3, 0.2, 0.3], 0.8); }
-      } else { g.box(M4.trs(M, (v0 + v1) / 2, h / 2, (u0 + u1) / 2, 0, 0, 0, len, h, depth), facadeCols[Math.floor(R() * 5)], 0, 1); solid(v0, v1, 0, h, u0, u1);
-        const nc = neonPick(); B((v0 + v1) / 2 + (R() - 0.5) * len * 0.6, h / 2, hside > 0 ? u0 - 0.1 : u1 + 0.1, 0.25, h, 0.2, nc, 2);
-        if (R() < 0.5) { B((v0 + v1) / 2, 1.8, hside > 0 ? u0 - 0.05 : u1 + 0.05, len * 0.7, 2.6, 0.1, [0.3, 0.2, 0.3], 0.8); }
-      }
-      a += len + r(0, 3);
-    }
-  }
   // ---------- outer skyline ----------
   for (let gx = -420; gx <= 420; gx += 34) for (let gz = -420; gz <= 420; gz += 34) {
     const x = gx + r(-6, 6), z = gz + r(-6, 6); const dist = Math.hypot(x, z);
@@ -221,6 +208,7 @@ function buildCity() {
     if (DISTRICTS.some(d => x > d.x0 - 34 && x < d.x1 + 34 && z > d.z0 - 34 && z < d.z1 + 34)) continue;   // districts + their walls
     if ((ax < 36 || az < 36) && mx < 165) continue;          // street walls live here
     if (ax < 24 || az < 24) continue;                        // keep avenues open to the horizon
+    if (z > 66) continue;                                    // south of the plaza is cherry forest, not city
     if (R() < 0.18) continue;
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
@@ -263,7 +251,7 @@ function buildCity() {
   function vend(x, z, ry, c) { const fx = ry === 0 ? 0 : ry > 0 ? 1 : -1, fz = ry === 0 ? -Math.sign(z) : 0; propVend(g, R, x, z, fx, fz, c); }
   vend(-14, 38.8, 0, NEON.cyan); vend(-12.6, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
   // bioluminescent trees in planters (props.js)
-  const tree = (x, z, c) => propTree(g, R, x, z, c);
+  const tree = (x, z, c) => propSakura(g, R, x, z, 1, true, c);
   tree(-17, -19, NEON.cyan); tree(18, 16, NEON.mag); tree(-26, 26, NEON.violet); tree(28, -27, NEON.cyan);
   // street lamps
   function lamp(x, z) { propLamp(g, x, z); }
@@ -272,28 +260,13 @@ function buildCity() {
   for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
   propBench(g, R, 12.5, -3.4, '-x');
   for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
-  // holo barriers across the 4 street mouths
-  const holoTex = (function () {
-    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const x = cv.getContext('2d');
-    x.fillStyle = 'rgba(255,46,136,0.12)'; x.fillRect(0, 0, 512, 128);
-    for (let i = -2; i < 20; i++) { x.fillStyle = 'rgba(255,46,136,0.55)'; x.beginPath(); x.moveTo(i * 40, 0); x.lineTo(i * 40 + 20, 0); x.lineTo(i * 40 + 60, 128); x.lineTo(i * 40 + 40, 128); x.fill(); }
-    x.fillStyle = '#07050d'; x.fillRect(120, 34, 272, 60);
-    segText(x, 'SEALED', 256, 64, 40, { color: '#ff2e88', align: 'center', glow: 0.6 });
-    return canvasTex(cv);
-  })();
-  for (const [x, z, ry] of [[0, RING - 3, 0]]) {
-    addSign(holoTex, x, 1.2, z, ry, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
-    addSign(holoTex, x, 1.2, z, ry + Math.PI, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
-    for (const s of [-1, 1]) { const px = ry ? x : s * 6.2, pz = ry ? s * 6.2 : z; B(px, 1.4, pz, 0.35, 2.8, 0.35, [0.1, 0.1, 0.12], 0, 4); B(px, 2.85, pz, 0.4, 0.12, 0.4, NEON.mag, 4); }
-    B(0, 3, z + 1.2, 13, 6, 0.6, [0.07, 0.07, 0.08], 0, 8); solid(-7, 7, 0, 6, z - 0.2, z + 1.6);   // quarantine gate
-  }
-  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : gNear; }, getG: () => g });
+  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
   // hub supply points
   WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });
   for (const sp of WORLD.supplies) supplyProp(g, sp);
 
-  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build();
+  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build();
 
   // flying traffic
   for (let i = 0; i < 46; i++) {
