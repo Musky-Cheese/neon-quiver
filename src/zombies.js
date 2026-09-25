@@ -198,8 +198,10 @@ function updateZombies(dt, time) {
     // --- steering
     let tx = P.x, tz = P.z;
     if (GAME.state === 'title') { if (!z.wt || Math.hypot(z.wt[0] - z.x, z.wt[1] - z.z) < 2) z.wt = [rand(-30, 30), rand(-30, 30)]; tx = z.wt[0]; tz = z.wt[1]; }
-    const dx = tx - z.x, dz = tz - z.z; const dist = Math.hypot(dx, dz) || 1e-3;
-    const want = Math.atan2(dx, dz);
+    const dist = Math.hypot(tx - z.x, tz - z.z) || 1e-3;
+    // around corners the flow field (world.js) leads; in the open, head straight for the player
+    if (GAME.state !== 'title' && NAV.ready && dist > 4.5 && navTarget(z.x, z.z, _nc)) { tx = _nc[0]; tz = _nc[1]; }
+    const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     const turn = z.crawl ? 1.8 : z.type === 'runner' ? 7 : z.type === 'boss' ? 1.6 : 3.2;
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
@@ -219,9 +221,10 @@ function updateZombies(dt, time) {
     if (z.stuckT > 2.5) { z.side *= -1; z.stuckT = 0.6; }
     z.phase += dt * (z.crawl ? 3.2 : z.type === 'runner' ? 11 : z.type === 'brute' ? 4.2 : z.type === 'boss' ? 3.2 : 5.2) * (spd > 0.1 || z.crawl ? 1 : 0.15);
     if (GAME.state === 'playing' && z.type !== 'boss') {
-      if (dist < (z.bestD ?? 1e9) - 1) { z.bestD = dist; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
-      if ((z.progT > (z.crawl ? 30 : 9) && dist > 5) || !isFinite(z.x + z.z)) {
-        let s = pick(WORLD.spawns); for (let k = 0; k < 8; k++) { s = pick(WORLD.spawns); if (Math.hypot(s[0] - P.x, s[1] - P.z) > 30) break; }
+      const pd = NAV.ready ? Math.min(navDistAt(z.x, z.z), 1e6) : dist;
+      if (pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
+      if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
+        const s = navSpawnPoint();
         z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
       }
     }
@@ -243,7 +246,7 @@ function updateBoss(z, dt, dist) {
   if (z.state === 'roar') { z.roarT += dt; z.jaw = 1; if (z.roarT > 1.4) { z.state = 'walk'; } return; }
   if (z.state === 'walk') {
     if (dist < 8 && z.slamCd <= 0) { z.state = 'slam'; z.atkT = 0; z.hitDone = false; AUD.groan(0, 0.35, 0.5); }
-    else if (z.summonCd <= 0) { z.state = 'roar'; z.roarT = 0; z.summonCd = rand(13, 17); AUD.roar(); shake(0.3); for (let k = 0; k < 2 + Math.min(3, GAME.bossCount); k++) { const s = pick(WORLD.spawns); GAME.spawnExtra('runner', s[0] + rand(-3, 3), s[1] + rand(-3, 3)); } }
+    else if (z.summonCd <= 0) { z.state = 'roar'; z.roarT = 0; z.summonCd = rand(13, 17); AUD.roar(); shake(0.3); for (let k = 0; k < 2 + Math.min(3, GAME.bossCount); k++) { const s = navSpawnPoint(14, 40); GAME.spawnExtra('runner', s[0], s[1]); } }
   }
   if (z.state === 'slam') {
     z.atkT += dt / 1.6;

@@ -158,43 +158,55 @@ const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCul
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, Math.PI); sun.layers.enableAll(); scene.add(sun); scene.add(sun.target);
-sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -52, right: 52, top: 52, bottom: -52, near: 1, far: 260 }); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -52, right: 52, top: 52, bottom: -52, near: 1, far: 260 }); sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04; sun.shadow.radius = 3;
 const PL = [];
 for (let i = 0; i < MAX_PL; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 1); l.layers.enableAll(); scene.add(l); PL.push(l); }
-const LAMPS = [];
+const SPOTS = [];      // pool of spot lights parked on the nearest street lamps / floodlights
+const N_SPOTS = 6, N_SHADOW_SPOTS = 4;
 const PL_K = Math.PI * 0.142;   // matches the old (1-d/r)^2 falloff with decay=1 lights
 function setPL(l, p, c, r) { l.position.set(p[0], p[1], p[2]); l.color.setRGB(c[0], c[1], c[2]); l.distance = r; l.intensity = PL_K * r; }
 function buildLights() {
-  for (const l of WORLD.lights) if (l.kind === 'lamp') {
-    const s = new THREE.SpotLight(0xffffff, 0, 26, 1.2, 0.55, 1);
-    s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] * 0.98, 0, l.p[2] * 0.98); s.layers.enableAll();
-    s.shadow.mapSize.set(1024, 1024); s.shadow.camera.near = 0.5; s.shadow.camera.far = 28; s.shadow.bias = -0.0008; s.shadow.normalBias = 0.03;
-    scene.add(s); scene.add(s.target); LAMPS.push({ l, s });
+  for (let i = 0; i < N_SPOTS; i++) {
+    const s = new THREE.SpotLight(0xffffff, 0, 28, 1.2, 0.55, 1); s.layers.enableAll();
+    s.shadow.mapSize.set(1024, 1024); s.shadow.camera.near = 0.5; s.shadow.camera.far = 30; s.shadow.bias = -0.0008; s.shadow.normalBias = 0.03; s.shadow.radius = 3;
+    scene.add(s); scene.add(s.target); SPOTS.push({ s, shadow: i < N_SHADOW_SPOTS });
   }
 }
-const _dyn = [];
+const _dyn = [], _stat = [], _lampsNear = [];
+const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
 function updateLights3(cam) {
   const T = THEME;
   hemi.color.setRGB(T.ambHi[0], T.ambHi[1], T.ambHi[2]); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
-  const sd = _n3(T.sunDir); sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(sd[0] * 120, sd[1] * 120, sd[2] * 120); sun.target.position.set(0, 0, 0);
-  for (const { s } of LAMPS) { s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * 20 * 1.35; }
-  // static: fountain + shops; dynamic: flashes, arrows, fires, burning zombies, boss core, pickups, hand light
-  let n = 0;
-  for (const l of WORLD.lights) {
-    if (l.kind === 'lamp') continue; if (n >= MAX_PL) break;
-    const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c;
-    setPL(PL[n++], l.p, c, l.r);
+  // the sun's shadow box follows the player (snapped so the shadow texels don't swim)
+  const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
+  sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
+  // lamps: nearest ones get the spot pool (the first few cast shadows)
+  _lampsNear.length = 0; for (const l of WORLD.lights) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
+  _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  for (let i = 0; i < SPOTS.length; i++) {
+    const { s } = SPOTS[i], l = _lampsNear[i];
+    if (!l) { s.intensity = 0; continue; }
+    s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
+    s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
   }
+  // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
+  _stat.length = 0; for (const l of WORLD.lights) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
+  _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   _dyn.length = 0;
   for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
   for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
+  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const fl = 0.8 + 0.2 * Math.sin(NQU.uTime.value * 17 + f.x) * Math.sin(NQU.uTime.value * 7.3 + f.z); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
   for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
   if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
   for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
-  _dyn.sort((a, b) => Math.hypot(a.p[0] - cam[0], a.p[2] - cam[2]) - Math.hypot(b.p[0] - cam[0], b.p[2] - cam[2]));
+  _dyn.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  let n = 0;
   if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; const hl = PL[n++]; setPL(hl, [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.25, BOW.handWorld[2] || cam[2]], [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18], 2.2); hl.intensity *= 0.3; }
+  const nStat = Math.min(_stat.length, 8);
+  for (let i = 0; i < nStat && n < MAX_PL; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (const d of _dyn) { if (n >= MAX_PL) break; setPL(PL[n++], d.p, d.c, d.r); }
+  for (let i = nStat; i < _stat.length && n < MAX_PL; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
 }
 
@@ -203,29 +215,102 @@ function buildWorld3() {
   const props = new THREE.Mesh(WORLD.meshProps, MAT.static); props.castShadow = true; props.receiveShadow = true; props.matrixAutoUpdate = false; scene.add(props);
   const near = new THREE.Mesh(WORLD.mesh, MAT.static); near.castShadow = false; near.receiveShadow = true; near.matrixAutoUpdate = false; scene.add(near);
   const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
-  buildSigns(); buildDecalPool(); buildLights();
+  buildSigns(); buildDecalPool(); buildLights(); buildVolumes();
   R3.built = true;
 }
 
-/* ---------------- environment (wet reflections): cube capture of the plaza ---------------- */
-let pmrem = null, envRT = null;
+/* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
+let pmrem = null;
+const ENV = { cache: {}, cur: null };
 const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
-const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); cubeCam.position.set(0, 5, 10); scene.add(cubeCam);
-function captureEnv() {
+const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
+function captureEnv(d) {
   if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = null;
   const vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false;
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = false;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = false;
+  const saveOn = NQU.uReflOn.value; NQU.uReflOn.value = 0;
+  cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
   renderer.shadowMap.needsUpdate = true;
   cubeCam.update(renderer, scene);
+  NQU.uReflOn.value = saveOn;
   partPoints.visible = vis; rainLines.visible = true;
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = true;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = m.n > 0;
-  if (envRT) envRT.dispose();
-  envRT = pmrem.fromCubemap(cubeRT.texture);
-  scene.environment = envRT.texture;
-  ENV_DIRTY = false;
+  if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
+  ENV.cache[d.id] = pmrem.fromCubemap(cubeRT.texture);
+  return ENV.cache[d.id];
+}
+function updateEnv(cam) {
+  if (ENV_DIRTY) { for (const k in ENV.cache) ENV.cache[k].dispose(); ENV.cache = {}; ENV_DIRTY = false; }
+  const d = districtAt(cam[0], cam[2]);
+  const rt = ENV.cache[d.id] || captureEnv(d);
+  if (scene.environment !== rt.texture) scene.environment = rt.texture;
+}
+
+/* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
+const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
+const coneMat = new THREE.ShaderMaterial({
+  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U),
+  transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
+  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
+${NOISE_GLSL}
+void main(){
+  vec3 V = normalize(cameraPosition - vW);
+  float facing = pow(abs(dot(normalize(vN), V)), 1.6);
+  float fall = pow(vH, 1.8) * (0.25 + 0.75 * smoothstep(0.0, 0.25, vH));
+  float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x) * 9., vW.y * 1.4 + uTime * 9.));
+  float d = length(vW - cameraPosition);
+  float near = smoothstep(0.5, 3.0, d);
+  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-d * uFogDen * 0.5);
+  gl_FragColor = vec4(c, 0.);
+}` });
+const CONES = [];
+const haloGeo = new THREE.InstancedBufferGeometry();
+function buildVolumes() {
+  for (const l of WORLD.lights) if (l.kind === 'lamp') {
+    const h = l.p[1] - 0.2, rb = Math.min(6, l.r * 0.3);
+    const g = new THREE.CylinderGeometry(0.35, rb, h, 24, 1, true); g.translate(0, -h / 2, 0);
+    const m = new THREE.Mesh(g, coneMat); m.position.set(l.p[0], l.p[1] - 0.1, l.p[2]); m.renderOrder = 8; m.frustumCulled = true;
+    scene.add(m); CONES.push(m);
+  }
+  const H = WORLD.halos, n = H.length;
+  const quad = new THREE.PlaneGeometry(1, 1);
+  haloGeo.index = quad.index; haloGeo.setAttribute('position', quad.attributes.position); haloGeo.setAttribute('uv', quad.attributes.uv);
+  const pos = new Float32Array(n * 4), col = new Float32Array(n * 3);
+  H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); });
+  haloGeo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); haloGeo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3));
+  haloGeo.instanceCount = n;
+  const mat = new THREE.ShaderMaterial({
+    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U), transparent: true, depthWrite: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+    vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
+void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
+    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
+void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-vD * uFogDen * 0.4), 0.); }` });
+  const mesh = new THREE.Mesh(haloGeo, mat); mesh.frustumCulled = false; mesh.renderOrder = 9; scene.add(mesh);
+}
+
+/* ---------------- wet-street reflections: the scene mirrored in y, at half resolution ---------------- */
+const reflRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
+const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
+const _S = new THREE.Matrix4().makeScale(1, -1, 1);
+const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
+NQU.uRefl.value = BLACK_TEX;
+function renderReflection(r) {
+  const W = Math.max(4, R3.W >> 1), H = Math.max(4, R3.H >> 1);
+  if (reflRT.width !== W || reflRT.height !== H) reflRT.setSize(W, H);
+  reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
+  reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
+  NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
+  const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
+  const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
+  partPoints.visible = false; rainLines.visible = false;
+  r.render(scene, reflCam);
+  partPoints.visible = true; rainLines.visible = true;
+  NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
 }
 
 /* ---------------- post: passes ---------------- */
@@ -233,21 +318,30 @@ class ScenePass extends Pass {
   constructor(cam, first) { super(); this.cam = cam; this.first = first; this.needsSwap = false; }
   render(r, writeBuffer, readBuffer) {
     r.setRenderTarget(this.renderToScreen ? null : readBuffer);
-    if (this.first) { const f = THEME.fog; r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false); renderer.shadowMap.needsUpdate = true; }
+    if (this.first) {
+      if (SETTINGS.quality >= 1 && THEME.wet > 0.2) renderReflection(r); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; }
+      r.setRenderTarget(this.renderToScreen ? null : readBuffer);
+      const f = THEME.fog; r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false); renderer.shadowMap.needsUpdate = true;
+    }
     else r.clearDepth();
     r.render(scene, this.cam);
   }
 }
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDmg: { value: 0 }, uLow: { value: 0 }, uExpo: { value: 1 }, uAberr: { value: 0 }, uSat: { value: 1 }, uGrade: { value: new THREE.Vector3(1, 1, 1) }, uLift: { value: new THREE.Vector3() }, uRes: { value: new THREE.Vector2(1, 1) } },
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDmg: { value: 0 }, uLow: { value: 0 }, uExpo: { value: 1 }, uAberr: { value: 0 }, uSat: { value: 1 }, uGrade: { value: new THREE.Vector3(1, 1, 1) }, uLift: { value: new THREE.Vector3() }, uRes: { value: new THREE.Vector2(1, 1) }, uFocus: { value: 0 } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime, uDmg, uLow, uExpo, uAberr, uSat; uniform vec3 uGrade, uLift; uniform vec2 uRes;
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime, uDmg, uLow, uExpo, uAberr, uSat, uFocus; uniform vec3 uGrade, uLift; uniform vec2 uRes;
 ${NOISE_GLSL}
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
 void main(){
   vec2 uv = vUv; vec2 cc = uv-0.5; float r2 = dot(cc,cc);
   float ab = (0.0015 + uDmg*0.006 + uAberr)*r2*4.;
   vec3 c; c.r = texture2D(tDiffuse, uv+cc*ab).r; c.g = texture2D(tDiffuse, uv).g; c.b = texture2D(tDiffuse, uv-cc*ab).b;
+  if (uFocus > 0.001) {   // aiming: the edges of the frame soften, the target stays crisp
+    float k = uFocus * smoothstep(0.02, 0.2, r2); vec3 acc = c; float wsum = 1.;
+    for (int i = 1; i <= 6; i++) { float t = float(i) / 6.; vec2 o = cc * t * 0.014 * k; float w = 1. - t * 0.5; acc += texture2D(tDiffuse, uv - o).rgb * w + texture2D(tDiffuse, uv + o * 0.5).rgb * w * 0.5; wsum += w * 1.5; }
+    c = mix(c, acc / wsum, clamp(k * 2., 0., 0.85));
+  }
   c *= uExpo;
   float lum = dot(c, vec3(0.3,0.59,0.11));
   c = mix(c, vec3(lum)*vec3(1.1,0.9,0.9), uLow*0.55);
@@ -278,8 +372,7 @@ function buildComposer(W, H, q) {
 }
 function applyQuality3(q) {
   const sh = q >= 1;
-  sun.castShadow = sh; for (const { s } of LAMPS) s.castShadow = sh;
-  const ms = q >= 2 ? 2048 : 1024; if (sun.shadow.mapSize.x !== ms * 2 && sh) { sun.shadow.mapSize.set(ms * 2, ms * 2); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  sun.castShadow = sh; for (const { s, shadow } of SPOTS) s.castShadow = sh && shadow;
 }
 
 /* ---------------- per-frame sync + render ---------------- */
@@ -300,18 +393,19 @@ function render3(time, W, H, fov, cam) {
   SKY_U.uZen.value.setRGB(...T.zen); SKY_U.uMid.value.setRGB(...T.mid); SKY_U.uGlow.value.setRGB(...T.glow); SKY_U.uCloud.value.setRGB(...T.cloud); SKY_U.uDiscCol.value.setRGB(...T.disc); SKY_U.uDiscDir.value.set(...T.discDir); SKY_U.uStars.value = T.stars;
   for (const { s, m } of SIGNS) m.material.uniforms.uCol.value.setRGB(s.col[0] * T.sign, s.col[1] * T.sign, s.col[2] * T.sign);
   rainMat.uniforms.uAlpha.value = T.rain; rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol);
-  NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5;
+  NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain;
+  VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain) * (SETTINGS.quality === 0 ? 0.6 : 1);
   updateLights3(cam);
   // dynamic geometry
   flushList(WORLD_ITEMS, false); flushList(VM_ITEMS, true);
   partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
-  if (ENV_DIRTY) captureEnv();
+  updateEnv(cam);
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uRes.value.set(W, H);
+  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H);
   bloomPass.strength = T.bloom * (T.bloomK || 0.32); bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   vmPass.enabled = VM_ITEMS.n > 0 && !DBG.noVM;
   composer.render();

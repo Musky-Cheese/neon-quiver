@@ -52,6 +52,7 @@ addEventListener('keydown', (e) => {
     if (k === 'KeyQ') selectArrow(GAME.lastType);
     if (k === 'KeyP' || (k === 'Escape' && INPUT.freeLook)) GAME.pause();
     if (k === 'Space') e.preventDefault();
+    if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
   if (k === 'KeyM') { SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); }
 });
@@ -236,7 +237,7 @@ function dropPickup(x, z, forceType) {
   const r = Math.random();
   let kind = forceType || (r < 0.55 ? 'ammo' : 'health');
   const at = kind === 'ammo' ? pick([1, 1, 2, 3, 3]) : 0;
-  PICKUPS.push({ x: clamp(x, -38, 38), z: clamp(z, -38, 38), kind, at, t: 0 });
+  PICKUPS.push({ x, z, kind, at, t: 0 });
 }
 function updatePickups(dt) {
   for (let i = PICKUPS.length - 1; i >= 0; i--) {
@@ -280,7 +281,7 @@ const GAME = {
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
-    ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
+    ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.ammo = [Infinity, 4, 2, 4];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
@@ -289,11 +290,12 @@ const GAME = {
   },
   startWave() {
     if (this.state !== 'playing') return;
+    this.intermission = false; this.clearedShown = false;
     this.wave++;
     const boss = this.wave % 5 === 0;
     const n = Math.round((6 + this.wave * 3.2) * (boss ? 0.55 : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
-    this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'HOLD THE PLAZA' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
+    this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
     if (boss) this.bossPending = 4;
     hudWave();
@@ -304,9 +306,8 @@ const GAME = {
     const pRun = w >= 2 ? Math.min(0.38, 0.1 + (w - 2) * 0.05) : 0, pBrute = w >= 3 ? Math.min(0.2, 0.06 + (w - 3) * 0.025) : 0;
     const type = r < pBrute ? 'brute' : r < pBrute + pRun ? 'runner' : 'walker';
     // pick a spawn not right next to the player
-    let s; for (let k = 0; k < 6; k++) { s = pick(WORLD.spawns); if (Math.hypot(s[0] - PLAYER.x, s[1] - PLAYER.z) > 30) break; }
-    const side = Math.abs(s[0]) > Math.abs(s[1]);
-    spawnZombie(type, s[0] + (side ? 0 : rand(-4.5, 4.5)), s[1] + (side ? rand(-4.5, 4.5) : 0), w);
+    const s = navSpawnPoint();
+    spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
   aliveCount() { let n = 0; for (const z of ZOMBIES) if (!z.dead) n++; return n; },
@@ -318,8 +319,8 @@ const GAME = {
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0) {
         this.clearT += dt;
-        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} BONUS`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); }
-        if (this.clearT > 3.2) { this.clearedShown = false; this.openShop(); }
+        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · REACH AN ARMORY TERMINAL`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = 35; }
+        if (this.intermission) { this.interT -= dt; if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; this.startWave(); } }
       }
     }
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -329,8 +330,8 @@ const GAME = {
   spawnBoss() {
     this.bossCount++;
     // drop in front of the player, inside the plaza
-    camBasis(); let x = PLAYER.x + _cf[0] * 22, z = PLAYER.z + _cf[2] * 22; x = clamp(x, -30, 30); z = clamp(z, -30, 30);
-    if (Math.hypot(x, z) < 6) x += 10;
+    camBasis(); let [x, z] = navNearestPoint(PLAYER.x + _cf[0] * 18, PLAYER.z + _cf[2] * 18);
+    if (Math.hypot(x - PLAYER.x, z - PLAYER.z) < 8) [x, z] = navSpawnPoint(10, 24);
     this.boss = spawnZombie('boss', x, z, this.wave);
     this.showBanner('THE WARDEN', 'AIM FOR THE GLOWING CORE', '#ff3df0');
     document.getElementById('bossbar').hidden = false;
@@ -355,7 +356,7 @@ const GAME = {
   toast(text, color) { this.toasts.unshift({ text, color, t: 1.6 }); if (this.toasts.length > 4) this.toasts.pop(); },
   showBanner(title, sub, color) { this.banner = { title, sub, color }; this.bannerT = 3; },
   openShop() { this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; BOW.state = 'ready'; BOW.draw = 0; if (document.exitPointerLock) document.exitPointerLock(); renderShop(); setScreen('shop'); },
-  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); this.startWave(); },
+  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); this.intermission = false; this.startWave(); },
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; AUD.drawStop(); INPUT.mouseDown = false; if (BOW.state === 'drawing') BOW.state = 'letdown'; setScreen('pause'); drawLogo($('pauseLogo'), 'PAUSED', '#29e7ff'); if (document.exitPointerLock && INPUT.locked) document.exitPointerLock(); },
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
@@ -486,6 +487,7 @@ function drawHUD2D(time) {
     GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
     hx.globalAlpha = 1;
   }
+  drawMinimap(hx, W, H, time); drawObjective(hx, W, H);
   // banners
   if (GAME.bannerT > 0 && GAME.banner) {
     const t = 3 - GAME.bannerT; const a = Math.min(1, t * 4, GAME.bannerT * 2);
@@ -541,7 +543,7 @@ function updatePlayer(dt) {
   if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
   P.vy -= 20 * dt; P.y += P.vy * dt; if (P.y <= 0) { P.y = 0; P.vy = 0; P.grounded = true; }
   pushOutCircle(P, 0.42);
-  P.x = clamp(P.x, -PLAZA + 0.6, PLAZA - 0.6); P.z = clamp(P.z, -PLAZA + 0.6, PLAZA - 0.6);
+  P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
   const hs = Math.hypot(P.vx, P.vz);
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
@@ -566,6 +568,9 @@ function step(dt) {
     updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) poseZombieRig(z, dt, t); } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
+  if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
+  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); }
+  const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
   // fire arrow nocked: flames at tip
@@ -618,7 +623,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time);
+  drawProjectiles(); drawPickups(time); drawSupplies(time);
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -649,7 +654,7 @@ function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
-  buildCity(); buildWorld3();
+  buildCity(); buildNav(); buildWorld3();
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb');
   wireUI();
   toTitle();
@@ -659,7 +664,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, ZRIG, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },

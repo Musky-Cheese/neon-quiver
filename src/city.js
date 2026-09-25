@@ -1,13 +1,13 @@
 /* ============================================================
    The city: Sector 7 plaza + endless neon skyline
    ============================================================ */
-const PLAZA = 40;
+const PLAZA = 40, RING = 74;   // plaza half-size; the inner ring of buildings reaches out to RING
 const WORLD = {
   boxes: [],    // {x0,x1,y0,y1,z0,z1} solid for everyone
   circles: [],  // {x,z,r,h}
   signs: [],    // {tex,m,col,mode,seed,add}
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
-  cars: [], train: null, mesh: null, spawns: [],
+  cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -94,10 +94,10 @@ function buildCity() {
     ['PAWN + CHIPS', 'panel'], ['KARAOKE', 'font'], ['VOLT', 'seg'], ['DATA CAFE', 'panel'], ['LUCKY 88', 'seg'], ['RAMEN', 'font'], ['MEMORY SHOP', 'panel'], ['SECTOR 7', 'seg'], ['CLONE CLINIC', 'font']];
   const vertWords = ['HOTEL', 'BAR', 'RAMEN', 'LIVE', 'OPEN', 'TATTOO', 'CHIPS', 'CLUB'];
   let sw = 0, vw = 0, bb = 0;
-  function building(x0, x1, z0, z1, h, face) {
+  function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
-    const col = facadeCols[Math.floor(R() * facadeCols.length)];
-    B(cx, h / 2, cz, w, h, d, col, 0, 1);
+    const col = opt.col || facadeCols[Math.floor(R() * facadeCols.length)];
+    B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1);
     solid(x0, x1, 0, h, z0, z1);
     // setback tier
     if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, 1); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2); h += h2; }
@@ -113,6 +113,27 @@ function buildCity() {
     else { fx = x1 + 0.02; fz = cz; ry = Math.PI / 2; tx = 0; tz = 1; span = d; }
     const nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const P = (along, y, out) => [fx + tx * along + nx * out, y, fz + tz * along + nz * out];
+    if (opt.industrial) {   // warehouse: roll-up shutters, a hazard strip and a caged work light, no shop signs
+      const n = Math.max(1, Math.floor(span / 9));
+      for (let i = 0; i < n; i++) { const a = (i - (n - 1) / 2) * (span / n); const p = P(a, 2.6, 0.06); B(p[0], 2.6, p[2], tx ? 4.2 : 0.12, 5.2, tz ? 4.2 : 0.12, [0.2, 0.19, 0.17], 0, 8);
+        const q = P(a, 5.6, 0.25); B(q[0], 5.6, q[2], tx ? 0.6 : 0.3, 0.3, tz ? 0.6 : 0.3, [1, 0.8, 0.5], 3);
+        WORLD.halos.push({ p: P(a, 5.6, 0.45), s: 1.6, c: [0.7, 0.5, 0.25] });
+        if (i % 2 === 0) WORLD.lights.push({ p: P(a, 5, 2.5), r: 11, c: [1.8, 1.25, 0.6], shop: true }); }
+      const hz = P(0, 0.5, 0.08); B(hz[0], 0.5, hz[2], tx ? span * 0.96 : 0.14, 0.25, tz ? span * 0.96 : 0.14, NEON.amber, 0.9);
+      if (R() < 0.5) { const [txt, st] = [['DOCK ' + (1 + Math.floor(R() * 9)), 'seg'], ['FREIGHT', 'panel'], ['NO ENTRY', 'seg'], ['HAZMAT', 'panel']][Math.floor(R() * 4)]; const sp = P(0, 8.5, 0.15); addSign(signTexture(txt, '#ffb52e', st), sp[0], sp[1], sp[2], ry, Math.min(span * 0.5, 8), Math.min(span * 0.5, 8) / 4, [1.4, 1.4, 1.4], 0, st !== 'panel'); }
+      return;
+    }
+    if (opt.tenement) {     // alley walls: fire escapes, AC units, pipes, one lit doorway
+      const floors = Math.floor((h - 3) / 3.3);
+      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < Math.min(floors, 7); f++) { const p = P(a, f * 3.3 + 0.6, 0.7); B(p[0], p[1], p[2], tx ? 3.2 : 1.3, 0.08, tz ? 3.2 : 1.3, [0.07, 0.07, 0.08], 0, 4); const q = P(a, f * 3.3 + 1.1, 1.3); B(q[0], q[1], q[2], tx ? 3.2 : 0.05, 0.9, tz ? 3.2 : 0.05, [0.06, 0.06, 0.07], 0, 4); }
+      for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
+      const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
+      const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
+      const dl = P(dp[0] - fx, 2.8, 0.3); B(dp[0] + nx * 0.3, 2.75, dp[2] + nz * 0.3, tx ? 0.5 : 0.25, 0.1, tz ? 0.5 : 0.25, [1, 0.85, 0.6], 3);
+      WORLD.lights.push({ p: [dp[0] + nx * 2, 2.6, dp[2] + nz * 2], r: 9, c: [dc[0] * 1.2, dc[1] * 1.2, dc[2] * 1.2], shop: true });
+      if (R() < 0.45) { const [txt, st] = signWords[sw++ % signWords.length]; const sp = P(dp[0] * tx + dp[2] * tz - (fx * tx + fz * tz), 3.6, 0.15); addSign(signTexture(txt, '#' + dc.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, 5, 1.25, [1.5, 1.5, 1.5], 0, st !== 'panel'); }
+      return;
+    }
     // corner neon strips
     const nc = neonPick();
     for (const s of [-1, 1]) { const p = P(s * (span / 2 - 0.15), h / 2, 0.1); B(p[0], p[1], p[2], nx ? 0.2 : 0.25, h, nz ? 0.2 : 0.25, nc, 2.2); }
@@ -152,7 +173,7 @@ function buildCity() {
       let a = 6; while (a < 64) {
         const wdt = Math.min(r(12, 22), 64 - a); if (wdt < 6) break;
         const x0 = half > 0 ? a : -a - wdt, x1 = half > 0 ? a + wdt : -a;
-        const depth = r(18, 30), z0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, z1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
+        const depth = RING - PLAZA - 2.5, z0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, z1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
         building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z');
         a += wdt + 0.01;
       }
@@ -164,15 +185,19 @@ function buildCity() {
       let a = 6; while (a < PLAZA + 2.4) {
         const wdt = Math.min(r(12, 20), PLAZA + 2.5 - a); if (wdt < 5) break;
         const z0 = half > 0 ? a : -a - wdt, z1 = half > 0 ? a + wdt : -a;
-        const depth = r(18, 30), x0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, x1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
+        const depth = RING - PLAZA - 2.5, x0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, x1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
         building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-x' : '+x');
         a += wdt + 0.01;
       }
     }
   }
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {   // corner towers
+    const x0 = sx > 0 ? 57 : -RING - 2, x1 = sx > 0 ? RING + 2 : -57, z0 = sz > 0 ? 43 : -RING - 2, z1 = sz > 0 ? RING + 2 : -43, h = r(70, 130);
+    B((x0 + x1) / 2, h / 2, (z0 + z1) / 2, x1 - x0, h, z1 - z0, facadeCols[Math.floor(R() * 5)], 0, 1); solid(x0, x1, 0, h, z0, z1);
+  }
   g = gFar;
   // street walls further out, flanking the 4 corridors (so the streets read as streets)
-  for (const axis of ['x', 'z']) for (const s of [-1, 1]) for (const hside of [-1, 1]) {
+  for (const axis of ['z']) for (const s of [1]) for (const hside of [-1, 1]) {
     let a = PLAZA + 32; while (a < 150) {
       const len = r(14, 26), h = r(30, 110), depth = r(14, 24);
       const u0 = hside > 0 ? 7 : -7 - depth, u1 = hside > 0 ? 7 + depth : -7;
@@ -193,6 +218,7 @@ function buildCity() {
     if (dist > 440) continue;
     const ax = Math.abs(x), az = Math.abs(z), mx = Math.max(ax, az);
     if (ax < 86 && az < 86) continue;                       // inner ring lives here
+    if (DISTRICTS.some(d => x > d.x0 - 34 && x < d.x1 + 34 && z > d.z0 - 34 && z < d.z1 + 34)) continue;   // districts + their walls
     if ((ax < 36 || az < 36) && mx < 165) continue;          // street walls live here
     if (ax < 24 || az < 24) continue;                        // keep avenues open to the horizon
     if (R() < 0.18) continue;
@@ -214,7 +240,7 @@ function buildCity() {
   // monorail track crossing over the plaza
   B(0, 24, -24, 1000, 0.9, 2.2, [0.08, 0.08, 0.1], 0, 4);
   B(0, 23.5, -24, 1000, 0.1, 0.3, NEON.cyan, 2.5);
-  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4);
+  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) { B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4); if (Math.abs(x) < 170) WORLD.circles.push({ x, z: -24, r: 0.9, h: 24 }); }
 
   g = gProps;
   // ---------- plaza props ----------
@@ -270,6 +296,7 @@ function buildCity() {
     B(x, 6.85, z, 1.4, 0.06, 0.3, [0.8, 0.95, 1.0], 4);
     WORLD.circles.push({ x, z, r: 0.25, h: 7 });
     WORLD.lights.push({ p: [x, 6.4, z], r: 20, c: [1.2, 1.5, 2.0], kind: 'lamp' });
+    WORLD.halos.push({ p: [x, 6.8, z], s: 2.6, c: [-1, 0, 0] });
   }
   lamp(-32, -32); lamp(32, 32); lamp(-32, 32); lamp(32, -32);
   // holo barriers across the 4 street mouths
@@ -281,18 +308,19 @@ function buildCity() {
     segText(x, 'SEALED', 256, 64, 40, { color: '#ff2e88', align: 'center', glow: 0.6 });
     return canvasTex(cv);
   })();
-  for (const [x, z, ry] of [[0, PLAZA, 0], [0, -PLAZA, 0], [PLAZA, 0, Math.PI / 2], [-PLAZA, 0, Math.PI / 2]]) {
+  for (const [x, z, ry] of [[0, RING - 3, 0]]) {
     addSign(holoTex, x, 1.2, z, ry, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
     addSign(holoTex, x, 1.2, z, ry + Math.PI, 12, 2.4, [1.2, 1.2, 1.2], 1, true);
     for (const s of [-1, 1]) { const px = ry ? x : s * 6.2, pz = ry ? s * 6.2 : z; B(px, 1.4, pz, 0.35, 2.8, 0.35, [0.1, 0.1, 0.12], 0, 4); B(px, 2.85, pz, 0.4, 0.12, 0.4, NEON.mag, 4); }
+    B(0, 3, z + 1.2, 13, 6, 0.6, [0.07, 0.07, 0.08], 0, 8); solid(-7, 7, 0, 6, z - 0.2, z + 1.6);   // quarantine gate
   }
-  // spawn points deep in the 4 avenues
-  for (const d of [62, 80, 100]) { WORLD.spawns.push([0, d], [0, -d], [d, 0], [-d, 0]); }
+  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : gNear; }, getG: () => g });
+  g = gProps;
+  // hub supply points
+  WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });
+  for (const sp of WORLD.supplies) supplyProp(g, sp);
 
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build();
-  // pick the brightest few shop lights so we stay within budget
-  const shops = WORLD.lights.filter(l => l.shop).sort(() => R() - 0.5).slice(0, 5);
-  WORLD.lights = WORLD.lights.filter(l => !l.shop).concat(shops);
 
   // flying traffic
   for (let i = 0; i < 46; i++) {

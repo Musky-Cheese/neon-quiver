@@ -121,6 +121,7 @@ const NQU = {
   uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 },
+  uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
 };
 const NOISE_GLSL = `
 float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -172,14 +173,33 @@ attribute vec2 nqm;
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
-uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK; uniform vec3 uFogCol, uRimCol;
+uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
+${NOISE_GLSL}
+// rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
+float nqRipple(vec2 p, float t) {
+  vec2 id = floor(p), f = fract(p) - 0.5; float h = 0.;
+  for (int k = 0; k < 2; k++) {
+    float fk = float(k); vec2 o = vec2(h21(id + fk * 7.1), h21(id + 13.7 + fk)) - 0.5;
+    float ph = fract(t * (0.8 + 0.4 * h21(id + fk * 2.3)) + h21(id * 1.7 + fk * 3.3));
+    float d = length(f - o * 0.5), r = ph * 0.42;
+    h += sin((d - r) * 70.) * smoothstep(0.07, 0., abs(d - r)) * (1. - ph) * (1. - ph);
+  }
+  return h;
+}
+// bricks in facade space (x along the wall, y up): colour variation + mortar mask
+vec2 nqBrick(vec2 fc) {
+  vec2 b = fc / vec2(0.62, 0.24); b.x += step(1., mod(floor(b.y), 2.)) * 0.5;
+  vec2 f = fract(b), fw = max(fwidth(b), vec2(1e-3)) * 1.5;
+  float m = 1. - smoothstep(0.06, 0.06 + fw.x, min(f.x, 1. - f.x)) * smoothstep(0.1, 0.1 + fw.y, min(f.y, 1. - f.y));
+  return vec2(h21(floor(b)), m);
+}
 #ifdef NQ_INST
 varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
 #endif
 #ifdef NQ_Z
 varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash;
 #endif
-${NOISE_GLSL}`)
+`)
       .replace('#include <color_fragment>', `
   vec3 tint = vec3(1.0), skin = vec3(0.5), iemit = vec3(0.0); float flash = 0.0;
 #ifdef NQ_INST
@@ -197,8 +217,12 @@ ${NOISE_GLSL}`)
   vec3 base = vNqC.rgb * tint;
   vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
+  float bumpH = 0.0, wetRefl = 0.0;
   vec3 N0 = normalize(vNqN);
-  if (mat > 0.5 && mat < 1.5) {            // facade with windows
+  vec2 fcW = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
+  // rain streaks running down walls: darker, glossier stripes that fade toward the top
+  float streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vn(vec2(fcW.x * 11.7, fcW.y * 0.3));
+  if ((mat > 0.5 && mat < 1.5) || (mat > 8.5 && mat < 9.5)) {   // facades with windows (concrete panels or brick)
     if (abs(N0.y) < 0.5) {
       vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
       vec2 cell = fc / vec2(2.4, 3.3); vec2 id = floor(cell); vec2 f = fract(cell);
@@ -209,12 +233,29 @@ ${NOISE_GLSL}`)
       float flick = step(0.997, h21(id + floor(uTime*4.)));
       vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
       wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
-      emis += win*lit*(1.-flick)*wc*uWin;
-      // mullions and a faint panel texture on the concrete
-      float panel = 0.85 + 0.15*vn(fc*vec2(0.9,0.35) + bseed*17.);
-      base = mix(base*panel, vec3(0.015,0.02,0.04), win);
-      rough = mix(0.82, 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6, 1.6, win);
-    }
+      // inside the glass: a room gradient, mullions, and some blinds half drawn
+      float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
+      float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
+      float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
+      float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
+      emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
+      vec3 wall;
+      if (mat > 8.5) {        // brick tenements
+        vec2 br = nqBrick(fc);
+        wall = base * (0.75 + 0.5 * br.x) * (1. - br.y * 0.55);
+        bumpH = -br.y * 0.012;
+      } else {                // concrete panels: seams every floor and bay, blotchy weathering
+        float seam = max(1. - smoothstep(0., 0.035, abs(f.y - 0.02)), 1. - smoothstep(0., 0.02, abs(f.x - 0.02)));
+        float panel = 0.8 + 0.25 * vn(fc * vec2(0.9, 0.35) + bseed * 17.) + 0.1 * vn(fc * 4.3);
+        wall = base * panel * (1. - seam * 0.45);
+        bumpH = -seam * 0.01;
+      }
+      float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5;
+      wall *= 1. - grime * 0.5;
+      base = mix(wall, vec3(0.015,0.02,0.04), win);
+      bumpH -= win * 0.03;
+      rough = mix(mix(0.85, 0.45, streak * uWet), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
+    } else if (mat > 8.5) { base *= 0.8; }
   } else if (mat > 1.5 && mat < 2.5) {      // plaza tiles, wet
     vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
     vec2 l2 = 1. - smoothstep(vec2(0.012), vec2(0.012)+fw*1.5, gd);
@@ -222,17 +263,32 @@ ${NOISE_GLSL}`)
     float pud = smoothstep(0.52,0.66, vn(vNqW.xz*0.18));
     float tileV = 0.9 + 0.2*h21(floor(q));
     emis += vec3(0.1,0.55,1.0)*line*uGrid*(1.-pud*0.6);
-    base = mix(base*tileV*(1.-line*0.5), base*0.35, pud);
-    rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*2.0*uWet);
+    float stain = vn(vNqW.xz * 0.7) * 0.25 + vn(vNqW.xz * 3.7) * 0.12;
+    base = mix(base*tileV*(1.-line*0.5)*(1. - stain), base*0.35, pud);
+    bumpH = -line * 0.01 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
+    rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
+    wetRefl = mix(0.04, 0.9, pud) * clamp(uWet, 0., 1.);
   } else if (mat > 2.5 && mat < 3.5) {      // asphalt
     float pud = smoothstep(0.5,0.7, vn(vNqW.xz*0.12));
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
     float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
     emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
-    base *= (1.-pud*0.6) * (0.85 + 0.3*vn(vNqW.xz*3.1));
-    rough = mix(0.8, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*2.0*uWet);
+    float grain = vn(vNqW.xz*3.1), fine = vn(vNqW.xz*23.);
+    float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
+    base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
+    bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
+    rough = mix(0.85, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
+    wetRefl = mix(0.03, 0.9, pud) * clamp(uWet, 0., 1.);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
-    rough = 0.34; metal = 0.65; rimK = 1.0;
+    float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
+    rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
+    base *= 0.9 + 0.2 * vn(vNqW.xz * 2.1 + vNqW.y);
+  } else if (mat > 7.5 && mat < 8.5) {      // corrugated / painted steel: ribs, rust, scratches
+    float along = abs(N0.y) > 0.5 ? vNqW.x : fcW.x;
+    float rib = sin(along * 25.1);
+    float rust = smoothstep(0.55, 0.8, vn(fcW * 1.3 + N0.xz * 5.) + streak * 0.4);
+    base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
+    bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);
@@ -249,6 +305,13 @@ ${NOISE_GLSL}`)
     emis += base*sl*1.6; base *= 0.0;
   } else { rimK = 1.0; }
   diffuseColor.rgb = base;`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+  {   // derivative bump from the procedural height (view space)
+    vec3 sp = -vViewPosition, dpx = dFdx(sp), dpy = dFdy(sp);
+    float dhx = dFdx(bumpH), dhy = dFdy(bumpH);
+    vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx); float det = dot(dpx, r1);
+    if (abs(det) > 1e-9) normal = normalize(abs(det) * normal - sign(det) * (dhx * r1 + dhy * r2));
+  }`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = rough;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = metal;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
@@ -256,7 +319,18 @@ ${NOISE_GLSL}`)
 #ifdef NQ_VM
     rim *= 0.25;
 #endif
-    totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK; }`)
+    totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK;
+#ifndef NQ_VM
+    // planar reflection of the street (rendered mirrored by r3.js), rippled by the bumped normal
+    if (wetRefl > 0.0 && uReflOn > 0.5) {
+      vec2 suv = gl_FragCoord.xy / uRes; suv.y = 1. - suv.y;
+      vec3 wn = normalize((vec4(normal, 0.) * viewMatrix).xyz);
+      suv += wn.xz * vec2(0.025, -0.025);
+      float fres = 0.04 + 0.96 * pow(1. - clamp(dot(normal, normalize(vViewPosition)), 0., 1.), 5.);
+      totalEmissiveRadiance += texture2D(uRefl, suv).rgb * wetRefl * mix(0.2, 1.0, fres);
+    }
+#endif
+  }`)
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25; radiance *= envK;')
       .replace('#include <fog_fragment>', `
   { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
