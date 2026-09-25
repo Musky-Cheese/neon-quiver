@@ -1,9 +1,9 @@
 /* ============================================================
    three.js scene graph + frame pipeline
-   world pass -> GTAO (high) -> viewmodel pass -> bloom -> grade
+   world pass (MSAA, baked occlusion) -> viewmodel pass -> bloom -> grade
    ============================================================ */
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
-const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false };
+const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
 var ENV_DIRTY = true;
 function onThemeChanged() { ENV_DIRTY = true; }
 
@@ -169,7 +169,8 @@ function buildLights() {
   for (let i = 0; i < N_SPOTS; i++) {
     const s = new THREE.SpotLight(0xffffff, 0, 28, 1.2, 0.55, 1); s.layers.enableAll();
     s.shadow.mapSize.set(1024, 1024); s.shadow.camera.near = 0.5; s.shadow.camera.far = 30; s.shadow.bias = -0.0008; s.shadow.normalBias = 0.03; s.shadow.radius = 3;
-    scene.add(s); scene.add(s.target); SPOTS.push({ s, shadow: i < N_SHADOW_SPOTS });
+    s.shadow.autoUpdate = false;   // refreshed by updateLights3: half of them per frame, or at once when moved
+    scene.add(s); scene.add(s.target); SPOTS.push({ s, shadow: i < N_SHADOW_SPOTS, lamp: null });
   }
 }
 const _dyn = [], _stat = [], _lampsNear = [];
@@ -183,8 +184,11 @@ function updateLights3(cam) {
   // lamps: nearest ones get the spot pool (the first few cast shadows)
   _lampsNear.length = 0; for (const l of WORLD.lights) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
   _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  R3.tick = (R3.tick + 1) | 0;
   for (let i = 0; i < SPOTS.length; i++) {
-    const { s } = SPOTS[i], l = _lampsNear[i];
+    const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
+    if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
+    else if ((i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
@@ -215,8 +219,61 @@ function buildWorld3() {
   const props = new THREE.Mesh(WORLD.meshProps, MAT.static); props.castShadow = true; props.receiveShadow = true; props.matrixAutoUpdate = false; scene.add(props);
   const near = new THREE.Mesh(WORLD.mesh, MAT.static); near.castShadow = false; near.receiveShadow = true; near.matrixAutoUpdate = false; scene.add(near);
   const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes();
+  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
   R3.built = true;
+}
+
+/* ---------------- baked occlusion: sky visibility of every half-metre of street ----------------
+   The city's collision boxes become a top-down height map. For each open cell we march 16 jittered directions
+   and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
+   Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
+function buildOcclusion() {
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 488;   // covers x -154..154, z -154..90
+  const hgt = new Float32Array(W * H);
+  for (const b of WORLD.boxes) {
+    if (b.y1 < 0.35) continue;
+    const i0 = Math.max(0, Math.ceil((b.x0 - X0) / C - 0.5)), i1 = Math.min(W - 1, Math.floor((b.x1 - X0) / C - 0.5));
+    const j0 = Math.max(0, Math.ceil((b.z0 - Z0) / C - 0.5)), j1 = Math.min(H - 1, Math.floor((b.z1 - Z0) / C - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const k = j * W + i; if (b.y1 > hgt[k]) hgt[k] = b.y1; }
+  }
+  const D = [1, 2, 3, 4.5, 6.5, 9, 13, 18, 25, 34, 46, 62];   // march distances, in cells
+  const ND = 16, occ = new Float32Array(W * H).fill(-1);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const k = j * W + i; if (hgt[k] > 0) continue;
+    let blocked = 0; const jit = ((i * 73856093 ^ j * 19349663) >>> 0) % 1000 / 1000;   // per-cell rotation: no wedge banding
+    for (let a = 0; a < ND; a++) {
+      const ang = (a + jit) * Math.PI * 2 / ND, dx = Math.cos(ang), dz = Math.sin(ang);
+      let s = 0;
+      for (const d of D) {
+        const x = Math.round(i + dx * d), z = Math.round(j + dz * d);
+        if (x < 0 || z < 0 || x >= W || z >= H) break;
+        const hh = hgt[z * W + x]; if (hh > 0) { const sl = (hh - 0.2) / (d * C); if (sl > s) s = sl; }
+      }
+      blocked += s * s / (1 + s * s);              // sin^2 of the skyline angle: the cosine-weighted share of sky it hides
+    }
+    occ[k] = 1 - blocked / ND;
+  }
+  // spread open-cell values into the solid cells, so filtering at a wall's foot never blends in a rooftop
+  for (let pass = 0; pass < 4; pass++) {
+    const src = occ.slice();
+    for (let j = 1; j < H - 1; j++) for (let i = 1; i < W - 1; i++) {
+      const k = j * W + i; if (src[k] >= 0) continue;
+      let s = 0, n = 0; for (const o of [-1, 1, -W, W, -W - 1, -W + 1, W - 1, W + 1]) if (src[k + o] >= 0) { s += src[k + o]; n++; }
+      if (n) occ[k] = s / n;
+    }
+  }
+  for (let k = 0; k < W * H; k++) if (occ[k] < 0) occ[k] = 1;
+  const tmp = new Float32Array(W * H);
+  for (let pass = 0; pass < 2; pass++) {          // separable 5-tap box blur, twice: smooths the jitter into soft gradients
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0, n = 0; for (let d = -2; d <= 2; d++) { const x = i + d; if (x >= 0 && x < W) { s += occ[j * W + x]; n++; } } tmp[j * W + i] = s / n; }
+    for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0, n = 0; for (let d = -2; d <= 2; d++) { const z = j + d; if (z >= 0 && z < H) { s += tmp[z * W + i]; n++; } } occ[j * W + i] = s / n; }
+  }
+  const px = new Uint8Array(W * H);
+  for (let k = 0; k < W * H; k++) px[k] = Math.round(Math.min(1, occ[k]) * 255);
+  if (window.DBG_OCC) console.log('occlusion map ms', (performance.now() - t0).toFixed(0));
+  const tex = new THREE.DataTexture(px, W, H, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
+  NQU.uOcc.value = tex; NQU.uOccB.value.set(X0, Z0, 1 / (W * C), 1 / (H * C));
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
@@ -382,7 +439,7 @@ function buildComposer(W, H, q) {
   composer = new EffectComposer(renderer, rt); composer.setPixelRatio(1);
   worldPass = new ScenePass(camera, true); composer.addPass(worldPass);
   gtaoPass = null;
-  if (q >= 2) { gtaoPass = new GTAOPass(scene, camera, W, H); gtaoPass.blendIntensity = 0.85; gtaoPass.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1, scale: 1 }); composer.addPass(gtaoPass); }
+  // (ambient occlusion comes from the baked occlusion map now, at no per-frame cost)
   vmPass = new ScenePass(vmCamera, false); composer.addPass(vmPass);
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);

@@ -678,6 +678,7 @@ window.NQ = {
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
+  occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
   clear() { ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + 1.62), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },

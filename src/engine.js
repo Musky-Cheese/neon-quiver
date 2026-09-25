@@ -122,6 +122,8 @@ const NQU = {
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 },
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
+  // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
+  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) },
 };
 const NOISE_GLSL = `
 float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -174,6 +176,7 @@ attribute vec2 nqm;
       .replace('#include <common>', `#include <common>
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
+uniform sampler2D uOcc; uniform vec4 uOccB;
 ${NOISE_GLSL}
 // rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
 float nqRipple(vec2 p, float t) {
@@ -219,6 +222,17 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
   float bumpH = 0.0, wetRefl = 0.0;
   vec3 N0 = normalize(vNqN);
+  // baked occlusion: how much open sky this spot sees (alley floors, wall bases and corners go dark).
+  // Step out of the surface first so a wall samples the street in front of it, then fade up the wall.
+  float nqOcc = 1.0;
+#if !defined(NQ_Z) && !defined(NQ_VM)
+  if (uOccB.z > 0.0) {
+    vec2 ouv = (vNqW.xz + N0.xz * 0.4 - uOccB.xy) * uOccB.zw;
+    float a = texture2D(uOcc, ouv).r;
+    a = mix(a, 1.0, smoothstep(0.0, 14.0, vNqW.y) * a);
+    nqOcc = mix(a, 1.0, step(0.5, N0.y) * step(1.2, vNqW.y));   // roofs and ledges look at the sky
+  }
+#endif
   vec2 fcW = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
   // rain streaks running down walls: darker, glossier stripes that fade toward the top
   float streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vn(vec2(fcW.x * 11.7, fcW.y * 0.3));
@@ -250,8 +264,10 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
         wall = base * panel * (1. - seam * 0.45);
         bumpH = -seam * 0.01;
       }
-      float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5;
-      wall *= 1. - grime * 0.5;
+      // dirty water runs down from every sill; sheltered walls collect more soot
+      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vn(vec2(fc.x * 14., id.y * 3.1)));
+      float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5 + sill * 0.55 + (1. - nqOcc) * 0.45;
+      wall *= 1. - clamp(grime, 0., 1.4) * 0.5;
       base = mix(wall, vec3(0.015,0.02,0.04), win);
       bumpH -= win * 0.03;
       rough = mix(mix(0.85, 0.45, streak * uWet), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
@@ -260,7 +276,7 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
     vec2 l2 = 1. - smoothstep(vec2(0.012), vec2(0.012)+fw*1.5, gd);
     float line = max(l2.x,l2.y) * (0.35 + 0.65*clamp(0.02/max(fw.x,fw.y),0.,1.));
-    float pud = smoothstep(0.52,0.66, vn(vNqW.xz*0.18));
+    float pud = max(smoothstep(0.52,0.66, vn(vNqW.xz*0.18)), smoothstep(0.8, 0.5, nqOcc) * 0.75);   // water pools along wall bases
     float tileV = 0.9 + 0.2*h21(floor(q));
     emis += vec3(0.1,0.55,1.0)*line*uGrid*(1.-pud*0.6);
     float stain = vn(vNqW.xz * 0.7) * 0.25 + vn(vNqW.xz * 3.7) * 0.12;
@@ -269,7 +285,7 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
     wetRefl = mix(0.04, 0.9, pud) * clamp(uWet, 0., 1.);
   } else if (mat > 2.5 && mat < 3.5) {      // asphalt
-    float pud = smoothstep(0.5,0.7, vn(vNqW.xz*0.12));
+    float pud = max(smoothstep(0.5,0.7, vn(vNqW.xz*0.12)), smoothstep(0.8, 0.5, nqOcc) * 0.8);     // gutters stay wet
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
     float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
     emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
@@ -304,7 +320,7 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
   } else { rimK = 1.0; }
-  diffuseColor.rgb = base;`)
+  diffuseColor.rgb = base * mix(1.0, nqOcc, 0.55);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   {   // derivative bump from the procedural height (view space)
     vec3 sp = -vViewPosition, dpx = dFdx(sp), dpy = dFdy(sp);
@@ -331,7 +347,7 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     }
 #endif
   }`)
-      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25; radiance *= envK;')
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
       .replace('#include <fog_fragment>', `
   { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
