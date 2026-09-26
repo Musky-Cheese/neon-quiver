@@ -345,8 +345,24 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base *= (0.7 + 0.45 * gr) * mix(1., 0.72, uWet * step(0.5, N0.y));
     bumpH = gr * 0.002; rough = mix(0.62, 0.35, uWet * step(0.5, N0.y)); rimK = 0.5;
   } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
-    base *= 0.65 + 0.55 * vn(vNqW.xz * 6. + vNqW.y * 6.);
-    emis += base * uNeon * 0.3; rough = 0.62; rimK = 1.2; bumpH = vn(vNqW.xz * 17. + vNqW.y * 13.) * 0.006;
+    // individual leaves / petals: a cellular pattern laid on the dominant plane of the canopy surface
+    bool pinkF = base.r > base.g * 1.35;
+    vec3 an = abs(N0); vec2 lp = an.y > max(an.x, an.z) ? vNqW.xz : an.x > an.z ? vNqW.zy : vNqW.xy;
+    lp = lp * (pinkF ? 13. : 9.) + vec2(vn(vNqW.xz * 2.1), vn(vNqW.zy * 2.3)) * 1.5;
+    vec2 li = floor(lp), lf = fract(lp); float F1 = 9., F2 = 9.; vec2 cid = li;
+    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+      vec2 o = vec2(float(i), float(j)); vec2 pc = o + vec2(h21(li + o), h21(li + o + 7.1)) * 0.85 + 0.075;
+      float dd = length(pc - lf); if (dd < F1) { F2 = F1; F1 = dd; cid = li + o; } else if (dd < F2) F2 = dd;
+    }
+    float edgeL = smoothstep(0.0, 0.14, F2 - F1), hv = h21(cid * 1.31), dome = 1. - clamp(F1 * 1.6, 0., 1.);
+    // ragged silhouette: leaves at grazing angles fall away between the gaps
+    float ndv = abs(dot(N0, normalize(cameraPosition - vNqW)));
+    if (F2 - F1 < 0.1 + (1. - ndv) * 0.25 && ndv < 0.45 && vn(vNqW.xz * 3.3 + vNqW.y * 2.9) > 0.3) discard;
+    float clump = vn(vNqW.xz * 1.4 + vNqW.y * 1.7);
+    if (pinkF) base = mix(base, mix(vec3(1., 0.78, 0.86), vec3(0.86, 0.36, 0.55), hv), 0.65) * (0.62 + 0.45 * clump);   // white to deep pink petals
+    else base *= mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv) * (0.55 + 0.6 * clump);                           // dark to sunlit, yellowing leaves
+    base *= mix(0.62 + 0.3 * clump, 1.0, edgeL) * (0.8 + 0.3 * dome);
+    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4; bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
   } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops

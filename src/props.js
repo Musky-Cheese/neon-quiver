@@ -263,7 +263,7 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
   for (const t of tips) {
     cx += t[0]; cy += t[1]; cz += t[2];
     g.blob(pT(PM.a, t[0], t[1] + 0.2, t[2], r(0, TAU)), r(0.75, 1.0) * s, r(0.5, 0.62) * s, r(0.75, 1.0) * s, 0.4, r(0, 99), blossom, 1.8, 14, 10, 7, 1);
-    for (let i = 0; i < 1; i++) { const a = r(0, TAU), d = r(0.5, 0.8) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
+    for (let i = 0; i < 3; i++) { const a = r(0, TAU), d = r(0.5, 0.95) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
   }
   cx /= tips.length; cy /= tips.length; cz /= tips.length;
   WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
@@ -356,6 +356,7 @@ function propSakuraFar(g, R, x, z, s = 1, detail = 1, leaf = null) {   // leaf: 
     const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
     g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
     g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, glow, 14, seg, rings, 1);
+    if (detail >= 1) for (let k = 0; k < 2; k++) { const b = r(0, TAU), e = r(0.9, 1.4) * s; g.blob(pT(PM.a, tx + Math.cos(b) * e, ty + r(-0.2, 0.5) * s, tz + Math.sin(b) * e, r(0, TAU)), r(0.45, 0.7) * s, r(0.35, 0.55) * s, r(0.45, 0.7) * s, 0.45, r(0, 99), blossom, glow, 14, 7, 5, 1); }
   }
   g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, glow, 14, seg, rings, 1);
   if (detail >= 2 && !leaf && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
@@ -517,7 +518,6 @@ function propFootBridge(g, x, z, solid) {
   for (const s of [-1, 1]) {
     for (let i = 0; i <= 5; i++) { const zz = z - 2.5 + i, h = (H[Math.min(i, 4)] + H[Math.max(i - 1, 0)]) / 2; g.box(M4.trs(PM.a, x + s * 1.75, h + 0.45, zz, 0, 0, 0, 0.14, 0.9, 0.14), lac, 0, 13); }
     for (let i = 0; i < 5; i++) g.box(M4.trs(PM.a, x + s * 1.75, H[i] + 0.88, z - 2.5 + i + 0.5, 0, 0, 0, 0.1, 0.08, 1.05), lac, 0, 13);
-    solid(x + s * 1.75 - 0.08, x + s * 1.75 + 0.08, 0, 1.3, z - 2.5, z + 2.5);
   }
 }
 

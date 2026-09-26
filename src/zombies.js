@@ -52,7 +52,7 @@ function spawnZombie(type, x, z, wave) {
 function pushOutCircle(o, rad) {
   for (const b of WORLD.boxes) {
     if (o.y > b.y1 - 0.02) continue;   // standing on top of it
-    if (o.grounded && b.y1 - o.y < 0.33) continue;   // a step you can walk up
+    if ((o.grounded || o.T) && b.y1 - (o.y || 0) < (o.T ? 0.45 : 0.33)) continue;   // a step you can walk up (zombies wade over low ones)
     if (b.y0 > o.y + 2.2) continue;     // overhead (upper floors above a walk-in shop, the manor roof)
     const cx = clamp(o.x, b.x0, b.x1), cz = clamp(o.z, b.z0, b.z1);
     const dx = o.x - cx, dz = o.z - cz, d2 = dx * dx + dz * dz;
