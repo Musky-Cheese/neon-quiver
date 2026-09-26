@@ -50,7 +50,7 @@ addEventListener('keydown', (e) => {
   if (GAME.state === 'playing') {
     if (k === 'Digit1') selectArrow(0); if (k === 'Digit2') selectArrow(1); if (k === 'Digit3') selectArrow(2); if (k === 'Digit4') selectArrow(3);
     if (k === 'KeyQ') selectArrow(GAME.lastType);
-    if (k === 'KeyP' || (k === 'Escape' && INPUT.freeLook)) GAME.pause();
+    if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
@@ -71,12 +71,12 @@ gameEl.addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; for (let i = 0; i < 4; i++) { t = (t + dir + 4) % 4; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
 function requestLock(quiet) {
   try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { INPUT.freeLook = true; }); } catch (e) { INPUT.freeLook = true; }
-  if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 500);
+  if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 1500);
 }
 document.addEventListener('pointerlockchange', () => {
   INPUT.locked = document.pointerLockElement === canvas;
   if (INPUT.locked) INPUT.freeLook = false;
-  if (!INPUT.locked && GAME.state === 'playing' && !INPUT.freeLook) GAME.pause();
+  if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
   if (t < 0 || t > 3) return;
