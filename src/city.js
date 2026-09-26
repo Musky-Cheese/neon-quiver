@@ -269,15 +269,14 @@ function buildCity() {
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build();
 
   // no flying traffic: the city is dead (WORLD.cars stays empty)
-  WORLD.train = { x: -600, speed: 42, wait: 6 };
+  WORLD.train = { x: 34, speed: 0, wait: 0 };   // stalled over the plaza since the outbreak
 }
 
 const _pv = [0, 0, 0];
 function updateCity(dt) {
   for (const c of WORLD.cars) { c.t += c.s * dt; if (c.t > 480) c.t = -480; if (c.t < -480) c.t = 480; }
   const T = WORLD.train;
-  if (T.wait > 0) { T.wait -= dt; if (T.wait <= 0) T.x = -620; }
-  else { T.x += T.speed * dt; if (T.x > 620) { T.wait = rand(14, 24); } }
+  // the monorail is dead: it never moves
 }
 function drawCityDynamic(time) {
   for (const c of WORLD.cars) {
@@ -292,8 +291,7 @@ function drawCityDynamic(time) {
   if (T.wait <= 0) for (let i = 0; i < 5; i++) {
     const x = T.x - i * 13.5;
     drawItem(MESH.metal, M4.trs(poolM(), x, 26.1, -24, 0, 0, 0, 13, 3, 2.8), [0.16, 0.16, 0.2]);
-    drawItem(MESH.box, M4.trs(poolM(), x, 26.4, -24, 0, 0, 0, 12, 0.9, 2.9), [1, 0.8, 0.6], [1.6, 1.2, 0.8]);
-    drawItem(MESH.box, M4.trs(poolM(), x, 24.7, -24, 0, 0, 0, 13, 0.1, 2.9), NEON.mag, [3, 0.4, 1.4]);
+    drawItem(MESH.box, M4.trs(poolM(), x, 26.4, -24, 0, 0, 0, 12, 0.9, 2.9), [0.04, 0.045, 0.05]);   // dark, dead windows
   }
   // fountain hologram: rotating rings + beam
   for (let i = 0; i < 3; i++) {
