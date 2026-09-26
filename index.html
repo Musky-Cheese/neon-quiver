@@ -601,6 +601,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float grain = vn(vNqW.xz*3.1), fine = vn(vNqW.xz*23.);
     float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
     base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
+    {   // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
+      float wild = smoothstep(128., 162., vNqW.z) * step(abs(vNqW.x), 40.);
+      float grav = wild * smoothstep(0.35, 0.6, vn(vNqW.xz * 0.35) * (1. - wild * 0.4) + wild * 0.55);
+      base = mix(base * (1. - crack * wild), vec3(0.12, 0.105, 0.085) * (0.55 + 0.7 * fine) * (0.7 + 0.5 * grain), grav);
+      pud *= 1. - grav * 0.7; bumpH += grav * fine * 0.006;
+    }
     bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.85, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
     wetRefl = mix(0.03, 0.9, pud) * clamp(uWet, 0., 1.);
@@ -1441,6 +1447,63 @@ function propCompoundWall(g, x0, z0, x1, z1, solid) {
 function propGate(g, x, z, w, solid) {
   for (const s of [-1, 1]) { g.box(M4.trs(PM.a, x + s * w / 2, 1.6, z, 0, 0, 0, 0.4, 3.2, 0.4), [0.12, 0.07, 0.04], 0, 13); solid(x + s * w / 2 - 0.2, x + s * w / 2 + 0.2, 0, 3.2, z - 0.2, z + 0.2); }
   g.extrude(pT(PM.a, x, 3.2, z, Math.PI / 2), [[-1.1, 0], [1.1, 0], [0, 0.8]], w + 1.6, [0.07, 0.08, 0.09], 0, 8);
+}
+
+/* ---------- elevated freeway across the city/suburb seam: the only way through is the barricaded underpass ---------- */
+function propHighway(g, R, z, solid) {
+  const conc = [0.3, 0.3, 0.29], dark = [0.1, 0.1, 0.1];
+  const B = (x, y, zz, sx, sy, sz, c, e = 0, mat = 16) => g.box(M4.trs(PM.a, x, y, zz, 0, 0, 0, sx, sy, sz), c, e, mat);
+  B(0, 7.0, z, 136, 1.0, 14, conc);                                        // deck
+  for (const o of [-5, 0, 5]) B(0, 6.2, z + o, 136, 0.7, 0.9, dark);       // girders underneath
+  for (const s of [-1, 1]) { B(0, 8.0, z + s * 6.8, 136, 1.0, 0.4, conc); B(0, 8.55, z + s * 6.8, 136, 0.1, 0.45, [0.9, 0.55, 0.1], 0.25, 0); }
+  for (let x = -60; x <= 60.1; x += 16) {                                   // lamp posts on the deck, most of them dead
+    B(x, 10, z - 6.4, 0.18, 4, 0.18, dark, 0, 4); B(x, 11.9, z - 5.9, 0.3, 0.12, 1.1, dark, 0, 4);
+    if (R() < 0.3) { B(x, 11.8, z - 5.5, 0.25, 0.05, 0.5, [1, 0.6, 0.25], 3, 0); WORLD.halos.push({ p: [x, 11.7, z - 5.5], s: 2.5, c: [0.5, 0.25, 0.08] }); }
+  }
+  const neon = [[1, 0.2, 0.6], [0.2, 0.9, 1], [0.9, 1, 0.2], [1, 0.4, 0.1]];
+  for (let x = -60; x <= 60.1; x += 12) {                                   // pillars: pairs under a cap beam, tagged with glowing graffiti
+    if (Math.abs(x) < 7) continue;
+    B(x, 6.0, z, 1.6, 0.6, 11, dark);
+    for (const s of [-1, 1]) {
+      B(x, 3.0, z + s * 4, 1.3, 6, 1.3, conc); solid(x - 0.65, x + 0.65, 0, 6, z + s * 4 - 0.65, z + s * 4 + 0.65);
+      if (R() < 0.5) B(x, 1.4 + R(), z + s * 4 - s * 0.66, 1.0, 0.6, 0.02, neon[Math.floor(R() * 4)], 0.5, 0);
+    }
+  }
+  // flanks: jersey barriers topped with chain-link, blocking everything but the avenue
+  for (const s of [-1, 1]) {
+    for (let x = 10.6; x < 64; x += 3.2) propBarrier(g, s * x, z, false);
+    B(s * 36.5, 2.2, z, 53, 2.4, 0.04, [0.18, 0.19, 0.2], 0, 4);
+    for (let x = 9; x <= 64; x += 3.2) B(s * x, 2.2, z, 0.08, 2.4, 0.08, dark, 0, 4);
+    solid(s > 0 ? 9 : -64, s > 0 ? 64 : -9, 0, 3.4, z - 0.4, z + 0.4);
+  }
+  // the barricade across the avenue leaves a gap to squeeze through
+  for (const x of [-7.6, -4.4, 4.4, 7.6]) propBarrier(g, x, z + 0.5, false);
+  propHoverCar(g, R, -5.5, z + 4.2, 1.3, [0.25, 0.08, 0.06], 0); solid(-8, -3, 0, 1.6, z + 2.8, z + 5.6);
+  // sodium lamps bolted under the deck
+  for (const o of [-3.5, 3.5]) { B(0, 5.75, z + o, 0.6, 0.12, 0.3, [1, 0.55, 0.2], 3, 0); WORLD.lights.push({ p: [0, 5.2, z + o], r: 11, c: [1.6, 0.75, 0.22], shop: true }); }
+}
+/* ---------- gas station: canopy over two pump islands and a kiosk ---------- */
+function propGasStation(g, x, z, solid) {
+  const dark = [0.1, 0.1, 0.11], wht = [0.55, 0.55, 0.53];
+  const B = (bx, by, bz, sx, sy, sz, c, e = 0, mat = 16) => g.box(M4.trs(PM.a, x + bx, by, z + bz, 0, 0, 0, sx, sy, sz), c, e, mat);
+  B(0, 0.03, 0, 16, 0.06, 12, [0.2, 0.2, 0.2]);
+  B(0, 4.6, 0, 11, 0.6, 7, wht, 0, 15); B(0, 4.25, 0, 11.1, 0.12, 7.1, [0.1, 0.8, 0.5], 0.8, 0);
+  for (const bx of [-4.5, 4.5]) for (const bz of [-2.8, 2.8]) { B(bx, 2.15, bz, 0.35, 4.3, 0.35, wht, 0, 4); solid(x + bx - 0.2, x + bx + 0.2, 0, 4.3, z + bz - 0.2, z + bz + 0.2); }
+  for (const bx of [-2, 2]) { B(bx, 0.15, 0, 1.2, 0.3, 4, [0.25, 0.25, 0.25]); for (const bz of [-1, 1]) { B(bx, 0.95, bz, 0.6, 1.3, 0.5, dark, 0, 15); B(bx, 1.3, bz - 0.26, 0.4, 0.3, 0.02, [0.2, 1, 0.6], 0.6, 0); } solid(x + bx - 0.6, x + bx + 0.6, 0, 1.6, z - 2, z + 2); }
+  B(0, 1.6, 5.2, 7, 3.2, 3, [0.35, 0.33, 0.3]); B(0, 1.5, 3.68, 5, 1.6, 0.04, [1, 0.8, 0.5], 0.5, 0); solid(x - 3.5, x + 3.5, 0, 3.2, z + 3.7, z + 6.7);
+  B(-7, 4, -5, 0.3, 8, 0.3, dark, 0, 4); B(-7, 8.4, -5, 2.4, 1.4, 0.3, [0.1, 0.8, 0.5], 1.2, 0);
+  WORLD.lights.push({ p: [x, 3.8, z], r: 12, c: [1.1, 1.4, 1.2], shop: true });
+}
+/* ---------- arched wooden footbridge over the stream ---------- */
+function propFootBridge(g, x, z, solid) {
+  const wood = [0.2, 0.12, 0.07], lac = [0.45, 0.07, 0.05];
+  const H = [0.14, 0.28, 0.38, 0.28, 0.14];
+  H.forEach((h, i) => { const zz = z - 2.5 + i + 0.5; g.box(M4.trs(PM.a, x, h / 2, zz, 0, 0, 0, 3.6, h, 1.02), wood, 0, 13); solid(x - 1.8, x + 1.8, 0, h, zz - 0.5, zz + 0.5); });
+  for (const s of [-1, 1]) {
+    for (let i = 0; i <= 5; i++) { const zz = z - 2.5 + i, h = (H[Math.min(i, 4)] + H[Math.max(i - 1, 0)]) / 2; g.box(M4.trs(PM.a, x + s * 1.75, h + 0.45, zz, 0, 0, 0, 0.14, 0.9, 0.14), lac, 0, 13); }
+    for (let i = 0; i < 5; i++) g.box(M4.trs(PM.a, x + s * 1.75, H[i] + 0.88, z - 2.5 + i + 0.5, 0, 0, 0, 0.1, 0.08, 1.05), lac, 0, 13);
+    solid(x + s * 1.75 - 0.08, x + s * 1.75 + 0.08, 0, 1.3, z - 2.5, z + 2.5);
+  }
 }
 
 /* ============================================================
@@ -2365,7 +2428,7 @@ function buildDistricts(C) {
   /* ---------------- THE SUBURBS (south of the plaza) ---------------- */
   // dead suburbia between the towers and the gardens: a strip of low shops, then houses on two cross streets
   setG('near');
-  row('z', 76, 100, 8, 24, '-x', 7, 11); row('z', 76, 100, -24, -8, '+x', 7, 11);   // two-storey shops lining the avenue
+  row('z', 89, 101, -24, -8, '+x', 7, 11);                                           // two-storey shops on one side, a gas station on the other
   setG('sub');
   const SG = C.getG();
   quad(-64, 64, 100, 163, 0.012, [0.06, 0.08, 0.045], 19);                          // overgrown lawns
@@ -2386,6 +2449,12 @@ function buildDistricts(C) {
     const x = sgn * (66 + k * 8 + (R() - 0.5) * 4), z = fz + (R() - 0.5) * 5;
     propSakuraFar(C.getForest(), R, x, z, 1 + R() * 0.4, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]);
   }
+  propHighway(SG, R, 80, solid);                                                     // the freeway: city behind, suburbs ahead
+  propGasStation(SG, 16, 95, solid);
+  quad(-62, 62, 155.8, 161.2, 0.014, [0.03, 0.03, 0.025], 16);                         // the stream and its muddy banks
+  quad(-62, 62, 156.6, 160.4, 0.024, [0.02, 0.04, 0.045], 18);
+  for (let i = 0; i < 40; i++) { const x = -60 + i * 3 + (R() - 0.5) * 2; if (Math.abs(x) < 3) continue; const s = 0.25 + R() * 0.4; SG.blob(pT(PM.a, x, 0.05, (R() < 0.5 ? 156.3 : 160.7) + (R() - 0.5) * 0.5, R() * 6), s * 1.2, s * 0.5, s, 0.3, R() * 99, [0.2, 0.2, 0.19], 0, 16, 9, 6); }
+  propFootBridge(SG, 0, 158.5, solid);
   WORLD.navBlocks.push({ x0: -150, x1: -61, z0: 76, z1: 166 }, { x0: 61, x1: 150, z0: 76, z1: 166 });
   WORLD.supplies.push({ kind: 'terminal', x: 8.5, z: 108, ry: -1.2, d: 'suburbs' }, { kind: 'cache', x: -40, z: 118, d: 'suburbs' }, { kind: 'cache', x: 44, z: 145, d: 'suburbs' });
 
