@@ -523,18 +523,23 @@ function propFootBridge(g, x, z, solid) {
 
 /* ---------- walk-in shop interiors (local frame: a along the facade, d into the room) ---------- */
 function propShopInterior(L, type) {
-  const { Bl, Sl, W, D, RH, R, light } = L;
-  const T = { ramen: { wall: [0.3, 0.16, 0.1], floor: [0.14, 0.1, 0.08], glow: [1, 0.55, 0.25] },
-              clinic: { wall: [0.55, 0.6, 0.62], floor: [0.3, 0.33, 0.34], glow: [0.4, 1, 0.95] },
-              pawn: { wall: [0.2, 0.17, 0.2], floor: [0.12, 0.11, 0.1], glow: [1, 0.75, 0.3] } }[type];
-  Bl(0, D / 2, 0.03, W, D, 0.06, T.floor);                                                   // floor, walls, ceiling
-  Bl(0, D - 0.03, RH / 2, W, 0.06, RH, T.wall); for (const s of [-1, 1]) Bl(s * (W / 2 - 0.03), D / 2, RH / 2, 0.06, D, RH, T.wall);
-  Bl(0, D / 2, RH - 0.05, W, D, 0.1, [0.06, 0.06, 0.07]);
-  for (const dd of [2.2, 5.6]) Bl(0, dd, RH - 0.12, W * 0.6, 0.25, 0.04, T.glow, 2.2, 0);
-  // front: glass either side of an open doorway, a lintel above
-  for (const s of [-1, 1]) { Bl(s * (1.3 + W / 2) / 2, 0.06, 1.6, W / 2 - 1.3, 0.08, 3.2, [T.glow[0] * 0.25, T.glow[1] * 0.25, T.glow[2] * 0.25], 0.5, 10); Sl(s * 1.3, s * W / 2, 0, 0.12, 0, 3.2); }
+  const { Bl, BlP, Sl, W, D, RH, R, light } = L;
+  const T = SHOP_DEFS[type];
+  BlP(0, D / 2, 0.03, W, D, 0.06, T.floor, 0, T.fmat);                                       // floor, walls, ceiling (these cast shadows: no moonlight indoors)
+  BlP(0, D - 0.03, RH / 2, W, 0.06, RH, T.wall, 0, T.wmat); for (const s of [-1, 1]) BlP(s * (W / 2 - 0.03), D / 2, RH / 2, 0.06, D, RH, T.wall, 0, T.wmat);
+  BlP(0, D / 2, RH - 0.05, W, D, 0.1, T.ceil, 0, 20);
+  const legacy = type === 'ramen' || type === 'clinic' || type === 'pawn';
+  if (legacy) for (const dd of [2.2, 5.6]) Bl(0, dd, RH - 0.12, W * 0.6, 0.25, 0.04, T.glow, 2.2, 0);
+  // front: real glass either side of an open doorway (you can see in from the street), mullions, a lintel above
+  for (const s of [-1, 1]) {
+    L.glass(s * (1.4 + W / 2) / 2, 0.06, 1.65, W / 2 - 1.4, 0.03, 3.1, T.glow);
+    Bl(s * (W / 2 - 0.05), 0.06, 1.6, 0.1, 0.12, 3.2, [0.06, 0.06, 0.07], 0, 4); Bl(s * (1.4 + W / 2) / 2, 0.06, 0.08, W / 2 - 1.4, 0.14, 0.16, [0.06, 0.06, 0.07], 0, 4);
+    Sl(s * 1.3, s * W / 2, 0, 0.12, 0, 3.2);
+    if (R() < 0.75) { const a = s * (1.4 + W / 2) / 2 + (R() - 0.5), c = [[1, 0.2, 0.3], [0.3, 1, 0.5], [1, 0.8, 0.2]][Math.floor(R() * 3)]; Bl(a, 0.14, 2.2, 0.7, 0.02, 0.22, c, 3, 0); }   // neon OPEN in the window
+  }
   Bl(0, 0.06, 3.8, W, 0.2, 1.2, [0.05, 0.05, 0.06], 0, 4);
-  light(0, D * 0.5, RH - 0.8, 10, [T.glow[0] * 1.5, T.glow[1] * 1.5, T.glow[2] * 1.5]);
+  if (legacy) light(0, D * 0.5, RH - 0.8, 10, [T.glow[0] * 1.5, T.glow[1] * 1.5, T.glow[2] * 1.5]);
+  interiorKit(L, type);
   if (type === 'ramen') {
     Bl(0, D - 2.4, 0.55, W - 2, 0.7, 1.1, [0.25, 0.14, 0.07], 0, 13); Bl(0, D - 2.4, 1.13, W - 1.8, 0.9, 0.06, [0.4, 0.24, 0.12], 0, 13); Sl(-(W - 2) / 2, (W - 2) / 2, D - 2.85, D - 1.95, 0, 1.15);
     for (let a = -W / 2 + 1.6; a < W / 2 - 1.4; a += 1.3) { Bl(a, D - 3.4, 0.35, 0.08, 0.08, 0.7, [0.1, 0.1, 0.1], 0, 4); Bl(a, D - 3.4, 0.72, 0.42, 0.42, 0.06, [0.5, 0.08, 0.06], 0, 15); }
@@ -551,7 +556,7 @@ function propShopInterior(L, type) {
     Bl(0, D - 1.6, 1.0, 0.7, 0.7, 2.0, [0.5, 0.9, 0.9], 0.6, 10);                                                        // the clone tank
     Bl(0, D - 1.6, 0.1, 0.9, 0.9, 0.2, [0.2, 0.22, 0.25], 0, 4); Bl(0, D - 1.6, 2.05, 0.9, 0.9, 0.12, [0.2, 0.22, 0.25], 0, 4); Sl(-0.45, 0.45, D - 2.05, D - 1.15, 0, 2.1);
     for (const s of [-1, 1]) Bl(s * (W / 2 - 0.35), D - 1, 1.1, 0.5, 1.4, 2.2, [0.8, 0.8, 0.8], 0, 4);
-  } else {
+  } else if (type === 'pawn') {
     Bl(0, D - 2.6, 0.55, W - 3, 0.7, 1.1, [0.2, 0.5, 0.5], 0.25, 10); Sl(-(W - 3) / 2, (W - 3) / 2, D - 2.95, D - 2.25, 0, 1.1);   // glass counter
     for (const s of [-1, 1]) for (let y = 0.4; y < 3.2; y += 0.8) {                                                  // shelves crammed with junk
       Bl(s * (W / 2 - 0.4), D / 2, y, 0.6, D - 1.5, 0.05, [0.12, 0.1, 0.08], 0, 13);

@@ -142,9 +142,9 @@ const rainGeo = (function () {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
 const rainMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() } }, transparent: true, depthWrite: false,
+  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB }, transparent: true, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime; varying float vA, vK;
+  vertexShader: `attribute vec2 aP2; uniform float uTime; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vA, vK;
 void main(){ float S = 50.;
   float x = mod(position.x - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
   float z = mod(position.y - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
@@ -155,6 +155,7 @@ void main(){ float S = 50.;
   float dens = clamp(0.2 + 0.7 * spell + 0.45 * (patchD - 0.5), 0.12, 1.);
   float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
   vK = step(rnd, dens) * (0.45 + 0.8 * fract(rnd * 13.7));
+  if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);   // dry under a ceiling
   float wind = 0.08 + 0.32 * spell + 0.12 * sin(uTime * 1.3 + position.y * 0.21), len = 0.9 * (0.55 + 0.9 * fract(rnd * 5.3));
   vec3 p = vec3(x + aP2.y * wind * len * 2., y + aP2.y * len, z + aP2.y * 0.05); vA = aP2.y;
   gl_Position = projectionMatrix*viewMatrix*vec4(p,1.); }`,
@@ -229,8 +230,34 @@ function buildWorld3() {
   const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
   const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
   const sub = new THREE.Mesh(WORLD.meshSub, MAT.static); sub.castShadow = true; sub.receiveShadow = true; sub.matrixAutoUpdate = false; scene.add(sub);
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
+  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   R3.built = true;
+}
+
+/* ---------------- shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down ---------------- */
+function buildGlass() {
+  if (!WORLD.glass.length) return;
+  const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
+    transparent: true, depthWrite: false, vertexColors: true,
+    vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+${NOISE_GLSL}
+void main(){
+  vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
+  float fr = 0.04 + 0.96 * pow(1. - ndv, 5.);
+  vec2 fc = abs(N.x) > 0.5 ? vW.zy : vW.xy;
+  float beads = smoothstep(0.8, 0.95, vn(fc * vec2(26., 14.))) * (0.3 + uRain * 0.6);
+  float runs = smoothstep(0.6, 0.95, vn(vec2(fc.x * 11., fc.y * 0.6 + uTime * 0.25))) * uRain;
+  float grime = smoothstep(1.1, 0.0, vW.y) * 0.5 + smoothstep(0.55, 0.8, vn(fc * 1.3)) * 0.25;
+  vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
+  vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
+  float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-d * uFogDen)) * 0.8, 0., 1.));
+  gl_FragColor = vec4(col, a);
+}` });
+  const m = new THREE.Mesh(gg.build(), mat); m.matrixAutoUpdate = false; m.renderOrder = 3; scene.add(m);
 }
 
 /* ---------------- baked occlusion: sky visibility of every half-metre of street ----------------
@@ -284,6 +311,14 @@ function buildOcclusion() {
   const tex = new THREE.DataTexture(px, W, H, THREE.RedFormat, THREE.UnsignedByteType);
   tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
   NQU.uOcc.value = tex; NQU.uOccB.value.set(X0, Z0, 1 / (W * C), 1 / (H * C));
+  const inn = new Uint8Array(W * H);
+  for (const q of WORLD.indoor) {
+    const i0 = Math.max(0, Math.ceil((q.x0 - X0) / C - 0.5)), i1 = Math.min(W - 1, Math.floor((q.x1 - X0) / C - 0.5));
+    const j0 = Math.max(0, Math.ceil((q.z0 - Z0) / C - 0.5)), j1 = Math.min(H - 1, Math.floor((q.z1 - Z0) / C - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) inn[j * W + i] = 255;
+  }
+  const tin = new THREE.DataTexture(inn, W, H, THREE.RedFormat, THREE.UnsignedByteType); tin.magFilter = tin.minFilter = THREE.NearestFilter; tin.needsUpdate = true;
+  NQU.uIndoor.value = tin;
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */

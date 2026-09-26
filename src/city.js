@@ -11,6 +11,8 @@ const WORLD = {
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
+  glass: [],       // {m, c} see-through shopfront panes (r3.js draws them blended)
+  indoor: [],      // {x0,x1,z0,z1,y1} rooms: no rain, no wet surfaces, no sky light inside
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -97,20 +99,29 @@ function buildCity() {
     ['PAWN + CHIPS', 'panel'], ['KARAOKE', 'font'], ['VOLT', 'seg'], ['DATA CAFE', 'panel'], ['LUCKY 88', 'seg'], ['RAMEN', 'font'], ['MEMORY SHOP', 'panel'], ['SECTOR 7', 'seg'], ['CLONE CLINIC', 'font']];
   const vertWords = ['HOTEL', 'BAR', 'RAMEN', 'LIVE', 'OPEN', 'TATTOO', 'CHIPS', 'CLUB'];
   let sw = 0, vw = 0, bb = 0;
-  const SHOPS = ['ramen', 'pawn', 'clinic'];
+  let shopN = 0; const nextShop = () => SHOP_ORDER[shopN % SHOP_ORDER.length];
   // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
   function shopBody(x0, x1, z0, z1, h, face, col, type) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = face[1] === 'z' ? x1 - x0 : z1 - z0, DF = face[1] === 'z' ? z1 - z0 : x1 - x0;
     const tx = face[1] === 'z' ? 1 : 0, tz = 1 - tx, nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const fx = nx ? (nx < 0 ? x0 : x1) : cx, fz = nz ? (nz < 0 ? z0 : z1) : cz;
     const W = Math.min(span - 3, 11), D = 8, RH = 4.4;
-    const wp = (a, dd) => [fx + tx * a - nx * dd, fz + tz * a - nz * dd];
+    const th = Math.atan2(-nx, -nz), ca = Math.cos(th), sa = Math.sin(th);   // a rotation (never a mirror) from room space to world
+    const wp = (a, dd) => [fx + a * ca + dd * sa, fz - a * sa + dd * ca];
     const Bl = (a, dd, y, sa, sd, sy, c, e = 0, mat = 16) => { const [x, z] = wp(a, dd); B(x, y, z, tx ? sa : sd, sy, tz ? sa : sd, c, e, mat); };
+    const BlP = (...args) => { const pg = g; g = gProps; Bl(...args); g = pg; };
     const Sl = (a0, a1, d0, d1, y0, y1) => { const [xa, za] = wp(a0, d0), [xb, zb] = wp(a1, d1); solid(Math.min(xa, xb), Math.max(xa, xb), y0, y1, Math.min(za, zb), Math.max(za, zb)); };
+    const Mm = M4.create();
+    const Mr = (a, dd, y, ry = 0, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, 1, 1, 1); };
+    const MS = (a, dd, y, ry, sx, sy, sz, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, sx, sy, sz); };
+    const glass = (a, dd, y, sa, sd, sy, c) => { const [x, z] = wp(a, dd); WORLD.glass.push({ m: M4.trs(M4.create(), x, y, z, 0, th, 0, sa, sy, sd), c }); };
+    const halo = (a, dd, y, s, c) => { const [x, z] = wp(a, dd); WORLD.halos.push({ p: [x, y, z], s, c }); };
+    { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
     Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, 1); Sl(-span / 2, span / 2, 0, DF, RH, h);
     Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, 1); Sl(-span / 2, span / 2, D, DF, 0, RH);
     for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, 1); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
-    propShopInterior({ Bl, Sl, W, D, RH, R, light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
+    propShopInterior({ g, Bl, BlP, Sl, W, D, RH, R: mulberry(1000 + shopN++ * 97), M: Mr, MS, wp, glass, halo,
+      light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
   }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
@@ -164,7 +175,7 @@ function buildCity() {
     const pe = P(0, 3.5, 1.8); B(pe[0], 3.5, pe[2], tx ? span * 0.85 : 0.1, 0.12, tz ? span * 0.85 : 0.1, sc, 2.5);
     WORLD.lights.push({ p: P(0, 2.5, 3), r: 12, c: [sc[0] * 1.6, sc[1] * 1.6, sc[2] * 1.6], shop: true });
     // horizontal sign above storefront
-    const [txt, st] = opt.shop ? [{ ramen: 'RAMEN', clinic: 'CLONE CLINIC', pawn: 'PAWN + CHIPS' }[opt.shop], 'font'] : signWords[sw++ % signWords.length];
+    const [txt, st] = opt.shop ? [SHOP_DEFS[opt.shop].sign, SHOP_DEFS[opt.shop].st] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
     addSign(signTexture(txt, '#' + [nc, sc, NEON.amber][sw % 3].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
     // vertical blade sign
@@ -192,7 +203,7 @@ function buildCity() {
         const wdt = Math.min(r(12, 22), 64 - a); if (wdt < 6) break;
         const x0 = half > 0 ? a : -a - wdt, x1 = half > 0 ? a + wdt : -a;
         const depth = RING - PLAZA - 2.5, z0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, z1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
-        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z', side > 0 && wdt >= 12 && Math.abs(x0 + x1) < 60 && SHOPS.length ? { shop: SHOPS.shift() } : {});
+        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z', wdt >= 12 ? { shop: nextShop() } : {});
         a += wdt + 0.01;
       }
     }
@@ -204,7 +215,7 @@ function buildCity() {
         const wdt = Math.min(r(12, 20), PLAZA + 2.5 - a); if (wdt < 5) break;
         const z0 = half > 0 ? a : -a - wdt, z1 = half > 0 ? a + wdt : -a;
         const depth = RING - PLAZA - 2.5, x0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, x1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
-        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-x' : '+x');
+        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-x' : '+x', wdt >= 12 ? { shop: nextShop() } : {});
         a += wdt + 0.01;
       }
     }
