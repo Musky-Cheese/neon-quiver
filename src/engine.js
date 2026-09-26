@@ -251,6 +251,23 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
+      if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+        vec3 V = normalize(vNqW - cameraPosition);
+        vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
+        vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
+        float tx = (d.x > 0. ? rs.x - p.x : -p.x) / (abs(d.x) < 1e-4 ? 1e-4 : d.x);
+        float ty = (d.y > 0. ? rs.y - p.y : -p.y) / (abs(d.y) < 1e-4 ? 1e-4 : d.y);
+        float tz = dep / d.z; float t = min(min(tx, ty), tz);
+        vec3 hp = vec3(p, 0.) + d * t; float sh;
+        if (t == tz) {         // back wall with a piece of furniture or a figure in silhouette
+          float fx = hp.x / rs.x, ft = h21(id + 4.4);
+          float furn = step(abs(fx - 0.3 - ft * 0.4), 0.12 + ft * 0.15) * step(hp.y, 0.9 + ft * 1.1);
+          sh = mix(0.62, 0.08, furn);
+        } else if (t == ty) sh = d.y > 0. ? 1.0 : 0.3 * (0.7 + 0.3 * vn(hp.xz * 3.));   // ceiling light / floor
+        else sh = 0.42;        // side walls
+        sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
+        room = sh * (0.55 + 0.45 * h21(id + 1.9));
+      }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
       vec3 wall;

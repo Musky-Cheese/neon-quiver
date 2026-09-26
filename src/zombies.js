@@ -3,8 +3,8 @@
    Sculpted in Blender (tools/make_models.py), animated procedurally here.
    ============================================================ */
 const ZTYPES = {
-  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [0.65, 1, 0.25], reach: 1.35, atk: 0.85 },
-  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [1, 0.4, 0.1], reach: 1.3, atk: 0.6 },
+  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
+  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
 };

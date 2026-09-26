@@ -172,6 +172,7 @@ function poseZombieRig(z, dt, time) {
     addRot(B.spine, R.t - z.flinch * 0.2 + 0.3 * legs, R.y, 0);
     addRot(B.jaw, z.jaw * 0.45, 0, 0);
     if (legs > 0) { addRot(B.kneeL, 0.9 * legs, 0, 0); addRot(B.kneeR, 0.7 * legs, 0, 0); addRot(B.hipL, -0.5 * legs, 0, 0); addRot(B.hipR, -0.4 * legs, 0, 0); B.pelvis.position.y -= 0.12 * legs; }
+    if (z.type === 'runner') { addRot(B.spine, 0.38, 0, 0); addRot(B.neck, -0.28, 0, 0); }   // hunched, head up to keep the gaze level
     if (z.type === 'walker' && !z.crawl) addRot(B.neck, 0, 0, Math.sin(time * 2.1 + z.seed) * 0.12);
   }
   if (w > 0) {
@@ -231,6 +232,14 @@ function drawZombieRig(z, time) {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
+  }
+  if (T === 'brute' && !z.headless) {   // gas mask: rubber face plate, twin filters, lenses lit by the eyes
+    const lg = dying ? [0.3, 0, 0.05] : [e[0] * 3.2, e[1] * 3, e[2] * 3];
+    part(neck, 0, 0.1, 0.1, 0.075, 0.06, 0.045, [0.05, 0.05, 0.055], null, fl);
+    for (const s of [-1, 1]) {
+      part(neck, s * 0.06, 0.07, 0.13, 0.03, 0.045, 0.03, [0.12, 0.13, 0.12], null, fl, MESH.cyl || MESH.box, 1.2, 0, s * 0.5);
+      part(neck, s * 0.045, 0.175, 0.105, 0.028, 0.024, 0.012, [0.2, 0.05, 0.05], lg, 0);
+    }
   }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {
