@@ -309,6 +309,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float grain = vn(vNqW.xz*3.1), fine = vn(vNqW.xz*23.);
     float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
     base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
+    {   // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
+      float wild = smoothstep(128., 162., vNqW.z) * step(abs(vNqW.x), 40.);
+      float grav = wild * smoothstep(0.35, 0.6, vn(vNqW.xz * 0.35) * (1. - wild * 0.4) + wild * 0.55);
+      base = mix(base * (1. - crack * wild), vec3(0.12, 0.105, 0.085) * (0.55 + 0.7 * fine) * (0.7 + 0.5 * grain), grav);
+      pud *= 1. - grav * 0.7; bumpH += grav * fine * 0.006;
+    }
     bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.85, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
     wetRefl = mix(0.03, 0.9, pud) * clamp(uWet, 0., 1.);

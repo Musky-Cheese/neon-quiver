@@ -188,7 +188,7 @@ function buildDistricts(C) {
   /* ---------------- THE SUBURBS (south of the plaza) ---------------- */
   // dead suburbia between the towers and the gardens: a strip of low shops, then houses on two cross streets
   setG('near');
-  row('z', 76, 100, 8, 24, '-x', 7, 11); row('z', 76, 100, -24, -8, '+x', 7, 11);   // two-storey shops lining the avenue
+  row('z', 89, 101, -24, -8, '+x', 7, 11);                                           // two-storey shops on one side, a gas station on the other
   setG('sub');
   const SG = C.getG();
   quad(-64, 64, 100, 163, 0.012, [0.06, 0.08, 0.045], 19);                          // overgrown lawns
@@ -209,6 +209,12 @@ function buildDistricts(C) {
     const x = sgn * (66 + k * 8 + (R() - 0.5) * 4), z = fz + (R() - 0.5) * 5;
     propSakuraFar(C.getForest(), R, x, z, 1 + R() * 0.4, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]);
   }
+  propHighway(SG, R, 80, solid);                                                     // the freeway: city behind, suburbs ahead
+  propGasStation(SG, 16, 95, solid);
+  quad(-62, 62, 155.8, 161.2, 0.014, [0.03, 0.03, 0.025], 16);                         // the stream and its muddy banks
+  quad(-62, 62, 156.6, 160.4, 0.024, [0.02, 0.04, 0.045], 18);
+  for (let i = 0; i < 40; i++) { const x = -60 + i * 3 + (R() - 0.5) * 2; if (Math.abs(x) < 3) continue; const s = 0.25 + R() * 0.4; SG.blob(pT(PM.a, x, 0.05, (R() < 0.5 ? 156.3 : 160.7) + (R() - 0.5) * 0.5, R() * 6), s * 1.2, s * 0.5, s, 0.3, R() * 99, [0.2, 0.2, 0.19], 0, 16, 9, 6); }
+  propFootBridge(SG, 0, 158.5, solid);
   WORLD.navBlocks.push({ x0: -150, x1: -61, z0: 76, z1: 166 }, { x0: 61, x1: 150, z0: 76, z1: 166 });
   WORLD.supplies.push({ kind: 'terminal', x: 8.5, z: 108, ry: -1.2, d: 'suburbs' }, { kind: 'cache', x: -40, z: 118, d: 'suburbs' }, { kind: 'cache', x: 44, z: 145, d: 'suburbs' });
 
