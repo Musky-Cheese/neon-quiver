@@ -2005,12 +2005,7 @@ function buildCity() {
 
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build();
 
-  // flying traffic
-  for (let i = 0; i < 46; i++) {
-    const alongX = R() < 0.5; const lane = (R() < 0.5 ? -1 : 1) * r(2, 22) * (R() < 0.3 ? 1 : 1);
-    const cross = R() < 0.6 ? (R() < 0.5 ? 0 : (R() < 0.5 ? -1 : 1) * Math.floor(r(1, 4)) * 136) : 0;
-    WORLD.cars.push({ alongX, off: cross + lane, h: r(32, 110), s: (R() < 0.5 ? -1 : 1) * r(18, 45), t: r(-450, 450), c: neonPick(), big: R() < 0.15 });
-  }
+  // no flying traffic: the city is dead (WORLD.cars stays empty)
   WORLD.train = { x: -600, speed: 42, wait: 6 };
 }
 
