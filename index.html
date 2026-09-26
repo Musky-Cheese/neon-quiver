@@ -543,6 +543,23 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
+      if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+        vec3 V = normalize(vNqW - cameraPosition);
+        vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
+        vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
+        float tx = (d.x > 0. ? rs.x - p.x : -p.x) / (abs(d.x) < 1e-4 ? 1e-4 : d.x);
+        float ty = (d.y > 0. ? rs.y - p.y : -p.y) / (abs(d.y) < 1e-4 ? 1e-4 : d.y);
+        float tz = dep / d.z; float t = min(min(tx, ty), tz);
+        vec3 hp = vec3(p, 0.) + d * t; float sh;
+        if (t == tz) {         // back wall with a piece of furniture or a figure in silhouette
+          float fx = hp.x / rs.x, ft = h21(id + 4.4);
+          float furn = step(abs(fx - 0.3 - ft * 0.4), 0.12 + ft * 0.15) * step(hp.y, 0.9 + ft * 1.1);
+          sh = mix(0.62, 0.08, furn);
+        } else if (t == ty) sh = d.y > 0. ? 1.0 : 0.3 * (0.7 + 0.3 * vn(hp.xz * 3.));   // ceiling light / floor
+        else sh = 0.42;        // side walls
+        sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
+        room = sh * (0.55 + 0.45 * h21(id + 1.9));
+      }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
       vec3 wall;
@@ -2858,8 +2875,8 @@ function vmToWorld(camM, p, out) {
    Sculpted in Blender (tools/make_models.py), animated procedurally here.
    ============================================================ */
 const ZTYPES = {
-  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [0.65, 1, 0.25], reach: 1.35, atk: 0.85 },
-  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [1, 0.4, 0.1], reach: 1.3, atk: 0.6 },
+  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
+  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
 };
@@ -3472,6 +3489,7 @@ function poseZombieRig(z, dt, time) {
     addRot(B.spine, R.t - z.flinch * 0.2 + 0.3 * legs, R.y, 0);
     addRot(B.jaw, z.jaw * 0.45, 0, 0);
     if (legs > 0) { addRot(B.kneeL, 0.9 * legs, 0, 0); addRot(B.kneeR, 0.7 * legs, 0, 0); addRot(B.hipL, -0.5 * legs, 0, 0); addRot(B.hipR, -0.4 * legs, 0, 0); B.pelvis.position.y -= 0.12 * legs; }
+    if (z.type === 'runner') { addRot(B.spine, 0.38, 0, 0); addRot(B.neck, -0.28, 0, 0); }   // hunched, head up to keep the gaze level
     if (z.type === 'walker' && !z.crawl) addRot(B.neck, 0, 0, Math.sin(time * 2.1 + z.seed) * 0.12);
   }
   if (w > 0) {
@@ -3531,6 +3549,14 @@ function drawZombieRig(z, time) {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
+  }
+  if (T === 'brute' && !z.headless) {   // gas mask: rubber face plate, twin filters, lenses lit by the eyes
+    const lg = dying ? [0.3, 0, 0.05] : [e[0] * 3.2, e[1] * 3, e[2] * 3];
+    part(neck, 0, 0.1, 0.1, 0.075, 0.06, 0.045, [0.05, 0.05, 0.055], null, fl);
+    for (const s of [-1, 1]) {
+      part(neck, s * 0.06, 0.07, 0.13, 0.03, 0.045, 0.03, [0.12, 0.13, 0.12], null, fl, MESH.cyl || MESH.box, 1.2, 0, s * 0.5);
+      part(neck, s * 0.045, 0.175, 0.105, 0.028, 0.024, 0.012, [0.2, 0.05, 0.05], lg, 0);
+    }
   }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {
