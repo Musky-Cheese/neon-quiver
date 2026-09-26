@@ -434,7 +434,7 @@ function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
   if (kind === 'vm') m.defines.NQ_VM = 1;
   if (kind === 'zombie') m.defines.NQ_Z = 1;
-  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 } } : {};
+  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 }, uSeed: { value: 0 } } : {};
   m.userData.u = own;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, NQU, own);
@@ -445,7 +445,7 @@ varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
 #endif
 #ifdef NQ_Z
-attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart;
+attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart; varying vec3 vNqL;
 #else
 attribute vec2 nqm;
 #endif`)
@@ -456,7 +456,7 @@ attribute vec2 nqm;
 #endif
   w = modelMatrix * w; vNqW = w.xyz; vNqN = normalize(mat3(modelMatrix) * wn); }
 #ifdef NQ_Z
-  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part;
+  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part; vNqL = position;   // bind-pose position: decay patterns stick to the body
   int pi = int(part + 0.5); if (uHide[pi] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
 #else
   vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
@@ -492,7 +492,7 @@ vec2 nqBrick(vec2 fc) {
 varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
 #endif
 #ifdef NQ_Z
-varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash;
+varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash, uSeed;
 #endif
 `)
       .replace('#include <color_fragment>', `
@@ -656,6 +656,22 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     armour = step(6.5, vPart) * step(vPart, 8.5);
 #endif
     rough = mix(mix(0.58, 0.2, bl), 0.32, armour); metal = armour*0.7; rimK = 1.0;
+#ifdef NQ_Z
+    {   // decay: mottled skin, dark veins, wet wounds; grimy clothes torn open to the skin beneath
+      vec3 q = vNqL * 7. + uSeed; float skinM = (1. - clm) * (1. - armour);
+      float mott = vn(q.xy * 1.3 + q.z * 0.7);
+      float vein = smoothstep(0.035, 0.0, abs(vn(q.xz * 2.1 + q.y * 0.6) - 0.5)) * skinM;
+      float wound = smoothstep(0.74, 0.82, vn(q.yz * 0.8 + 7.3)) * (1. - armour);
+      float tear = smoothstep(0.66, 0.74, vn(q.xy * 1.6 + 3.1)) * clm * (1. - armour);
+      base = mix(base, base * vec3(0.78, 0.72, 0.82) * (0.65 + 0.6 * mott), skinM * 0.85);
+      base = mix(base, vec3(0.11, 0.04, 0.1) * ao, vein * 0.7);
+      base = mix(base, skin * ao * 0.75, tear);
+      base *= 1. - clm * (1. - tear) * 0.4 * vn(q.xz * 3. + 1.7);
+      base = mix(base, vec3(0.16, 0.015, 0.012) * ao, wound * 0.9);
+      rough = mix(rough, 0.12, max(wound, bl));
+      bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.004 + vein * 0.002;
+    }
+#endif
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
@@ -1358,6 +1374,56 @@ function propHouse(g, R, x, z, face, solid) {
   if (gar) { const gx = x + gs * (w / 2 + 1.9) * (fz > 0 ? 1 : -1); const ga = z - fz * 3.5, gb = z + fz * 2.5; solid(gx - 1.8, gx + 1.8, 0, 3, Math.min(ga, gb), Math.max(ga, gb)); }
   const zf = z + fz * fzl;
   for (const s of [-1, 1]) { const a = x + s * 0.9, b = x + s * 5.3; solid(Math.min(a, b), Math.max(a, b), 0, 0.9, zf - 0.08, zf + 0.08); }
+}
+
+/* ---------- Japanese manor: stone platform, wraparound veranda, glowing shoji walls, hip-and-gable roof ---------- */
+function propManor(g, x, z, solid) {
+  const stone = [0.22, 0.22, 0.21], wood = [0.16, 0.1, 0.06], dark = [0.06, 0.04, 0.03], roof = [0.07, 0.08, 0.09], shoji = [1.0, 0.82, 0.58];
+  const B = (bx, by, bz, sx, sy, sz, c, e, mat) => g.box(M4.trs(PM.a, x + bx, by, z + bz, 0, 0, 0, sx, sy, sz), c, e, mat);
+  // platform and steps (each step under the 0.32 m you can walk up)
+  B(0, 0.5, 0, 20, 1.0, 12, stone, 0, 16); solid(x - 10, x + 10, 0, 1.15, z - 6, z + 6);
+  for (let i = 0; i < 3; i++) { const h = 0.29 * (i + 1), d = 0.45; B(0, h / 2, -6 - (2.5 - i) * d, 5, h, d, stone, 0, 16); solid(x - 2.5, x + 2.5, 0, h, z - 6 - (3 - i) * d, z - 6 - (2 - i) * d); }
+  // veranda deck and its posts
+  B(0, 1.08, 0, 18, 0.16, 11, wood, 0, 13);
+  for (let px = -8.6; px <= 8.61; px += 2.15) for (const pz of [-5.2, 5.2]) B(px, 3.0, pz, 0.24, 3.8, 0.24, dark, 0, 13);
+  for (let pz = -3.1; pz <= 3.11; pz += 2.07) for (const px of [-8.6, 8.6]) B(px, 3.0, pz, 0.24, 3.8, 0.24, dark, 0, 13);
+  // the hall: shoji panels lit from within, framed by dark posts and a lattice
+  const panelWall = (cx, cz, len, alongX) => {
+    const n = Math.round(len / 1.8), step = len / n;
+    for (let i = 0; i < n; i++) {
+      const o = -len / 2 + step * (i + 0.5), px = alongX ? cx + o : cx, pz = alongX ? cz : cz + o;
+      B(px, 2.8, pz, alongX ? step - 0.14 : 0.06, 3.2, alongX ? 0.06 : step - 0.14, shoji, 0.9, 0);
+      for (let k = 1; k < 4; k++) B(px, 1.2 + k * 0.8, pz, alongX ? step - 0.14 : 0.09, 0.04, alongX ? 0.09 : step - 0.14, dark, 0, 13);
+      B(alongX ? px : px, 2.8, alongX ? pz : pz, alongX ? 0.04 : 0.09, 3.2, alongX ? 0.09 : 0.04, dark, 0, 13);
+      B(alongX ? cx - len / 2 + step * i : px, 2.8, alongX ? pz : cz - len / 2 + step * i, 0.16, 3.3, 0.16, dark, 0, 13);
+    }
+  };
+  panelWall(0, -4, 15, true); panelWall(0, 4, 15, true); panelWall(-7.5, 0, 8, false); panelWall(7.5, 0, 8, false);
+  B(0, 4.55, 0, 15.4, 0.3, 8.4, wood, 0, 13);
+  solid(x - 7.6, x + 7.6, 1.15, 4.6, z - 4.1, z + 4.1);
+  // roof: hipped skirt (4-sided lathe stretched to the rectangle) with a gable on top, ridge with upswept ends
+  g.lathe(M4.trs(PM.a, x, 4.7, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[1.414, 0], [1.414, 0.12], [0.8, 1.8]], roof, 0, 8, 4, false, false);
+  g.lathe(M4.trs(PM.a, x, 4.58, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[0.8, 1.9], [1.414, 0.1]], [0.03, 0.03, 0.035], 0, 16, 4, false, false);   // underside
+  g.extrude(pT(PM.a, x, 6.45, z, Math.PI / 2), [[-3.2, 0], [3.2, 0], [0, 2.3]], 9.6, roof, 0, 8);
+  B(0, 8.8, 0, 10.8, 0.3, 0.45, dark, 0, 8);
+  for (const s of [-1, 1]) g.rbox(pT(PM.a, x + s * 5.6, 9.05, z, 0, 0, -s * 0.5), 0.9, 0.3, 0.42, 0.08, dark, 0, 8, 1);
+  // hanging lanterns under the eaves, warm light spilling onto the veranda
+  for (const lx of [-6, -2, 2, 6]) {
+    g.lathe(pT(PM.a, x + lx, 4.0, z - 5.6), [[0.1, 0], [0.3, 0.14], [0.32, 0.4], [0.3, 0.66], [0.1, 0.78]], [1, 0.32, 0.16], 2.6, 15, 12, true, true);
+    WORLD.halos.push({ p: [x + lx, 4.4, z - 5.6], s: 1.8, c: [0.6, 0.14, 0.06] });
+  }
+  WORLD.lights.push({ p: [x, 3.2, z - 7], r: 14, c: [1.9, 1.2, 0.6], shop: true }, { p: [x - 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true }, { p: [x + 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true });
+}
+// plastered compound wall with a tiled cap; gate: two posts under a little roof
+function propCompoundWall(g, x0, z0, x1, z1, solid) {
+  const L = Math.hypot(x1 - x0, z1 - z0), ry = Math.atan2(x1 - x0, z1 - z0), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  g.box(M4.trs(PM.a, cx, 1.0, cz, 0, ry, 0, 0.5, 2.0, L), [0.5, 0.48, 0.44], 0, 16);
+  g.box(M4.trs(PM.a, cx, 2.1, cz, 0, ry, 0, 0.8, 0.22, L + 0.3), [0.07, 0.08, 0.09], 0, 8);
+  solid(Math.min(x0, x1) - 0.25, Math.max(x0, x1) + 0.25, 0, 2.2, Math.min(z0, z1) - 0.25, Math.max(z0, z1) + 0.25);
+}
+function propGate(g, x, z, w, solid) {
+  for (const s of [-1, 1]) { g.box(M4.trs(PM.a, x + s * w / 2, 1.6, z, 0, 0, 0, 0.4, 3.2, 0.4), [0.12, 0.07, 0.04], 0, 13); solid(x + s * w / 2 - 0.2, x + s * w / 2 + 0.2, 0, 3.2, z - 0.2, z + 0.2); }
+  g.extrude(pT(PM.a, x, 3.2, z, Math.PI / 2), [[-1.1, 0], [1.1, 0], [0, 0.8]], w + 1.6, [0.07, 0.08, 0.09], 0, 8);
 }
 
 /* ============================================================
@@ -2333,13 +2399,18 @@ function buildDistricts(C) {
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
   for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
-    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 116.5, 0.95], [10, 117, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-11, 131, 1.3], [11, 132, 1.25]])
+    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 109, 0.95], [10, 109.5, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-17, 134, 1.3], [17.5, 134.5, 1.25]])
     propSakura(G, R, x, z + OZ, s, false);
   for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
-  propShrine(G, 0, 126 + OZ, solid);
+  propShrine(G, 20, 115 + OZ, solid);                                   // the old shrine now sits off to the side
+  // the end of the path: a walled manor
+  propManor(G, 0, 219, solid);
+  propGate(G, 0, 207.5, 5, solid);
+  propCompoundWall(G, -13.5, 207.5, -3, 207.5, solid); propCompoundWall(G, 3, 207.5, 13.5, 207.5, solid);
+  propCompoundWall(G, -13.5, 207.5, -13.5, 226, solid); propCompoundWall(G, 13.5, 207.5, 13.5, 226, solid);
   bench(-11, 113.2 + OZ, '-z'); bench(3.6, 99 + OZ, '-x'); bench(-26.3, 101 + OZ, '+x');
   setG('props');
-  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121 + OZ, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86 + OZ, d: 'garden' }, { kind: 'cache', x: 26, z: 131 + OZ, d: 'garden' });
+  WORLD.supplies.push({ kind: 'terminal', x: 6.5, z: 203, ry: -0.6, d: 'garden' }, { kind: 'cache', x: -26, z: 86 + OZ, d: 'garden' }, { kind: 'cache', x: 26, z: 131 + OZ, d: 'garden' });
 
 }
 
@@ -2792,7 +2863,15 @@ const ZTYPES = {
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
 };
-const SKINS = [[0.46, 0.52, 0.40], [0.58, 0.54, 0.46], [0.42, 0.47, 0.50], [0.52, 0.46, 0.40], [0.47, 0.53, 0.45], [0.36, 0.33, 0.30]];
+// rotting skin: grey-green, bruised violet, waxy pale, necrotic brown, blue-grey
+const SKINS = [[0.42, 0.48, 0.36], [0.46, 0.38, 0.44], [0.62, 0.6, 0.52], [0.36, 0.3, 0.24], [0.4, 0.45, 0.48], [0.5, 0.5, 0.4]];
+// what they were wearing when it happened: [shirt, pants] by type
+const OUTFITS = {
+  walker: [[[0.62, 0.62, 0.6], [0.1, 0.11, 0.16]], [[0.3, 0.36, 0.5], [0.12, 0.12, 0.13]], [[0.7, 0.55, 0.1], [0.62, 0.5, 0.1]], [[0.26, 0.09, 0.1], [0.16, 0.14, 0.12]], [[0.2, 0.3, 0.22], [0.2, 0.2, 0.22]], [[0.36, 0.28, 0.18], [0.1, 0.11, 0.16]]],
+  runner: [[[0.12, 0.12, 0.12], [0.08, 0.1, 0.18]], [[0.5, 0.1, 0.08], [0.1, 0.1, 0.1]], [[0.18, 0.22, 0.3], [0.14, 0.14, 0.15]], [[0.3, 0.3, 0.26], [0.06, 0.06, 0.07]]],
+  brute: [[[0.07, 0.08, 0.13], [0.06, 0.07, 0.1]], [[0.1, 0.1, 0.1], [0.08, 0.08, 0.08]]],
+  boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
+};
 const CLOTHES = [[0.14, 0.15, 0.2], [0.26, 0.09, 0.1], [0.1, 0.18, 0.2], [0.3, 0.27, 0.22], [0.12, 0.12, 0.12], [0.3, 0.2, 0.09], [0.36, 0.36, 0.38], [0.2, 0.24, 0.16]];
 const PANTS = [[0.1, 0.11, 0.16], [0.16, 0.14, 0.12], [0.08, 0.08, 0.09], [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06]];
@@ -2808,7 +2887,7 @@ function spawnZombie(type, x, z, wave) {
   const zz = {
     type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.35, wave * 0.02)), scale: T.scale * rand(0.95, 1.06),
     phase: Math.random() * TAU, state: 'walk', atkT: 0, atkCd: 0.5, flinch: 0, flash: 0, burn: 0, dieT: 0, dead: false,
-    skin: pick(SKINS), cloth: pick(CLOTHES), pants: pick(PANTS), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
+    skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: Math.random() < 0.3, sleeve: Math.random() < 0.55, headVar: Math.random() < 0.5 ? 'a' : 'b',
     stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
@@ -3442,7 +3521,7 @@ function drawZombieRig(z, time) {
   setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 3.2, e[1] * 3, e[2] * 3]);
   setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
-  u.uFlash.value = fl;
+  u.uFlash.value = fl; u.uSeed.value = z.seed;
   r.mesh.visible = true;
   // ---------- rigid extras attached to bones ----------
   const neck = B.neck.matrixWorld.elements, spine = B.spine.matrixWorld.elements;
