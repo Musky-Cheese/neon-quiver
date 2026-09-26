@@ -97,11 +97,26 @@ function buildCity() {
     ['PAWN + CHIPS', 'panel'], ['KARAOKE', 'font'], ['VOLT', 'seg'], ['DATA CAFE', 'panel'], ['LUCKY 88', 'seg'], ['RAMEN', 'font'], ['MEMORY SHOP', 'panel'], ['SECTOR 7', 'seg'], ['CLONE CLINIC', 'font']];
   const vertWords = ['HOTEL', 'BAR', 'RAMEN', 'LIVE', 'OPEN', 'TATTOO', 'CHIPS', 'CLUB'];
   let sw = 0, vw = 0, bb = 0;
+  const SHOPS = ['ramen', 'pawn', 'clinic'];
+  // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
+  function shopBody(x0, x1, z0, z1, h, face, col, type) {
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = face[1] === 'z' ? x1 - x0 : z1 - z0, DF = face[1] === 'z' ? z1 - z0 : x1 - x0;
+    const tx = face[1] === 'z' ? 1 : 0, tz = 1 - tx, nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
+    const fx = nx ? (nx < 0 ? x0 : x1) : cx, fz = nz ? (nz < 0 ? z0 : z1) : cz;
+    const W = Math.min(span - 3, 11), D = 8, RH = 4.4;
+    const wp = (a, dd) => [fx + tx * a - nx * dd, fz + tz * a - nz * dd];
+    const Bl = (a, dd, y, sa, sd, sy, c, e = 0, mat = 16) => { const [x, z] = wp(a, dd); B(x, y, z, tx ? sa : sd, sy, tz ? sa : sd, c, e, mat); };
+    const Sl = (a0, a1, d0, d1, y0, y1) => { const [xa, za] = wp(a0, d0), [xb, zb] = wp(a1, d1); solid(Math.min(xa, xb), Math.max(xa, xb), y0, y1, Math.min(za, zb), Math.max(za, zb)); };
+    Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, 1); Sl(-span / 2, span / 2, 0, DF, RH, h);
+    Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, 1); Sl(-span / 2, span / 2, D, DF, 0, RH);
+    for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, 1); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
+    propShopInterior({ Bl, Sl, W, D, RH, R, light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
+  }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
     const col = opt.col || facadeCols[Math.floor(R() * facadeCols.length)];
-    B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1);
-    solid(x0, x1, 0, h, z0, z1);
+    if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop);
+    else { B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1); solid(x0, x1, 0, h, z0, z1); }
     // setback tier
     if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, 1); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2); h += h2; }
     // roof bits
@@ -144,12 +159,12 @@ function buildCity() {
     if (R() < 0.6) { const y = r(12, Math.min(h - 4, 40)); const p = P(0, y, 0.12); B(p[0], y, p[2], tx ? span : 0.25, 0.35, tz ? span : 0.25, neonPick(), 2.2); }
     // storefront: glowing window + awning
     const sc = neonPick();
-    const pw = P(0, 1.8, 0.05); B(pw[0], 1.8, pw[2], tx ? span * 0.8 : 0.1, 2.6, tz ? span * 0.8 : 0.1, [sc[0] * 0.3 + 0.1, sc[1] * 0.3 + 0.1, sc[2] * 0.3 + 0.1], 0.9);
+    const pw = P(0, 1.8, 0.05); if (!opt.shop) B(pw[0], 1.8, pw[2], tx ? span * 0.8 : 0.1, 2.6, tz ? span * 0.8 : 0.1, [sc[0] * 0.3 + 0.1, sc[1] * 0.3 + 0.1, sc[2] * 0.3 + 0.1], 0.9);
     const pa = P(0, 3.6, 0.9); B(pa[0], 3.6, pa[2], tx ? span * 0.85 : 1.8, 0.2, tz ? span * 0.85 : 1.8, [0.05, 0.05, 0.07]);
     const pe = P(0, 3.5, 1.8); B(pe[0], 3.5, pe[2], tx ? span * 0.85 : 0.1, 0.12, tz ? span * 0.85 : 0.1, sc, 2.5);
     WORLD.lights.push({ p: P(0, 2.5, 3), r: 12, c: [sc[0] * 1.6, sc[1] * 1.6, sc[2] * 1.6], shop: true });
     // horizontal sign above storefront
-    const [txt, st] = signWords[sw++ % signWords.length];
+    const [txt, st] = opt.shop ? [{ ramen: 'RAMEN', clinic: 'CLONE CLINIC', pawn: 'PAWN + CHIPS' }[opt.shop], 'font'] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
     addSign(signTexture(txt, '#' + [nc, sc, NEON.amber][sw % 3].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
     // vertical blade sign
@@ -177,7 +192,7 @@ function buildCity() {
         const wdt = Math.min(r(12, 22), 64 - a); if (wdt < 6) break;
         const x0 = half > 0 ? a : -a - wdt, x1 = half > 0 ? a + wdt : -a;
         const depth = RING - PLAZA - 2.5, z0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, z1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
-        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z');
+        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z', side > 0 && wdt >= 12 && Math.abs(x0 + x1) < 60 && SHOPS.length ? { shop: SHOPS.shift() } : {});
         a += wdt + 0.01;
       }
     }

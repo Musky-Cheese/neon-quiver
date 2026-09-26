@@ -420,6 +420,7 @@ function propManor(g, x, z, solid) {
     const n = Math.round(len / 1.8), step = len / n;
     for (let i = 0; i < n; i++) {
       const o = -len / 2 + step * (i + 0.5), px = alongX ? cx + o : cx, pz = alongX ? cz : cz + o;
+      if (alongX && cz < 0 && Math.abs(o) < 1.5) continue;   // the front doorway stands open
       B(px, 2.8, pz, alongX ? step - 0.14 : 0.06, 3.2, alongX ? 0.06 : step - 0.14, shoji, 0.9, 0);
       for (let k = 1; k < 4; k++) B(px, 1.2 + k * 0.8, pz, alongX ? step - 0.14 : 0.09, 0.04, alongX ? 0.09 : step - 0.14, dark, 0, 13);
       B(alongX ? px : px, 2.8, alongX ? pz : pz, alongX ? 0.04 : 0.09, 3.2, alongX ? 0.09 : 0.04, dark, 0, 13);
@@ -428,7 +429,16 @@ function propManor(g, x, z, solid) {
   };
   panelWall(0, -4, 15, true); panelWall(0, 4, 15, true); panelWall(-7.5, 0, 8, false); panelWall(7.5, 0, 8, false);
   B(0, 4.55, 0, 15.4, 0.3, 8.4, wood, 0, 13);
-  solid(x - 7.6, x + 7.6, 1.15, 4.6, z - 4.1, z + 4.1);
+  // the hall is enterable: thin walls with the doorway gap, a tatami floor, low table, cushions and an alcove
+  for (const s of [-1, 1]) { solid(x + s * 1.4 - (s < 0 ? 6.1 : 0), x + s * 1.4 + (s > 0 ? 6.1 : 0), 1.15, 4.6, z - 4.1, z - 3.9); solid(x + s * 7.4, x + s * 7.6, 1.15, 4.6, z - 4.1, z + 4.1); }
+  solid(x - 7.6, x + 7.6, 1.15, 4.6, z + 3.9, z + 4.1);
+  for (let i = -3; i <= 3; i++) for (let k = -1; k <= 1; k++) B(i * 2, 1.18, k * 2.5, 1.95, 0.04, 2.45, [0.42, 0.38, 0.2], 0, 13);
+  B(0, 1.42, 0.6, 2.4, 0.08, 1.2, [0.08, 0.04, 0.03], 0, 13); for (const s of [-1, 1]) for (const t of [-1, 1]) B(s * 1.05, 1.3, 0.6 + t * 0.5, 0.08, 0.2, 0.08, [0.08, 0.04, 0.03], 0, 13);
+  for (const [cx, cz] of [[-1.8, 0.6], [1.8, 0.6], [0, -0.4], [0, 1.6]]) B(cx, 1.24, cz, 0.6, 0.08, 0.6, [0.45, 0.08, 0.1], 0, 15);
+  B(0, 2.4, 3.6, 3, 2.4, 0.5, [0.1, 0.06, 0.04], 0, 13); B(0, 2.6, 3.3, 1.6, 1.8, 0.04, [0.85, 0.8, 0.7], 0.3, 0);    // alcove with a hanging scroll
+  B(0, 1.9, 3.25, 0.9, 0.05, 0.05, [0.1, 0.1, 0.1], 0, 4); B(0, 1.95, 3.2, 0.95, 0.03, 0.03, [0.8, 0.8, 0.85], 0.2, 4);  // katana on its stand
+  for (const lx of [-5, 5]) { g.lathe(pT(PM.a, x + lx, 1.2, z + 2.5), [[0.05, 0], [0.18, 0.1], [0.2, 0.5], [0.16, 0.8], [0.05, 0.85]], [1, 0.7, 0.4], 1.8, 15, 10, true, true); }
+  WORLD.lights.push({ p: [x, 3.4, z + 0.5], r: 10, c: [1.4, 0.95, 0.5], shop: true });
   // roof: hipped skirt (4-sided lathe stretched to the rectangle) with a gable on top, ridge with upswept ends
   g.lathe(M4.trs(PM.a, x, 4.7, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[1.414, 0], [1.414, 0.12], [0.8, 1.8]], roof, 0, 8, 4, false, false);
   g.lathe(M4.trs(PM.a, x, 4.58, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[0.8, 1.9], [1.414, 0.1]], [0.03, 0.03, 0.035], 0, 16, 4, false, false);   // underside
@@ -508,5 +518,46 @@ function propFootBridge(g, x, z, solid) {
     for (let i = 0; i <= 5; i++) { const zz = z - 2.5 + i, h = (H[Math.min(i, 4)] + H[Math.max(i - 1, 0)]) / 2; g.box(M4.trs(PM.a, x + s * 1.75, h + 0.45, zz, 0, 0, 0, 0.14, 0.9, 0.14), lac, 0, 13); }
     for (let i = 0; i < 5; i++) g.box(M4.trs(PM.a, x + s * 1.75, H[i] + 0.88, z - 2.5 + i + 0.5, 0, 0, 0, 0.1, 0.08, 1.05), lac, 0, 13);
     solid(x + s * 1.75 - 0.08, x + s * 1.75 + 0.08, 0, 1.3, z - 2.5, z + 2.5);
+  }
+}
+
+/* ---------- walk-in shop interiors (local frame: a along the facade, d into the room) ---------- */
+function propShopInterior(L, type) {
+  const { Bl, Sl, W, D, RH, R, light } = L;
+  const T = { ramen: { wall: [0.3, 0.16, 0.1], floor: [0.14, 0.1, 0.08], glow: [1, 0.55, 0.25] },
+              clinic: { wall: [0.55, 0.6, 0.62], floor: [0.3, 0.33, 0.34], glow: [0.4, 1, 0.95] },
+              pawn: { wall: [0.2, 0.17, 0.2], floor: [0.12, 0.11, 0.1], glow: [1, 0.75, 0.3] } }[type];
+  Bl(0, D / 2, 0.03, W, D, 0.06, T.floor);                                                   // floor, walls, ceiling
+  Bl(0, D - 0.03, RH / 2, W, 0.06, RH, T.wall); for (const s of [-1, 1]) Bl(s * (W / 2 - 0.03), D / 2, RH / 2, 0.06, D, RH, T.wall);
+  Bl(0, D / 2, RH - 0.05, W, D, 0.1, [0.06, 0.06, 0.07]);
+  for (const dd of [2.2, 5.6]) Bl(0, dd, RH - 0.12, W * 0.6, 0.25, 0.04, T.glow, 2.2, 0);
+  // front: glass either side of an open doorway, a lintel above
+  for (const s of [-1, 1]) { Bl(s * (1.3 + W / 2) / 2, 0.06, 1.6, W / 2 - 1.3, 0.08, 3.2, [T.glow[0] * 0.25, T.glow[1] * 0.25, T.glow[2] * 0.25], 0.5, 10); Sl(s * 1.3, s * W / 2, 0, 0.12, 0, 3.2); }
+  Bl(0, 0.06, 3.8, W, 0.2, 1.2, [0.05, 0.05, 0.06], 0, 4);
+  light(0, D * 0.5, RH - 0.8, 10, [T.glow[0] * 1.5, T.glow[1] * 1.5, T.glow[2] * 1.5]);
+  if (type === 'ramen') {
+    Bl(0, D - 2.4, 0.55, W - 2, 0.7, 1.1, [0.25, 0.14, 0.07], 0, 13); Bl(0, D - 2.4, 1.13, W - 1.8, 0.9, 0.06, [0.4, 0.24, 0.12], 0, 13); Sl(-(W - 2) / 2, (W - 2) / 2, D - 2.85, D - 1.95, 0, 1.15);
+    for (let a = -W / 2 + 1.6; a < W / 2 - 1.4; a += 1.3) { Bl(a, D - 3.4, 0.35, 0.08, 0.08, 0.7, [0.1, 0.1, 0.1], 0, 4); Bl(a, D - 3.4, 0.72, 0.42, 0.42, 0.06, [0.5, 0.08, 0.06], 0, 15); }
+    for (let a = -W / 2 + 1.5; a < W / 2 - 1; a += 1.1) Bl(a, D - 2.3, 1.2, 0.18, 0.18, 0.12, [0.9, 0.85, 0.75], 0, 15);   // bowls
+    for (let i = 0; i < 3; i++) Bl(-W / 4 + i * W / 4, D - 0.8, 2.6, 0.9, 0.5, 0.7, [0.3, 0.3, 0.32], 0, 4);           // pots and a hood
+    Bl(0, D - 0.9, 3.4, W - 1, 1.2, 0.5, [0.15, 0.15, 0.16], 0, 4);
+    for (let a = -W / 2 + 1; a < W / 2 - 0.5; a += 1.8) Bl(a, 2, 3.4, 0.45, 0.45, 0.6, [1, 0.3, 0.15], 2.2, 15);         // paper lanterns
+    for (const s of [-1, 1]) Bl(s * 0.6, -0.1, 3.0, 0.5, 0.02, 1.1, [0.5, 0.06, 0.06], 0.3, 0);                           // noren at the door
+  } else if (type === 'clinic') {
+    for (const s of [-1, 1]) { const a = s * (W / 2 - 1.2);
+      Bl(a, D / 2 + 0.5, 0.45, 1.0, 2.2, 0.15, [0.7, 0.72, 0.75], 0, 4); Bl(a, D / 2 + 0.5, 0.62, 0.95, 2.1, 0.18, [0.8, 0.85, 0.86], 0, 15); Sl(a - 0.5, a + 0.5, D / 2 - 0.6, D / 2 + 1.6, 0, 0.7);
+      Bl(a, D / 2 + 0.5, 0.25, 0.9, 2, 0.04, [0.1, 0.1, 0.1], 0, 4); }
+    Bl(0, D - 0.3, 2.2, 3.2, 0.06, 1.8, [0.3, 1, 0.95], 1.4, 0);                                                         // holo diagnostic wall
+    Bl(0, D - 1.6, 1.0, 0.7, 0.7, 2.0, [0.5, 0.9, 0.9], 0.6, 10);                                                        // the clone tank
+    Bl(0, D - 1.6, 0.1, 0.9, 0.9, 0.2, [0.2, 0.22, 0.25], 0, 4); Bl(0, D - 1.6, 2.05, 0.9, 0.9, 0.12, [0.2, 0.22, 0.25], 0, 4); Sl(-0.45, 0.45, D - 2.05, D - 1.15, 0, 2.1);
+    for (const s of [-1, 1]) Bl(s * (W / 2 - 0.35), D - 1, 1.1, 0.5, 1.4, 2.2, [0.8, 0.8, 0.8], 0, 4);
+  } else {
+    Bl(0, D - 2.6, 0.55, W - 3, 0.7, 1.1, [0.2, 0.5, 0.5], 0.25, 10); Sl(-(W - 3) / 2, (W - 3) / 2, D - 2.95, D - 2.25, 0, 1.1);   // glass counter
+    for (const s of [-1, 1]) for (let y = 0.4; y < 3.2; y += 0.8) {                                                  // shelves crammed with junk
+      Bl(s * (W / 2 - 0.4), D / 2, y, 0.6, D - 1.5, 0.05, [0.12, 0.1, 0.08], 0, 13);
+      for (let dd = 1.2; dd < D - 1; dd += 0.55) if (R() < 0.7) { const q = 0.15 + R() * 0.3; Bl(s * (W / 2 - 0.4), dd, y + q / 2 + 0.03, q, q, q, [R() * 0.6 + 0.1, R() * 0.5 + 0.1, R() * 0.5 + 0.1], R() < 0.15 ? 1.5 : 0, 15); }
+    }
+    for (const s of [-1, 1]) Sl(s * (W / 2 - 0.7), s * W / 2, 0.8, D - 0.6, 0, 3.2);
+    Bl(0, D - 0.2, 2.2, 2.5, 0.06, 1.2, [1, 0.6, 0.15], 1.6, 0);                                                         // neon sign behind the counter
   }
 }
