@@ -335,10 +335,11 @@ const GAME = {
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0) {
         this.clearT += dt;
-        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · REACH AN ARMORY TERMINAL`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = 35; }
-        if (this.intermission) { this.interT -= dt; if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; this.startWave(); } }
+        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · REACH AN ARMORY TERMINAL`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = 15; }
       }
     }
+    // 15 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
+    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { this.interT -= dt; if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
     if (this.bannerT > 0) this.bannerT -= dt;
     this.hm.t = Math.max(0, this.hm.t - dt);
     for (let i = this.toasts.length - 1; i >= 0; i--) { this.toasts[i].t -= dt; if (this.toasts[i].t <= 0) this.toasts.splice(i, 1); }
@@ -372,7 +373,7 @@ const GAME = {
   toast(text, color) { this.toasts.unshift({ text, color, t: 1.6 }); if (this.toasts.length > 4) this.toasts.pop(); },
   showBanner(title, sub, color) { this.banner = { title, sub, color }; this.bannerT = 3; },
   openShop() { this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; BOW.state = 'ready'; BOW.draw = 0; if (document.exitPointerLock) document.exitPointerLock(); renderShop(); setScreen('shop'); },
-  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); this.intermission = false; this.startWave(); },
+  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // leaving early keeps the countdown
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; AUD.drawStop(); INPUT.mouseDown = false; if (BOW.state === 'drawing') BOW.state = 'letdown'; setScreen('pause'); drawLogo($('pauseLogo'), 'PAUSED', '#29e7ff'); if (document.exitPointerLock && INPUT.locked) document.exitPointerLock(); },
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
@@ -565,12 +566,14 @@ function updatePlayer(dt) {
   else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
-  if (P.z > 75.5) P.x = clamp(P.x, -31, 31);   // the grove's treeline
+  if (P.z > 165.5) P.x = clamp(P.x, -31, 31);   // the grove's treeline
+  else if (P.z > 75.5) P.x = clamp(P.x, -59, 59);   // the suburbs' woods
   const hs = Math.hypot(P.vx, P.vz);
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
-  BOW.walkPhase += dt * hs * 1.6;
-  P.roll = lerp(P.roll, -fx * 0.012, Math.min(1, dt * 6));
+  const ph0 = BOW.walkPhase; BOW.walkPhase += dt * hs * 1.6 * (1 + BOW.sprintAmt * 0.35);
+  if (P.grounded && hs > 1.5 && Math.floor(ph0 / Math.PI) !== Math.floor(BOW.walkPhase / Math.PI)) AUD.step(0.5 + BOW.sprintAmt * 0.7);   // footsteps
+  P.roll = lerp(P.roll, -fx * 0.012 + Math.sin(BOW.walkPhase) * 0.014 * BOW.sprintAmt, Math.min(1, dt * 6));
   P.fov = lerp(P.fov, 78 - (BOW.state === 'drawing' ? easeOut(BOW.draw) * 14 : 0) + BOW.sprintAmt * 6, Math.min(1, dt * 10));
   P.dmgFlash = Math.max(0, P.dmgFlash - dt * 1.4);
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }

@@ -346,17 +346,60 @@ function propPath(g, R, pts, w, y = 0.018) {
 }
 function inPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
 // background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
-function propSakuraFar(g, R, x, z, s = 1, detail = 1) {
+function propSakuraFar(g, R, x, z, s = 1, detail = 1, leaf = null) {   // leaf: plain foliage colour (non-blossom trees)
   const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
-  const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
+  const blossom = leaf ? [leaf[0] * (0.8 + R() * 0.4), leaf[1] * (0.8 + R() * 0.4), leaf[2]] : [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)], glow = leaf ? 0 : 1.6;
   const h = r(1.4, 1.9) * s, sides = detail >= 2 ? 6 : 4;
   g.tube([[x, 0, z], [x + r(-0.2, 0.2), h * 0.6, z + r(-0.2, 0.2)], [x + r(-0.3, 0.3), h, z + r(-0.3, 0.3)]], [0.24 * s, 0.2 * s, 0.16 * s], bark, 0, 12, sides, false);
   const n = detail >= 2 ? 5 : detail === 1 ? 3 : 2, a0 = r(0, TAU), seg = detail >= 2 ? 10 : detail === 1 ? 7 : 6, rings = detail >= 2 ? 7 : detail === 1 ? 5 : 4;
   for (let i = 0; i < n; i++) {
     const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
     g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
-    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
+    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, glow, 14, seg, rings, 1);
   }
-  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, 1.6, 14, seg, rings, 1);
-  if (detail >= 2 && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
+  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, glow, 14, seg, rings, 1);
+  if (detail >= 2 && !leaf && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
+}
+
+/* ---------- suburban house on its lot. face: '+z' / '-z' (the street side). Some are boarded up, some burnt out ---------- */
+const SIDING = [[0.3, 0.28, 0.24], [0.22, 0.26, 0.28], [0.3, 0.24, 0.2], [0.26, 0.26, 0.24], [0.2, 0.24, 0.2], [0.32, 0.3, 0.27]];
+function propHouse(g, R, x, z, face, solid) {
+  const ry = face === '+z' ? 0 : Math.PI, fz = face === '+z' ? 1 : -1, P = pT(M4.create(), x, 0, z, ry);
+  const burnt = R() < 0.15, two = R() < 0.55, w = 7.5 + R() * 1.5, d = 7 + R() * 1.2, h = two ? 5.8 : 3.2;
+  const wall = burnt ? [0.05, 0.045, 0.04] : SIDING[Math.floor(R() * SIDING.length)], trim = burnt ? [0.03, 0.03, 0.03] : [0.36, 0.35, 0.33];
+  const box = (lx, ly, lz, sx, sy, sz, c, e, mat, lry = 0, lrx = 0) => g.box(M4.mul(PM.c, P, M4.trs(PM.b, lx, ly, lz, lrx, lry, 0, sx, sy, sz)), c, e, mat);
+  // body: facade material gives it windows (mostly dark: nobody's home)
+  box(0, h / 2, -1, w, h, d, wall, 0, burnt ? 16 : 1);
+  box(0, 0.25, -1, w + 0.3, 0.5, d + 0.3, [0.16, 0.16, 0.16], 0, 16);                                     // foundation
+  // roof: gable across the width, or charred rafters when burnt
+  if (!burnt) {
+    const rh = 1.8 + R() * 0.8, roof = R() < 0.5 ? [0.09, 0.08, 0.08] : [0.12, 0.07, 0.06];
+    g.extrude(M4.mul(PM.c, P, pT(PM.b, 0, h, -1, Math.PI / 2)), [[-d / 2 - 0.5, 0], [d / 2 + 0.5, 0], [0, rh]], w + 0.6, roof, 0, 8);
+    if (R() < 0.6) box(w * 0.28, h + rh * 0.7, -1.5, 0.6, 1.8, 0.6, [0.18, 0.1, 0.08], 0, 9);           // chimney
+  } else for (let i = 0; i < 5; i++) box(-w / 2 + 0.6 + i * (w - 1.2) / 4, h + 0.8, -1, 0.14, 0.14, d + 0.8, [0.02, 0.02, 0.02], 0, 16, 0, 0.5 * (i % 2 ? 1 : -1));
+  // porch, door, steps
+  box(0, 0.35, d / 2 - 0.1, 3.2, 0.7, 1.8, [0.2, 0.15, 0.1], 0, 13);
+  for (const sx of [-1.4, 1.4]) box(sx, 1.7, d / 2 + 0.6, 0.14, 2.0, 0.14, trim, 0, 13);
+  box(0, 2.75, d / 2 + 0.1, 3.5, 0.12, 2.2, trim, 0, 13);
+  box(0, 1.55, d / 2 - 1.0 + 0.01, 1.0, 2.1, 0.08, burnt ? [0.01, 0.01, 0.01] : [0.12, 0.06, 0.04], 0, 13);
+  box(0, 0.12, d / 2 + 1.1, 1.6, 0.24, 0.6, [0.2, 0.2, 0.2], 0, 16);
+  // boarded windows on abandoned houses
+  if (!burnt && R() < 0.45) for (const sx of [-w / 2 + 1.3, w / 2 - 1.3]) for (let k = 0; k < 3; k++) box(sx, 1.2 + k * 0.28, d / 2 - 1.0 + 0.06, 1.5, 0.16, 0.05, [0.24, 0.17, 0.1], 0, 13, 0, 0);
+  // garage with a ribbed door on some
+  const gar = R() < 0.4, gs = R() < 0.5 ? 1 : -1;
+  if (gar) { box(gs * (w / 2 + 1.9), 1.5, -0.5, 3.6, 3.0, 6, wall, 0, 16); box(gs * (w / 2 + 1.9), 1.2, 2.51, 3.0, 2.4, 0.06, [0.22, 0.22, 0.22], 0, 8); }
+  // front yard: picket fence with a gate gap, a hedge, bins, a wrecked car in the drive
+  const fzl = d / 2 + 3.4;
+  for (let fx = -5.2; fx <= 5.2; fx += 0.32) if (Math.abs(fx) > 0.9) box(fx, 0.45, fzl, 0.08, 0.9, 0.04, burnt ? [0.05, 0.05, 0.05] : [0.5, 0.49, 0.46], 0, 13);
+  for (const fy of [0.3, 0.7]) for (const s of [-1, 1]) box(s * 3.05, fy, fzl, 4.3, 0.06, 0.05, [0.45, 0.44, 0.41], 0, 13);
+  if (R() < 0.7) g.blob(M4.mul(PM.c, P, pT(PM.b, -gs * 3.2, 0.5, d / 2 + 1.6, R() * 6)), 1.6, 0.8, 0.7, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  const wp = pPt(P, gs * (w / 2 + 1.9), 0, d / 2 + 1.5);
+  if (R() < 0.35) propHoverCar(g, R, wp[0], wp[2], ry + (R() - 0.5) * 0.4, SIDING[Math.floor(R() * SIDING.length)], Math.floor(R() * 3));
+  if (burnt) { const bp = pPt(P, -gs * 2.5, 0, d / 2 + 2); propBurnBarrel(g, bp[0], bp[2]); }
+  // collision: house (+ garage), fence line with its gate gap
+  const hx = w / 2 + 0.2, z0 = z - fz * (d / 2 + 1) , z1 = z + fz * (d / 2 - 1);
+  solid(x - hx, x + hx, 0, h, Math.min(z0, z1), Math.max(z0, z1));
+  if (gar) { const gx = x + gs * (w / 2 + 1.9) * (fz > 0 ? 1 : -1); const ga = z - fz * 3.5, gb = z + fz * 2.5; solid(gx - 1.8, gx + 1.8, 0, 3, Math.min(ga, gb), Math.max(ga, gb)); }
+  const zf = z + fz * fzl;
+  for (const s of [-1, 1]) { const a = x + s * 0.9, b = x + s * 5.3; solid(Math.min(a, b), Math.max(a, b), 0, 0.9, zf - 0.08, zf + 0.08); }
 }

@@ -8,7 +8,8 @@ const DISTRICTS = [
   { id: 'yard', name: 'RAIL YARD', x0: -32, x1: 32, z0: -138, z1: -74, env: [0, 5, -104] },
   { id: 'market', name: 'NIGHT MARKET', x0: 74, x1: 138, z0: -32, z1: 32, env: [106, 5, 0] },
   { id: 'warrens', name: 'THE WARRENS', x0: -138, x1: -74, z0: -32, z1: 32, env: [-84, 5, 0] },
-  { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 74, z1: 138, env: [0, 5, 100] },
+  { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 164, z1: 228, env: [0, 5, 190] },
+  { id: 'suburbs', name: 'THE SUBURBS', x0: -60, x1: 60, z0: 74, z1: 162, env: [0, 5, 125] },
 ];
 function districtAt(x, z) {
   for (const d of DISTRICTS) if (x > d.x0 - 2 && x < d.x1 + 2 && z > d.z0 - 2 && z < d.z1 + 2) return d;
@@ -16,10 +17,10 @@ function districtAt(x, z) {
   if (Math.abs(x) < 8 && z < -40) return DISTRICTS[1];
   if (Math.abs(z) < 8 && x > 40) return DISTRICTS[2];
   if (Math.abs(z) < 8 && x < -40) return DISTRICTS[3];
-  if (Math.abs(x) < 8 && z > 40) return DISTRICTS[4];
+  if (Math.abs(x) < 8 && z > 40) return z < 162 ? DISTRICTS[5] : DISTRICTS[4];
   return DISTRICTS[0];
 }
-const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 136 };
+const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 226 };
 
 // terminals and ammo caches: static base geometry (the glow is drawn per frame in world.js)
 function supplyProp(g, sp) {
@@ -184,40 +185,66 @@ function buildDistricts(C) {
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 
 
-  /* ---------------- SAKURA GARDENS (south) ---------------- */
-  // no buildings here: the grove is walled in by cherry forest that fades into the mist
+  /* ---------------- THE SUBURBS (south of the plaza) ---------------- */
+  // dead suburbia between the towers and the gardens: a strip of low shops, then houses on two cross streets
+  setG('near');
+  row('z', 76, 100, 8, 24, '-x', 7, 11); row('z', 76, 100, -24, -8, '+x', 7, 11);   // two-storey shops lining the avenue
+  setG('sub');
+  const SG = C.getG();
+  quad(-64, 64, 100, 163, 0.012, [0.06, 0.08, 0.045], 19);                          // overgrown lawns
+  quad(-64, 64, 74, 100, 0.012, [0.07, 0.07, 0.07], 3); quad(-64, -24, 74, 100, 0.013, [0.06, 0.08, 0.045], 19); quad(24, 64, 74, 100, 0.013, [0.06, 0.08, 0.045], 19);
+  quad(-6, 6, 100, 163, 0.016, [0.05, 0.05, 0.055], 3);                             // the avenue runs on to the gardens
+  for (const sz of [116, 142]) {                                                     // cross streets + sidewalks
+    quad(-62, 62, sz - 5, sz + 5, 0.017, [0.05, 0.05, 0.055], 3);
+    for (const o of [-6.2, 6.2]) quad(-62, 62, sz + o - 1.2, sz + o + 1.2, 0.03, [0.2, 0.2, 0.2], 16);
+  }
+  for (const o of [-7.2, 7.2]) quad(o - 1.2, o + 1.2, 100, 163, 0.03, [0.2, 0.2, 0.2], 16);
+  // houses: [row z, facing]; lots every 11 m either side of the avenue
+  for (const [hz, face] of [[106.5, '+z'], [125.5, '-z'], [132.5, '+z'], [151.5, '-z']])
+    for (const hx of [-51, -40, -29, -18, 18, 29, 40, 51]) propHouse(SG, R, hx + (R() - 0.5) * 1.2, hz, face, solid);
+  for (const [x, z] of [[-10, 104], [10, 128], [-10, 148], [10, 104]]) lamp(x, z);
+  for (let i = 0; i < 14; i++) { const x = (R() < 0.5 ? -1 : 1) * (9.5 + R() * 50), z = 118 + (R() < 0.5 ? 0 : 26) + (R() - 0.5) * 4; if (Math.abs(x) > 12) propSakuraFar(SG, R, x, z + (R() < 0.5 ? -9 : 9), 0.8 + R() * 0.3, 1, R() < 0.3 ? null : [0.07, 0.12, 0.05]); }
+  // the edges: dark woods you can't enter
+  for (let fz = 78; fz < 168; fz += 8) for (const sgn of [-1, 1]) for (let k = 0; k < 4; k++) {
+    const x = sgn * (66 + k * 8 + (R() - 0.5) * 4), z = fz + (R() - 0.5) * 5;
+    propSakuraFar(C.getForest(), R, x, z, 1 + R() * 0.4, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]);
+  }
+  WORLD.navBlocks.push({ x0: -150, x1: -61, z0: 76, z1: 166 }, { x0: 61, x1: 150, z0: 76, z1: 166 });
+  WORLD.supplies.push({ kind: 'terminal', x: 8.5, z: 108, ry: -1.2, d: 'suburbs' }, { kind: 'cache', x: -40, z: 118, d: 'suburbs' }, { kind: 'cache', x: 44, z: 145, d: 'suburbs' });
+
+  /* ---------------- SAKURA GARDENS (far south) ---------------- */
+  // no buildings: the grove is walled in by cherry forest that fades into the mist
+  const OZ = 90;
   setG('garden');
   const G = C.getG();
-  quad(-110, 110, 74, 230, 0.012, [0.07, 0.11, 0.05], 17);
-  // the forest: lighter trees on a jittered grid all round the grove (you can't walk out there)
+  quad(-110, 110, 74 + OZ, 230 + OZ, 0.012, [0.07, 0.11, 0.05], 17);
+  quad(-64, 64, 160, 164, 0.013, [0.06, 0.08, 0.045], 19);
   for (let fz = 77; fz < 200; fz += 8.5) for (let fx = -90; fx <= 90; fx += 8.5) {
-    const x = fx + (R() - 0.5) * 6, z = fz + (R() - 0.5) * 6;
-    if (Math.abs(x) < 33 && z < 137.5) continue;                 // the grove itself
-    if (z < 79 && Math.abs(x) > 60) continue;                    // tucked behind the corner towers anyway
-    const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;   // thins out into the mist
+    const x = fx + (R() - 0.5) * 6, z = fz + (R() - 0.5) * 6 + OZ;
+    if (Math.abs(x) < 33 && z < 137.5 + OZ) continue;                 // the grove itself
+    if (z < 166 && Math.abs(x) < 62) continue;                        // leave the way in from the suburbs open
+    const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5 - OZ)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;
     propSakuraFar(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, edge < 7 ? 2 : edge < 20 ? 1 : 0);
   }
-  WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 76, z1: 150 }, { x0: 32, x1: 150, z0: 76, z1: 150 }, { x0: -150, x1: 150, z0: 137, z1: 150 });
-  // the torii marks the way in from the plaza
-  propTorii(G, 0, 77);
+  // hedge line between the last houses and the grove, with a gap for the path
+  for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) SG.blob(pT(PM.a, x, 0.5, 163.5, R() * 6), 1.5, 0.9, 1.1, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  solid(-62, -5.5, 0, 1.4, 162.6, 164.4); solid(5.5, 62, 0, 1.4, 162.6, 164.4);
+  WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 166, z1: 240 }, { x0: 32, x1: 150, z0: 166, z1: 240 }, { x0: -150, x1: 150, z0: 227, z1: 240 });
+  propTorii(G, 0, 77 + OZ);
   const gt = signTexture('SAKURA GARDENS', '#ff8fc8', 'font');
-  addSign(gt, 0, 4.45, 76.6, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
-  // flagstone path to the shrine and a loop round the koi pond
-  propPath(G, R, [[0, 75], [0, 90], [0.6, 104], [0, 118], [0, 122.4]], 2.2);
-  const loop = []; for (let i = 0; i <= 28; i++) { const a = i / 28 * TAU; loop.push([-11 + Math.cos(a) * 12.5, 102 + Math.sin(a) * 9]); }
+  addSign(gt, 0, 4.45, 76.6 + OZ, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
+  propPath(G, R, [[0, 75 + OZ], [0, 90 + OZ], [0.6, 104 + OZ], [0, 118 + OZ], [0, 122.4 + OZ]], 2.2);
+  const loop = []; for (let i = 0; i <= 28; i++) { const a = i / 28 * TAU; loop.push([-11 + Math.cos(a) * 12.5, 102 + OZ + Math.sin(a) * 9]); }
   propPath(G, R, loop, 1.3);
-  propPond(G, R, -11, 102, 9, 6.5);
-  for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + (i % 2 ? 0.35 : -0.35));
-  // cherry trees: [x, z, size]
+  propPond(G, R, -11, 102 + OZ, 9, 6.5);
+  for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
   for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
     [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 116.5, 0.95], [10, 117, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-11, 131, 1.3], [11, 132, 1.25]])
-    propSakura(G, R, x, z, s, false);
-  // stone lanterns along the paths and round the pond
-  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z);
-  propShrine(G, 0, 126, solid);
-  bench(-11, 113.2, '-z'); bench(3.6, 99, '-x'); bench(-26.3, 101, '+x');
+    propSakura(G, R, x, z + OZ, s, false);
+  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
+  propShrine(G, 0, 126 + OZ, solid);
+  bench(-11, 113.2 + OZ, '-z'); bench(3.6, 99 + OZ, '-x'); bench(-26.3, 101 + OZ, '+x');
   setG('props');
-  lamp(-14, 77); lamp(14, 77);
-  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86, d: 'garden' }, { kind: 'cache', x: 26, z: 131, d: 'garden' });
+  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121 + OZ, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86 + OZ, d: 'garden' }, { kind: 'cache', x: 26, z: 131 + OZ, d: 'garden' });
 
 }

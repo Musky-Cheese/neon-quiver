@@ -69,7 +69,7 @@ function billboardTexture(kind) {
 function buildCity() {
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
-  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
+  const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(), gSub = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
   const M = M4.create();
   const B = (x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0) => g.box(M4.trs(M, x, y, z, 0, ry, 0, sx, sy, sz), c, e, mat);
   const solid = (x0, x1, y0, y1, z0, z1) => WORLD.boxes.push({ x0, x1, y0, y1, z0, z1 });
@@ -244,6 +244,9 @@ function buildCity() {
   propHoverCar(g, R, 15, -17, 0.55, [0.25, 0.05, 0.12], 1);
   propHoverCar(g, R, -21, 12, -1.1, [0.05, 0.12, 0.22], 0);
   propHoverCar(g, R, 24, 22, 2.2, [0.18, 0.18, 0.2], 2);
+  // abandoned where they stalled on the avenues
+  propHoverCar(g, R, -2.8, -58, 0.35, [0.1, 0.1, 0.12], 1); propHoverCar(g, R, 57, 2.6, 1.9, [0.22, 0.12, 0.04], 0);
+  propHoverCar(g, R, -55, -3, -1.3, [0.06, 0.14, 0.08], 2); propHoverCar(g, R, 44, -3.2, 1.45, [0.2, 0.2, 0.22], 0);
   // jersey barriers
   function barrier(x, z, rot) { propBarrier(g, x, z, rot); }
   barrier(-9, 24, 0); barrier(-5.5, 24.6, 0); barrier(11, -26, 0); barrier(27, 5, 1); barrier(-28, -9, 1); barrier(-5, -30, 0); barrier(6, 30, 0); barrier(30, -12, 1);
@@ -260,13 +263,13 @@ function buildCity() {
   for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
   propBench(g, R, 12.5, -3.4, '-x');
   for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
-  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : gNear; }, getG: () => g, getForest: () => gForest });
+  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
   // hub supply points
   WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });
   for (const sp of WORLD.supplies) supplyProp(g, sp);
 
-  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build();
+  WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
   // no flying traffic: the city is dead (WORLD.cars stays empty)
   WORLD.train = { x: 34, speed: 0, wait: 0 };   // stalled over the plaza since the outbreak

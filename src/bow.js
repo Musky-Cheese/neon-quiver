@@ -113,10 +113,11 @@ function drawBowViewmodel(camM, time, player) {
   // ---- place bow in camera space
   const breath = Math.sin(time * 1.3) * 0.004;
   const walk = B.walkAmt, spr = B.sprintAmt;
-  const bobX = Math.sin(B.walkPhase) * 0.014 * walk * (1 + spr), bobY = -Math.abs(Math.cos(B.walkPhase)) * 0.014 * walk * (1 + spr);
+  const bobX = Math.sin(B.walkPhase) * 0.014 * walk * (1 + spr * 2.2), bobY = -Math.abs(Math.cos(B.walkPhase)) * 0.014 * walk * (1 + spr * 2.6);
   let tremX = 0, tremY = 0; if (B.hold > 2.2) { const k = Math.min(1, (B.hold - 2.2) / 2) * 0.004; tremX = (Math.random() - 0.5) * k; tremY = (Math.random() - 0.5) * k; }
-  let gx = lerp(-0.12, -0.085, dE) + bobX + B.lagX * 0.6 + tremX, gy = lerp(-0.15, -0.098, dE) + bobY + breath + B.lagY * 0.6 + tremY - spr * 0.07, gz = -0.62 + B.kick * 0.03;
-  let rx = 0.02 + spr * -0.35 + B.lagY * 1.2 + B.kick * 0.06, ry = 0.0 + B.lagX * -1.2 + spr * 0.3, rz = 0.4 - dE * 0.08 + spr * 0.25;
+  let gx = lerp(-0.12, -0.085, dE) + bobX + B.lagX * 0.6 + tremX, gy = lerp(-0.15, -0.098, dE) + bobY + breath + B.lagY * 0.6 + tremY - spr * 0.17, gz = -0.62 + B.kick * 0.03 + spr * 0.08;
+  gx -= spr * 0.07;   // sprinting: bow swung low and out to the side
+  let rx = 0.02 + spr * -0.95 + B.lagY * 1.2 + B.kick * 0.06, ry = 0.0 + B.lagX * -1.2 + spr * 0.55, rz = 0.4 - dE * 0.08 + spr * 0.85 + Math.sin(B.walkPhase) * 0.12 * spr;
   // reload: dip the bow slightly
   if (B.state === 'reload') { const k = Math.sin(clamp(B.t, 0, 1) * Math.PI); gy -= k * 0.02; rz -= k * 0.08; }
   // swap-in on game start / death anim

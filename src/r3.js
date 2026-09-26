@@ -221,6 +221,7 @@ function buildWorld3() {
   const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
   const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
   const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
+  const sub = new THREE.Mesh(WORLD.meshSub, MAT.static); sub.castShadow = true; sub.receiveShadow = true; sub.matrixAutoUpdate = false; scene.add(sub);
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
   R3.built = true;
 }
@@ -230,7 +231,7 @@ function buildWorld3() {
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 616;   // covers x -154..154, z -154..154
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 800;   // covers x -154..154, z -154..246
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;
@@ -469,7 +470,12 @@ function render3(time, W, H, fov, cam) {
   applyThemeUniforms(); NQU.uTime.value = time;
   const T = THEME;
   SKY_U.uZen.value.setRGB(...T.zen); SKY_U.uMid.value.setRGB(...T.mid); SKY_U.uGlow.value.setRGB(...T.glow); SKY_U.uCloud.value.setRGB(...T.cloud); SKY_U.uDiscCol.value.setRGB(...T.disc); SKY_U.uDiscDir.value.set(...T.discDir); SKY_U.uStars.value = T.stars;
-  for (const { s, m } of SIGNS) m.material.uniforms.uCol.value.setRGB(s.col[0] * T.sign, s.col[1] * T.sign, s.col[2] * T.sign);
+  for (const { s, m } of SIGNS) {   // dead city: some signs are out, a third sputter on failing power
+    const f = s.seed % 1; let k = 1;
+    if (f < 0.08) k = 0.06;
+    else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
+    m.material.uniforms.uCol.value.setRGB(s.col[0] * T.sign * k, s.col[1] * T.sign * k, s.col[2] * T.sign * k);
+  }
   rainMat.uniforms.uAlpha.value = T.rain; rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol);
   NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain;
   VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain) * (SETTINGS.quality === 0 ? 0.6 : 1);

@@ -243,7 +243,7 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
       float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
       float bseed = h21(floor(vNqW.xz/37.) + N0.xz*3.1);
       float seed = h21(id*1.37 + bseed*91.);
-      float lit = step(0.7 - bseed*0.22, seed) * step(1.2, vNqW.y);
+      float lit = step(0.86 - bseed*0.1, seed) * step(1.2, vNqW.y);   // dead city: most rooms dark
       float flick = step(0.997, h21(id + floor(uTime*4.)));
       vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
       wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
@@ -339,6 +339,11 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
     emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
     bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(uWet, 0., 1.) * 0.6); rimK = 0.2;
+  } else if (mat > 18.5 && mat < 19.5) {    // overgrown lawn: patchy weeds, bare mud, wet sheen
+    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vn(vNqW.xz * 27.);
+    base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
+    base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
+    bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(uWet, 0., 1.) * 0.5); rimK = 0.2;
   } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
     float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
     vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
