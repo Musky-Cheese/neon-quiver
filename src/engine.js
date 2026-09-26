@@ -300,7 +300,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base = mix(base*tileV*(1.-line*0.5)*(1. - stain), base*0.35, pud);
     bumpH = -line * 0.01 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
-    wetRefl = mix(0.04, 0.9, pud) * clamp(uWet, 0., 1.);
+    wetRefl = mix(0.22, 1.0, pud) * clamp(uWet, 0., 1.);   // the whole wet surface mirrors a little, puddles fully
   } else if (mat > 2.5 && mat < 3.5) {      // asphalt
     float pud = max(smoothstep(0.5,0.7, vn(vNqW.xz*0.12)), smoothstep(0.8, 0.5, nqOcc) * 0.8);     // gutters stay wet
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
@@ -317,7 +317,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     }
     bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.85, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
-    wetRefl = mix(0.03, 0.9, pud) * clamp(uWet, 0., 1.);
+    wetRefl = mix(0.2, 1.0, pud) * clamp(uWet, 0., 1.);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
     float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
     rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
@@ -428,9 +428,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     if (wetRefl > 0.0 && uReflOn > 0.5) {
       vec2 suv = gl_FragCoord.xy / uRes; suv.y = 1. - suv.y;
       vec3 wn = normalize((vec4(normal, 0.) * viewMatrix).xyz);
-      suv += wn.xz * vec2(0.025, -0.025);
+      suv += wn.xz * vec2(0.007, -0.007);   // puddles stay sharp; only the ripples bend them
       float fres = 0.04 + 0.96 * pow(1. - clamp(dot(normal, normalize(vViewPosition)), 0., 1.), 5.);
-      totalEmissiveRadiance += texture2D(uRefl, suv).rgb * wetRefl * mix(0.2, 1.0, fres);
+      // wet asphalt stretches lights into vertical streaks: a few taps down the screen, tighter on standing water
+      float str = (1. - clamp(wetRefl, 0., 1.)) * 0.012 + 0.002; vec3 rc = texture2D(uRefl, suv).rgb * 0.34;
+      rc += texture2D(uRefl, suv + vec2(0., str)).rgb * 0.26 + texture2D(uRefl, suv + vec2(0., str * 2.2)).rgb * 0.22 + texture2D(uRefl, suv - vec2(0., str)).rgb * 0.18;
+      totalEmissiveRadiance += rc * wetRefl * mix(0.35, 1.1, fres);
     }
 #endif
   }`)

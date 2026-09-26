@@ -635,7 +635,7 @@ function setCamera(time) {
 }
 function render(time) {
   // resolution: pixel budget per quality level, plus automatic scaling if frames run slow
-  const budget = (SETTINGS.quality === 0 ? 1.0e6 : SETTINGS.quality === 2 ? 3.7e6 : 2.1e6) * PERF.scale;
+  const budget = (SETTINGS.quality === 0 ? 1.0e6 : SETTINGS.quality === 2 ? 8.3e6 : 2.4e6) * PERF.scale;   // High renders up to native 4K
   const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
   let dpr = Math.min(2, devicePixelRatio || 1); if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
   if (window.__NQ_CAPTURE) dpr = window.__NQ_CAPTURE_DPR || 1;

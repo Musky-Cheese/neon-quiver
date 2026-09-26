@@ -361,7 +361,7 @@ const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 NQU.uRefl.value = BLACK_TEX;
 function renderReflection(r) {
-  const W = Math.max(4, R3.W >> 1), H = Math.max(4, R3.H >> 1);
+  const k = SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // sharper mirror on High
   if (reflRT.width !== W || reflRT.height !== H) reflRT.setSize(W, H);
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
@@ -405,15 +405,21 @@ class ScenePass extends Pass {
   }
 }
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDmg: { value: 0 }, uLow: { value: 0 }, uExpo: { value: 1 }, uAberr: { value: 0 }, uSat: { value: 1 }, uGrade: { value: new THREE.Vector3(1, 1, 1) }, uLift: { value: new THREE.Vector3() }, uRes: { value: new THREE.Vector2(1, 1) }, uFocus: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDmg: { value: 0 }, uLow: { value: 0 }, uExpo: { value: 1 }, uAberr: { value: 0 }, uSharp: { value: 0.3 }, uSat: { value: 1 }, uGrade: { value: new THREE.Vector3(1, 1, 1) }, uLift: { value: new THREE.Vector3() }, uRes: { value: new THREE.Vector2(1, 1) }, uFocus: { value: 0 } },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
-  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime, uDmg, uLow, uExpo, uAberr, uSat, uFocus; uniform vec3 uGrade, uLift; uniform vec2 uRes;
+  fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D tDiffuse; uniform float uTime, uDmg, uLow, uExpo, uAberr, uSat, uFocus, uSharp; uniform vec3 uGrade, uLift; uniform vec2 uRes;
 ${NOISE_GLSL}
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.,1.); }
 void main(){
   vec2 uv = vUv; vec2 cc = uv-0.5; float r2 = dot(cc,cc);
   float ab = (0.0015 + uDmg*0.006 + uAberr)*r2*4.;
   vec3 c; c.r = texture2D(tDiffuse, uv+cc*ab).r; c.g = texture2D(tDiffuse, uv).g; c.b = texture2D(tDiffuse, uv-cc*ab).b;
+  {   // contrast-adaptive sharpen: pulls back the softness of MSAA + upscaling, eased off on already-contrasty edges
+    vec2 px = 1. / uRes; vec3 n = texture2D(tDiffuse, uv + vec2(0., px.y)).rgb, s = texture2D(tDiffuse, uv - vec2(0., px.y)).rgb, e = texture2D(tDiffuse, uv + vec2(px.x, 0.)).rgb, w = texture2D(tDiffuse, uv - vec2(px.x, 0.)).rgb;
+    vec3 mn = min(min(min(n, s), min(e, w)), c), mx = max(max(max(n, s), max(e, w)), c);
+    vec3 amp = sqrt(clamp(min(mn, 2. - mx) / max(mx, 1e-4), 0., 1.)) * uSharp;
+    c = max((c + (n + s + e + w) * -amp * 0.25) / (1. - amp), 0.);
+  }
   if (uFocus > 0.001) {   // aiming: the edges of the frame soften, the target stays crisp
     float k = uFocus * smoothstep(0.02, 0.2, r2); vec3 acc = c; float wsum = 1.;
     for (int i = 1; i <= 6; i++) { float t = float(i) / 6.; vec2 o = cc * t * 0.014 * k; float w = 1. - t * 0.5; acc += texture2D(tDiffuse, uv - o).rgb * w + texture2D(tDiffuse, uv + o * 0.5).rgb * w * 0.5; wsum += w * 1.5; }
@@ -425,11 +431,13 @@ void main(){
   c = aces(c);
   c *= uGrade; float lm = dot(c, vec3(0.3,0.59,0.11)); c = mix(vec3(lm), c, uSat); c += uLift*(1.-c);
   c = pow(clamp(c,0.,1.), vec3(1./2.2));
+  c = mix(c, c * c * (3. - 2. * c), 0.42);   // S-curve: deeper blacks, punchier neon
+  { float l2 = dot(c, vec3(0.3, 0.59, 0.11)); c = max(mix(vec3(l2), c, 1.18), 0.); c *= 1. - 0.35 * smoothstep(0.12, 0.0, l2); }   // richer colour, crushed shadows
   float vig = smoothstep(0.85,0.2,sqrt(r2)*1.25); c *= mix(0.72,1.,vig);
   float edge = smoothstep(0.25,0.75,sqrt(r2)*1.4);
   c = mix(c, vec3(0.75,0.02,0.08), edge*clamp(uDmg,0.,1.)*0.75);
   c = mix(c, vec3(0.5,0.0,0.05), edge*uLow*(0.25+0.2*sin(uTime*6.)));
-  c += (h21(uv*uRes+fract(uTime)*100.)-0.5)*0.03;
+  c += (h21(uv*uRes+fract(uTime)*100.)-0.5)*0.014;
   gl_FragColor = vec4(c,1.);
 }`,
 };
@@ -489,8 +497,8 @@ function render3(time, W, H, fov, cam) {
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H);
-  bloomPass.strength = T.bloom * (T.bloomK || 0.32); bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
+  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality === 2 ? 0.45 : 0.35;
+  bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
   vmPass.enabled = vmOn && !worldPass.withVM;
