@@ -362,6 +362,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     if (pinkF) base = mix(base, mix(vec3(1., 0.78, 0.86), vec3(0.86, 0.36, 0.55), hv), 0.65) * (0.62 + 0.45 * clump);   // white to deep pink petals
     else base *= mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv) * (0.55 + 0.6 * clump);                           // dark to sunlit, yellowing leaves
     base *= mix(0.62 + 0.3 * clump, 1.0, edgeL) * (0.8 + 0.3 * dome);
+    if (pinkF) { base *= vec3(1.12, 0.95, 1.02); emis += base * (0.1 + 0.16 * dome) * (0.6 + 0.4 * clump); }   // petals glow softly, as if lit through
     emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4; bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
