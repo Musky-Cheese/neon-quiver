@@ -267,7 +267,7 @@ function buildCity() {
   barrier(-9, 24, 0); barrier(-5.5, 24.6, 0); barrier(11, -26, 0); barrier(27, 5, 1); barrier(-28, -9, 1); barrier(-5, -30, 0); barrier(6, 30, 0); barrier(30, -12, 1);
   // vending machines / kiosks
   function vend(x, z, ry, c) { const fx = ry === 0 ? 0 : ry > 0 ? 1 : -1, fz = ry === 0 ? -Math.sign(z) : 0; propVend(g, R, x, z, fx, fz, c); }
-  vend(-14, 38.8, 0, NEON.cyan); vend(-12.6, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
+  vend(-17.4, 38.8, 0, NEON.cyan); vend(-16, 38.8, 0, NEON.mag); vend(19, -38.8, 0, NEON.amber); vend(38.8, 16, -1, NEON.mag); vend(-38.8, -20, 1, NEON.cyan);
   // bioluminescent trees in planters (props.js)
   const tree = (x, z, c) => propSakura(g, R, x, z, 1, true, c);
   tree(-17, -19, NEON.cyan); tree(18, 16, NEON.mag); tree(-26, 26, NEON.violet); tree(28, -27, NEON.cyan);
