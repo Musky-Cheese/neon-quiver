@@ -403,3 +403,53 @@ function propHouse(g, R, x, z, face, solid) {
   const zf = z + fz * fzl;
   for (const s of [-1, 1]) { const a = x + s * 0.9, b = x + s * 5.3; solid(Math.min(a, b), Math.max(a, b), 0, 0.9, zf - 0.08, zf + 0.08); }
 }
+
+/* ---------- Japanese manor: stone platform, wraparound veranda, glowing shoji walls, hip-and-gable roof ---------- */
+function propManor(g, x, z, solid) {
+  const stone = [0.22, 0.22, 0.21], wood = [0.16, 0.1, 0.06], dark = [0.06, 0.04, 0.03], roof = [0.07, 0.08, 0.09], shoji = [1.0, 0.82, 0.58];
+  const B = (bx, by, bz, sx, sy, sz, c, e, mat) => g.box(M4.trs(PM.a, x + bx, by, z + bz, 0, 0, 0, sx, sy, sz), c, e, mat);
+  // platform and steps (each step under the 0.32 m you can walk up)
+  B(0, 0.5, 0, 20, 1.0, 12, stone, 0, 16); solid(x - 10, x + 10, 0, 1.15, z - 6, z + 6);
+  for (let i = 0; i < 3; i++) { const h = 0.29 * (i + 1), d = 0.45; B(0, h / 2, -6 - (2.5 - i) * d, 5, h, d, stone, 0, 16); solid(x - 2.5, x + 2.5, 0, h, z - 6 - (3 - i) * d, z - 6 - (2 - i) * d); }
+  // veranda deck and its posts
+  B(0, 1.08, 0, 18, 0.16, 11, wood, 0, 13);
+  for (let px = -8.6; px <= 8.61; px += 2.15) for (const pz of [-5.2, 5.2]) B(px, 3.0, pz, 0.24, 3.8, 0.24, dark, 0, 13);
+  for (let pz = -3.1; pz <= 3.11; pz += 2.07) for (const px of [-8.6, 8.6]) B(px, 3.0, pz, 0.24, 3.8, 0.24, dark, 0, 13);
+  // the hall: shoji panels lit from within, framed by dark posts and a lattice
+  const panelWall = (cx, cz, len, alongX) => {
+    const n = Math.round(len / 1.8), step = len / n;
+    for (let i = 0; i < n; i++) {
+      const o = -len / 2 + step * (i + 0.5), px = alongX ? cx + o : cx, pz = alongX ? cz : cz + o;
+      B(px, 2.8, pz, alongX ? step - 0.14 : 0.06, 3.2, alongX ? 0.06 : step - 0.14, shoji, 0.9, 0);
+      for (let k = 1; k < 4; k++) B(px, 1.2 + k * 0.8, pz, alongX ? step - 0.14 : 0.09, 0.04, alongX ? 0.09 : step - 0.14, dark, 0, 13);
+      B(alongX ? px : px, 2.8, alongX ? pz : pz, alongX ? 0.04 : 0.09, 3.2, alongX ? 0.09 : 0.04, dark, 0, 13);
+      B(alongX ? cx - len / 2 + step * i : px, 2.8, alongX ? pz : cz - len / 2 + step * i, 0.16, 3.3, 0.16, dark, 0, 13);
+    }
+  };
+  panelWall(0, -4, 15, true); panelWall(0, 4, 15, true); panelWall(-7.5, 0, 8, false); panelWall(7.5, 0, 8, false);
+  B(0, 4.55, 0, 15.4, 0.3, 8.4, wood, 0, 13);
+  solid(x - 7.6, x + 7.6, 1.15, 4.6, z - 4.1, z + 4.1);
+  // roof: hipped skirt (4-sided lathe stretched to the rectangle) with a gable on top, ridge with upswept ends
+  g.lathe(M4.trs(PM.a, x, 4.7, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[1.414, 0], [1.414, 0.12], [0.8, 1.8]], roof, 0, 8, 4, false, false);
+  g.lathe(M4.trs(PM.a, x, 4.58, z, 0, Math.PI / 4, 0, 11.5, 1, 7.6), [[0.8, 1.9], [1.414, 0.1]], [0.03, 0.03, 0.035], 0, 16, 4, false, false);   // underside
+  g.extrude(pT(PM.a, x, 6.45, z, Math.PI / 2), [[-3.2, 0], [3.2, 0], [0, 2.3]], 9.6, roof, 0, 8);
+  B(0, 8.8, 0, 10.8, 0.3, 0.45, dark, 0, 8);
+  for (const s of [-1, 1]) g.rbox(pT(PM.a, x + s * 5.6, 9.05, z, 0, 0, -s * 0.5), 0.9, 0.3, 0.42, 0.08, dark, 0, 8, 1);
+  // hanging lanterns under the eaves, warm light spilling onto the veranda
+  for (const lx of [-6, -2, 2, 6]) {
+    g.lathe(pT(PM.a, x + lx, 4.0, z - 5.6), [[0.1, 0], [0.3, 0.14], [0.32, 0.4], [0.3, 0.66], [0.1, 0.78]], [1, 0.32, 0.16], 2.6, 15, 12, true, true);
+    WORLD.halos.push({ p: [x + lx, 4.4, z - 5.6], s: 1.8, c: [0.6, 0.14, 0.06] });
+  }
+  WORLD.lights.push({ p: [x, 3.2, z - 7], r: 14, c: [1.9, 1.2, 0.6], shop: true }, { p: [x - 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true }, { p: [x + 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true });
+}
+// plastered compound wall with a tiled cap; gate: two posts under a little roof
+function propCompoundWall(g, x0, z0, x1, z1, solid) {
+  const L = Math.hypot(x1 - x0, z1 - z0), ry = Math.atan2(x1 - x0, z1 - z0), cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  g.box(M4.trs(PM.a, cx, 1.0, cz, 0, ry, 0, 0.5, 2.0, L), [0.5, 0.48, 0.44], 0, 16);
+  g.box(M4.trs(PM.a, cx, 2.1, cz, 0, ry, 0, 0.8, 0.22, L + 0.3), [0.07, 0.08, 0.09], 0, 8);
+  solid(Math.min(x0, x1) - 0.25, Math.max(x0, x1) + 0.25, 0, 2.2, Math.min(z0, z1) - 0.25, Math.max(z0, z1) + 0.25);
+}
+function propGate(g, x, z, w, solid) {
+  for (const s of [-1, 1]) { g.box(M4.trs(PM.a, x + s * w / 2, 1.6, z, 0, 0, 0, 0.4, 3.2, 0.4), [0.12, 0.07, 0.04], 0, 13); solid(x + s * w / 2 - 0.2, x + s * w / 2 + 0.2, 0, 3.2, z - 0.2, z + 0.2); }
+  g.extrude(pT(PM.a, x, 3.2, z, Math.PI / 2), [[-1.1, 0], [1.1, 0], [0, 0.8]], w + 1.6, [0.07, 0.08, 0.09], 0, 8);
+}

@@ -8,7 +8,15 @@ const ZTYPES = {
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
 };
-const SKINS = [[0.46, 0.52, 0.40], [0.58, 0.54, 0.46], [0.42, 0.47, 0.50], [0.52, 0.46, 0.40], [0.47, 0.53, 0.45], [0.36, 0.33, 0.30]];
+// rotting skin: grey-green, bruised violet, waxy pale, necrotic brown, blue-grey
+const SKINS = [[0.42, 0.48, 0.36], [0.46, 0.38, 0.44], [0.62, 0.6, 0.52], [0.36, 0.3, 0.24], [0.4, 0.45, 0.48], [0.5, 0.5, 0.4]];
+// what they were wearing when it happened: [shirt, pants] by type
+const OUTFITS = {
+  walker: [[[0.62, 0.62, 0.6], [0.1, 0.11, 0.16]], [[0.3, 0.36, 0.5], [0.12, 0.12, 0.13]], [[0.7, 0.55, 0.1], [0.62, 0.5, 0.1]], [[0.26, 0.09, 0.1], [0.16, 0.14, 0.12]], [[0.2, 0.3, 0.22], [0.2, 0.2, 0.22]], [[0.36, 0.28, 0.18], [0.1, 0.11, 0.16]]],
+  runner: [[[0.12, 0.12, 0.12], [0.08, 0.1, 0.18]], [[0.5, 0.1, 0.08], [0.1, 0.1, 0.1]], [[0.18, 0.22, 0.3], [0.14, 0.14, 0.15]], [[0.3, 0.3, 0.26], [0.06, 0.06, 0.07]]],
+  brute: [[[0.07, 0.08, 0.13], [0.06, 0.07, 0.1]], [[0.1, 0.1, 0.1], [0.08, 0.08, 0.08]]],
+  boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
+};
 const CLOTHES = [[0.14, 0.15, 0.2], [0.26, 0.09, 0.1], [0.1, 0.18, 0.2], [0.3, 0.27, 0.22], [0.12, 0.12, 0.12], [0.3, 0.2, 0.09], [0.36, 0.36, 0.38], [0.2, 0.24, 0.16]];
 const PANTS = [[0.1, 0.11, 0.16], [0.16, 0.14, 0.12], [0.08, 0.08, 0.09], [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06]];
@@ -24,7 +32,7 @@ function spawnZombie(type, x, z, wave) {
   const zz = {
     type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.35, wave * 0.02)), scale: T.scale * rand(0.95, 1.06),
     phase: Math.random() * TAU, state: 'walk', atkT: 0, atkCd: 0.5, flinch: 0, flash: 0, burn: 0, dieT: 0, dead: false,
-    skin: pick(SKINS), cloth: pick(CLOTHES), pants: pick(PANTS), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
+    skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: Math.random() < 0.3, sleeve: Math.random() < 0.55, headVar: Math.random() < 0.5 ? 'a' : 'b',
     stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,

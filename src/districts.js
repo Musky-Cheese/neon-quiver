@@ -239,12 +239,17 @@ function buildDistricts(C) {
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
   for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
-    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 116.5, 0.95], [10, 117, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-11, 131, 1.3], [11, 132, 1.25]])
+    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 109, 0.95], [10, 109.5, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-17, 134, 1.3], [17.5, 134.5, 1.25]])
     propSakura(G, R, x, z + OZ, s, false);
   for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
-  propShrine(G, 0, 126 + OZ, solid);
+  propShrine(G, 20, 115 + OZ, solid);                                   // the old shrine now sits off to the side
+  // the end of the path: a walled manor
+  propManor(G, 0, 219, solid);
+  propGate(G, 0, 207.5, 5, solid);
+  propCompoundWall(G, -13.5, 207.5, -3, 207.5, solid); propCompoundWall(G, 3, 207.5, 13.5, 207.5, solid);
+  propCompoundWall(G, -13.5, 207.5, -13.5, 226, solid); propCompoundWall(G, 13.5, 207.5, 13.5, 226, solid);
   bench(-11, 113.2 + OZ, '-z'); bench(3.6, 99 + OZ, '-x'); bench(-26.3, 101 + OZ, '+x');
   setG('props');
-  WORLD.supplies.push({ kind: 'terminal', x: 7.5, z: 121 + OZ, ry: -0.5, d: 'garden' }, { kind: 'cache', x: -26, z: 86 + OZ, d: 'garden' }, { kind: 'cache', x: 26, z: 131 + OZ, d: 'garden' });
+  WORLD.supplies.push({ kind: 'terminal', x: 6.5, z: 203, ry: -0.6, d: 'garden' }, { kind: 'cache', x: -26, z: 86 + OZ, d: 'garden' }, { kind: 'cache', x: 26, z: 131 + OZ, d: 'garden' });
 
 }

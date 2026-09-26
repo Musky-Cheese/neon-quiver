@@ -142,7 +142,7 @@ function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
   if (kind === 'vm') m.defines.NQ_VM = 1;
   if (kind === 'zombie') m.defines.NQ_Z = 1;
-  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 } } : {};
+  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 }, uSeed: { value: 0 } } : {};
   m.userData.u = own;
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, NQU, own);
@@ -153,7 +153,7 @@ varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
 #endif
 #ifdef NQ_Z
-attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart;
+attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart; varying vec3 vNqL;
 #else
 attribute vec2 nqm;
 #endif`)
@@ -164,7 +164,7 @@ attribute vec2 nqm;
 #endif
   w = modelMatrix * w; vNqW = w.xyz; vNqN = normalize(mat3(modelMatrix) * wn); }
 #ifdef NQ_Z
-  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part;
+  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part; vNqL = position;   // bind-pose position: decay patterns stick to the body
   int pi = int(part + 0.5); if (uHide[pi] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
 #else
   vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
@@ -200,7 +200,7 @@ vec2 nqBrick(vec2 fc) {
 varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
 #endif
 #ifdef NQ_Z
-varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash;
+varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash, uSeed;
 #endif
 `)
       .replace('#include <color_fragment>', `
@@ -364,6 +364,22 @@ varying float vPart; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; u
     armour = step(6.5, vPart) * step(vPart, 8.5);
 #endif
     rough = mix(mix(0.58, 0.2, bl), 0.32, armour); metal = armour*0.7; rimK = 1.0;
+#ifdef NQ_Z
+    {   // decay: mottled skin, dark veins, wet wounds; grimy clothes torn open to the skin beneath
+      vec3 q = vNqL * 7. + uSeed; float skinM = (1. - clm) * (1. - armour);
+      float mott = vn(q.xy * 1.3 + q.z * 0.7);
+      float vein = smoothstep(0.035, 0.0, abs(vn(q.xz * 2.1 + q.y * 0.6) - 0.5)) * skinM;
+      float wound = smoothstep(0.74, 0.82, vn(q.yz * 0.8 + 7.3)) * (1. - armour);
+      float tear = smoothstep(0.66, 0.74, vn(q.xy * 1.6 + 3.1)) * clm * (1. - armour);
+      base = mix(base, base * vec3(0.78, 0.72, 0.82) * (0.65 + 0.6 * mott), skinM * 0.85);
+      base = mix(base, vec3(0.11, 0.04, 0.1) * ao, vein * 0.7);
+      base = mix(base, skin * ao * 0.75, tear);
+      base *= 1. - clm * (1. - tear) * 0.4 * vn(q.xz * 3. + 1.7);
+      base = mix(base, vec3(0.16, 0.015, 0.012) * ao, wound * 0.9);
+      rough = mix(rough, 0.12, max(wound, bl));
+      bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.004 + vein * 0.002;
+    }
+#endif
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;

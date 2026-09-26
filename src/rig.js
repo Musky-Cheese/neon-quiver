@@ -221,7 +221,7 @@ function drawZombieRig(z, time) {
   setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 3.2, e[1] * 3, e[2] * 3]);
   setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
-  u.uFlash.value = fl;
+  u.uFlash.value = fl; u.uSeed.value = z.seed;
   r.mesh.visible = true;
   // ---------- rigid extras attached to bones ----------
   const neck = B.neck.matrixWorld.elements, spine = B.spine.matrixWorld.elements;
