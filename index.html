@@ -3873,14 +3873,21 @@ const rainGeo = (function () {
 const rainMat = new THREE.ShaderMaterial({
   uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() } }, transparent: true, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime; varying float vA;
+  vertexShader: `attribute vec2 aP2; uniform float uTime; varying float vA, vK;
 void main(){ float S = 50.;
   float x = mod(position.x - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
   float z = mod(position.y - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
   float y = mod(position.z - uTime*(24.+aP2.x*8.), 36.) - 6. + cameraPosition.y;
-  vec3 p = vec3(x + aP2.y*0.18, y + aP2.y*0.9, z + aP2.y*0.05); vA = aP2.y;
+  // the downpour comes and goes: slow heavy/light spells, drifting patches, gusts that swing the slant
+  float spell = 0.5 + 0.5 * sin(uTime * 0.21) * sin(uTime * 0.067 + 1.3);
+  float patchD = 0.5 + 0.5 * sin(x * 0.09 + uTime * 0.35) * sin(z * 0.075 - uTime * 0.27);
+  float dens = clamp(0.2 + 0.7 * spell + 0.45 * (patchD - 0.5), 0.12, 1.);
+  float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
+  vK = step(rnd, dens) * (0.45 + 0.8 * fract(rnd * 13.7));
+  float wind = 0.08 + 0.32 * spell + 0.12 * sin(uTime * 1.3 + position.y * 0.21), len = 0.9 * (0.55 + 0.9 * fract(rnd * 5.3));
+  vec3 p = vec3(x + aP2.y * wind * len * 2., y + aP2.y * len, z + aP2.y * 0.05); vA = aP2.y;
   gl_Position = projectionMatrix*viewMatrix*vec4(p,1.); }`,
-  fragmentShader: `precision mediump float; varying float vA; uniform float uAlpha; uniform vec3 uRainCol; void main(){ gl_FragColor = vec4(uRainCol*uAlpha*(0.3+vA*0.7), 0.); }`,
+  fragmentShader: `precision mediump float; varying float vA, vK; uniform float uAlpha; uniform vec3 uRainCol; void main(){ gl_FragColor = vec4(uRainCol*uAlpha*(0.3+vA*0.7)*vK, 0.); }`,
 });
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
 
