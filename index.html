@@ -189,7 +189,7 @@ button, select, input { font-family: var(--f); }
     </div>
     <div class="hud-tr"><div class="lbl">Credits</div><div id="cash" class="num">¢0</div></div>
     <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div><i class="hpcap"></i></div></div></div>
-    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel to switch · Q for last</div></div>
+    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel · X last arrow · Q grapple</div></div>
   </div>
 
   <section id="scr-title" class="screen">
@@ -221,7 +221,8 @@ button, select, input { font-family: var(--f); }
           <kbd>Release</kbd><span>Loose the arrow</span>
           <kbd>Right click</kbd><span>Let the string down</span>
           <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
-          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel)</span>
+          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
+          <kbd>Q</kbd><span>Grappling hook: pulls you toward walls, poles and cranes. High anchors mean long falls, and falls hurt</span>
           <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
           <kbd>P / Esc</kbd><span>Pause · <kbd>M</kbd> music</span>
         </div>
@@ -2436,6 +2437,11 @@ const AUD = {
     if (H.horn <= 0) { H.horn = rand(28, 55); for (const f of [82, 87.5, 164]) this.tone('sawtooth', f, f * 0.985, 2.6, 0.07 * k * (f > 100 ? 0.4 : 1), H.hl, t, 0.35); }
     if (H.creak <= 0) { H.creak = rand(7, 16); this.burst('bandpass', rand(300, 500), rand(700, 1100), 18, 1.2, 0.05 * k, this.amb, t, 0.2); this.tone('triangle', rand(90, 130), rand(70, 90), 0.9, 0.025 * k, this.amb, t + 0.2, 0.15); }
   },
+  hookFire() { if (!this.ctx) return; this.burst('highpass', 2500, 900, 1.5, 0.22, 0.2); this.tone('square', 900, 1500, 0.08, 0.04); },
+  hookAttach() { if (!this.ctx) return; this.tone('square', 220, 90, 0.08, 0.12); this.burst('bandpass', 1800, 600, 4, 0.12, 0.18); },
+  hookRelease() { if (!this.ctx) return; this.tone('triangle', 700, 300, 0.12, 0.05); },
+  _reelT: 0,
+  hookReel(dt, k) { if (!this.ctx) return; this._reelT -= dt; if (this._reelT > 0) return; this._reelT = 0.05; this.burst('bandpass', 700 + 1400 * k, 900 + 1600 * k, 6, 0.06, 0.05); },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
   tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
@@ -3607,7 +3613,7 @@ const LIMB_BEND = [0.05, 0.11, 0.19, 0.27, 0.36, 0.22];
 const LIMB_W = [0.032, 0.03, 0.027, 0.024, 0.021, 0.018];
 
 function bowStartDraw() {
-  if (BOW.state !== 'ready') return false;
+  if (BOW.state !== 'ready' || HOOK.state === 'reel' || HOOK.state === 'fly') return false;
   BOW.state = 'drawing'; BOW.hold = 0; AUD.drawStart(PLAYER.drawTime * (1 - BOW.draw)); return true;
 }
 function bowRelease() {
@@ -3809,6 +3815,133 @@ function vmToWorld(camM, p, out) {
   M4.pt(_bc, p[0], p[1], p[2], _vc);
   const k = Math.tan(PLAYER.fov * Math.PI / 360) / Math.tan(VM_FOV * Math.PI / 360);
   M4.pt(camM, _vc[0] * k, _vc[1] * k, _vc[2], out);
+}
+
+/* ============================================================
+   Grappling hook (Q): fire at any wall, pole, crane or container within 36 m,
+   get reeled toward it, keep your momentum when it lets go. Streets only:
+   you're pulled to a point just off the wall and below the anchor, so you
+   never land on roofs (zombies can't reach them). High anchors mean long
+   falls, and falls hurt, so the reticle shows the risk before you commit.
+   ============================================================ */
+const HOOK = { state: 'idle', cd: 0, t: 0, ax: 0, ay: 0, az: 0, tx: 0, ty: 0, tz: 0, hx: 0, hy: 0, hz: 0, flyT: 0, stuckT: 0, aim: null, aimT: 0 };
+const HOOK_CFG = { range: 36, cooldown: 8, reel: 27, hang: 1.5, maxReel: 1.8, safeFall: 5, fallDmg: 5.5 };
+
+// ray against the city's boxes and poles, returning the hit point, its surface normal and the top of what was hit
+function hookRay(ox, oy, oz, dx, dy, dz, maxD) {
+  let best = null;
+  for (const b of WORLD.boxes) {
+    if (b.y1 < 0.6) continue;
+    let t0 = 0, t1 = maxD, ok = true, ax0 = -1, sg = 0; const o = [ox, oy, oz], d = [dx, dy, dz], mn = [b.x0, b.y0, b.z0], mx = [b.x1, b.y1, b.z1];
+    for (let a = 0; a < 3 && ok; a++) {
+      if (Math.abs(d[a]) < 1e-9) { if (o[a] < mn[a] || o[a] > mx[a]) ok = false; continue; }
+      let ta = (mn[a] - o[a]) / d[a], tb = (mx[a] - o[a]) / d[a], s = -1; if (ta > tb) { const q = ta; ta = tb; tb = q; s = 1; }
+      if (ta > t0) { t0 = ta; ax0 = a; sg = s; } t1 = Math.min(t1, tb); if (t0 > t1) ok = false;
+    }
+    if (ok && ax0 >= 0 && t0 > 0.5 && (!best || t0 < best.t)) { const n = [0, 0, 0]; n[ax0] = sg; best = { t: t0, n, top: b.y1 }; }
+  }
+  for (const c of WORLD.circles) {
+    if (c.h < 0.6) continue;
+    const px = ox - c.x, pz = oz - c.z, A = dx * dx + dz * dz; if (A < 1e-9) continue;
+    const B = 2 * (px * dx + pz * dz), C = px * px + pz * pz - c.r * c.r, D = B * B - 4 * A * C; if (D < 0) continue;
+    const t = (-B - Math.sqrt(D)) / (2 * A); if (t < 0.5 || t > maxD || oy + dy * t > c.h) continue;
+    if (!best || t < best.t) { const hx = px + dx * t, hz = pz + dz * t, L = Math.hypot(hx, hz) || 1; best = { t, n: [hx / L, 0, hz / L], top: c.h }; }
+  }
+  if (!best) return null;
+  best.x = ox + dx * best.t; best.y = oy + dy * best.t; best.z = oz + dz * best.t;
+  return best;
+}
+// where a hook along the view would take you, and how far you'd fall from there
+function hookAim() {
+  camBasis();
+  const P = PLAYER, h = hookRay(P.x, P.y + 1.62, P.z, _cf[0], _cf[1], _cf[2], HOOK_CFG.range);
+  if (!h) return null;
+  const ty = clamp(Math.min(h.y, h.top - 0.3) - HOOK_CFG.hang, 0, 400);
+  h.tx = h.x + h.n[0] * 0.75; h.tz = h.z + h.n[2] * 0.75; h.ty = ty;
+  h.drop = Math.max(0, h.ty + 0.4);   // you let go with a little upward hop, then fall to the street
+  return h;
+}
+function hookRisk(drop) { return drop <= HOOK_CFG.safeFall ? 0 : Math.round((drop - HOOK_CFG.safeFall) * HOOK_CFG.fallDmg); }
+
+function hookFire() {
+  if (GAME.state !== 'playing' || PLAYER.dead) return;
+  if (HOOK.state !== 'idle') { if (HOOK.state === 'reel') hookRelease(); return; }   // Q again cuts the rope
+  if (HOOK.cd > 0) { AUD.deny(); return; }
+  const h = hookAim();
+  bowCancel();
+  camBasis();
+  if (!h) {   // nothing in range: the hook flies out and falls short
+    HOOK.state = 'whiff'; HOOK.t = 0; HOOK.cd = 1;
+    HOOK.ax = PLAYER.x + _cf[0] * HOOK_CFG.range; HOOK.ay = PLAYER.y + 1.62 + _cf[1] * HOOK_CFG.range; HOOK.az = PLAYER.z + _cf[2] * HOOK_CFG.range;
+    AUD.hookFire(); return;
+  }
+  Object.assign(HOOK, { state: 'fly', t: 0, ax: h.x, ay: h.y, az: h.z, tx: h.tx, ty: h.ty, tz: h.tz, flyT: h.t / 140, cd: HOOK_CFG.cooldown, stuckT: 0 });
+  AUD.hookFire();
+}
+function hookRelease() {
+  const P = PLAYER;
+  if (HOOK.state === 'reel') { P.vy = clamp(P.vy, -4, 1.5) + 2.5; P.fling = true; }   // a small hop off the rope; the fall is what the reticle promised
+  HOOK.state = 'idle'; AUD.hookRelease();
+}
+// hand point for the rope: low and to the right of the camera
+function hookHand(out) { camBasis(); const P = PLAYER; out[0] = P.x + _cr[0] * 0.28 + _cf[0] * 0.3; out[1] = P.y + 1.3; out[2] = P.z + _cr[2] * 0.28 + _cf[2] * 0.3; return out; }
+const _hh = [0, 0, 0];
+
+// runs inside updatePlayer; returns true while the hook owns the player's movement
+function updateHook(dt) {
+  const P = PLAYER;
+  HOOK.cd = Math.max(0, HOOK.cd - dt);
+  HOOK.aimT -= dt; if (HOOK.aimT <= 0) { HOOK.aimT = 0.05; HOOK.aim = HOOK.state === 'idle' ? hookAim() : null; }
+  if (HOOK.state === 'whiff') { HOOK.t += dt; if (HOOK.t > 0.35) HOOK.state = 'idle'; return false; }
+  if (HOOK.state === 'fly') {
+    HOOK.t += dt; const k = Math.min(1, HOOK.t / HOOK.flyT);
+    hookHand(_hh); HOOK.hx = lerp(_hh[0], HOOK.ax, k); HOOK.hy = lerp(_hh[1], HOOK.ay, k); HOOK.hz = lerp(_hh[2], HOOK.az, k);
+    if (k >= 1) { HOOK.state = 'reel'; HOOK.t = 0; AUD.hookAttach(); burst(HOOK.ax, HOOK.ay, HOOK.az, 14, [1.6, 1.4, 1.1], 4, 0.3, 0.05, 6, 1.6); }
+    return false;
+  }
+  if (HOOK.state !== 'reel') return false;
+  HOOK.t += dt;
+  const dx = HOOK.tx - P.x, dy = HOOK.ty - P.y, dz = HOOK.tz - P.z, d = Math.hypot(dx, dy, dz) || 1e-3;
+  const sp = HOOK_CFG.reel * Math.min(1, 0.45 + HOOK.t * 2.5);          // ramps up over the first quarter second
+  const k = Math.min(1, dt * 9);
+  P.vx = lerp(P.vx, dx / d * sp, k); P.vy = lerp(P.vy, dy / d * sp, k); P.vz = lerp(P.vz, dz / d * sp, k);
+  const x0 = P.x, z0 = P.z, y0 = P.y;
+  P.x += P.vx * dt; P.y += P.vy * dt; P.z += P.vz * dt; P.y = Math.max(0, P.y); P.grounded = false;
+  pushOutCircle(P, 0.42);
+  const moved = Math.hypot(P.x - x0, P.y - y0, P.z - z0);
+  if (moved < sp * dt * 0.25) HOOK.stuckT += dt; else HOOK.stuckT = 0;
+  if (d < 1.4 || HOOK.t > HOOK_CFG.maxReel || HOOK.stuckT > 0.2) hookRelease();
+  AUD.hookReel(dt, sp / HOOK_CFG.reel);
+  return true;
+}
+// falls: anything past 5 m hurts, and it climbs fast
+function hookLanded(drop) {
+  const d = hookRisk(drop);
+  if (d > 0) { PLAYER.hurt(d, PLAYER.x + Math.sin(PLAYER.yaw) * 0.01, PLAYER.z + 0.01); shake(0.4 + d / 60); GAME.toast(`HARD LANDING  -${d}`, '#ff5a3c'); }
+}
+
+function drawHook() {
+  if (HOOK.state === 'idle' || GAME.state === 'title') return;
+  hookHand(_hh);
+  let ex = HOOK.ax, ey = HOOK.ay, ez = HOOK.az;
+  if (HOOK.state === 'fly') { ex = HOOK.hx; ey = HOOK.hy; ez = HOOK.hz; }
+  if (HOOK.state === 'whiff') { const k = Math.sin(Math.min(1, HOOK.t / 0.35) * Math.PI) * 0.55; ex = lerp(_hh[0], HOOK.ax, k); ey = lerp(_hh[1], HOOK.ay, k) - k * 4; ez = lerp(_hh[2], HOOK.az, k); }
+  drawItem(MESH.box, M4.align(poolM(), _hh[0], _hh[1], _hh[2], ex, ey, ez, 0.012, 0.012), [0.9, 0.95, 1], [0.6, 1.4, 1.8]);
+  drawItem(MESH.box, M4.trs(poolM(), ex, ey, ez, 0, 0, 0, 0.12, 0.12, 0.12), [0.2, 0.2, 0.22], [0.9, 1.8, 2.2]);
+}
+// reticle: a ring round the crosshair when a hook point is in range, coloured by how far you'd fall
+function drawHookHUD(hx, cx, cy, W, H) {
+  const h = HOOK.aim, cdK = HOOK.cd / HOOK_CFG.cooldown;
+  if (HOOK.state === 'idle' && h && cdK <= 0) {
+    const risk = hookRisk(h.drop), col = risk <= 0 ? '#a6ff3a' : risk < 40 ? '#ffb52e' : '#ff3040';
+    const p = toScreen(h.x, h.y, h.z, W, H);
+    if (p) { hx.strokeStyle = col; hx.lineWidth = 2; hx.globalAlpha = 0.9; hx.beginPath(); hx.arc(p[0], p[1], 7, 0, TAU); hx.stroke();
+      hx.beginPath(); hx.moveTo(p[0] - 11, p[1]); hx.lineTo(p[0] - 4, p[1]); hx.moveTo(p[0] + 4, p[1]); hx.lineTo(p[0] + 11, p[1]); hx.stroke(); hx.globalAlpha = 1; }
+    hx.font = '700 12px "Quiver Cn", sans-serif'; hx.textAlign = 'center'; hx.fillStyle = col;
+    hx.fillText(risk <= 0 ? `Q  GRAPPLE ${Math.round(h.t)} m` : risk < 40 ? `Q  GRAPPLE · FALL -${risk}` : `Q  GRAPPLE · FALL -${risk} !`, cx, cy + 46);
+  }
+  // cooldown arc under the crosshair
+  if (cdK > 0) { hx.strokeStyle = '#bff6ff'; hx.globalAlpha = 0.55; hx.lineWidth = 2; hx.beginPath(); hx.arc(cx, cy, 44, Math.PI * 0.62, Math.PI * 0.62 + Math.PI * 0.76 * (1 - cdK)); hx.stroke(); hx.globalAlpha = 1; }
 }
 
 /* ============================================================
@@ -5380,7 +5513,8 @@ addEventListener('keydown', (e) => {
   const k = e.code; INPUT.keys[k] = true;
   if (GAME.state === 'playing') {
     const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
-    if (k === 'KeyQ') selectArrow(GAME.lastType);
+    if (k === 'KeyX') selectArrow(GAME.lastType);
+    if (k === 'KeyQ' && !e.repeat) hookFire();
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
@@ -5648,7 +5782,7 @@ const GAME = {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
     ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
+    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     objReset();
@@ -5864,6 +5998,7 @@ function drawHUD2D(time) {
       hx.beginPath(); for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { hx.moveTo(cx + sx * r0, cy + sy * r0); hx.lineTo(cx + sx * r1, cy + sy * r1); } hx.stroke(); hx.globalAlpha = 1; }
     // damage direction arcs
     for (const h of PLAYER.hurtDirs) { const rel = h.ang - Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw)); const a = -rel - Math.PI / 2; hx.strokeStyle = `rgba(255,40,70,${clamp(h.t, 0, 1)})`; hx.lineWidth = 6; hx.beginPath(); hx.arc(cx, cy, 120, a - 0.35, a + 0.35); hx.stroke(); }
+    drawHookHUD(hx, cx, cy, W, H);
     // toasts
     hx.font = '700 15px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif';
     GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
@@ -5920,14 +6055,21 @@ function updatePlayer(dt) {
   const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (wading ? 0.62 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
-  const acc = P.grounded ? 12 : 3;
-  P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
-  P.x += P.vx * dt; P.z += P.vz * dt;
-  if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
-  P.vy -= 20 * dt; P.y += P.vy * dt;
+  const hooked = updateHook(dt);   // while reeling in, the grapple owns the movement
+  if (!hooked) {
+    const acc = P.grounded ? 12 : P.fling ? 0.8 : 3;   // flung off the hook: keep the momentum
+    P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
+    P.x += P.vx * dt; P.z += P.vz * dt;
+    if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
+    P.vy -= 20 * dt; P.y += P.vy * dt;
+  }
+  if (!P.grounded) P.peakY = Math.max(P.peakY ?? P.y, P.y);
   // land on whatever is under your feet: benches, planters, barriers, the fountain rim
   const gy = groundAt(P.x, P.z, P.y, 0.26);
-  if (P.y <= gy && P.vy <= 0) { if (!P.grounded && P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); P.y = gy; P.vy = 0; P.grounded = true; }
+  if (!hooked && P.y <= gy && P.vy <= 0) {
+    if (!P.grounded) { if (P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); hookLanded((P.peakY ?? gy) - gy); P.fling = false; }
+    P.y = gy; P.vy = 0; P.grounded = true; P.peakY = gy;
+  }
   else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
@@ -6024,7 +6166,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time);
+  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -6068,7 +6210,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD,
+  OBJ, objStart, AUD, HOOK, hookFire, hookAim,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

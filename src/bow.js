@@ -22,7 +22,7 @@ const LIMB_BEND = [0.05, 0.11, 0.19, 0.27, 0.36, 0.22];
 const LIMB_W = [0.032, 0.03, 0.027, 0.024, 0.021, 0.018];
 
 function bowStartDraw() {
-  if (BOW.state !== 'ready') return false;
+  if (BOW.state !== 'ready' || HOOK.state === 'reel' || HOOK.state === 'fly') return false;
   BOW.state = 'drawing'; BOW.hold = 0; AUD.drawStart(PLAYER.drawTime * (1 - BOW.draw)); return true;
 }
 function bowRelease() {

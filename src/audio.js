@@ -125,6 +125,11 @@ const AUD = {
     if (H.horn <= 0) { H.horn = rand(28, 55); for (const f of [82, 87.5, 164]) this.tone('sawtooth', f, f * 0.985, 2.6, 0.07 * k * (f > 100 ? 0.4 : 1), H.hl, t, 0.35); }
     if (H.creak <= 0) { H.creak = rand(7, 16); this.burst('bandpass', rand(300, 500), rand(700, 1100), 18, 1.2, 0.05 * k, this.amb, t, 0.2); this.tone('triangle', rand(90, 130), rand(70, 90), 0.9, 0.025 * k, this.amb, t + 0.2, 0.15); }
   },
+  hookFire() { if (!this.ctx) return; this.burst('highpass', 2500, 900, 1.5, 0.22, 0.2); this.tone('square', 900, 1500, 0.08, 0.04); },
+  hookAttach() { if (!this.ctx) return; this.tone('square', 220, 90, 0.08, 0.12); this.burst('bandpass', 1800, 600, 4, 0.12, 0.18); },
+  hookRelease() { if (!this.ctx) return; this.tone('triangle', 700, 300, 0.12, 0.05); },
+  _reelT: 0,
+  hookReel(dt, k) { if (!this.ctx) return; this._reelT -= dt; if (this._reelT > 0) return; this._reelT = 0.05; this.burst('bandpass', 700 + 1400 * k, 900 + 1600 * k, 6, 0.06, 0.05); },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
   tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },

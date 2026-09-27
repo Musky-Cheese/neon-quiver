@@ -51,7 +51,8 @@ addEventListener('keydown', (e) => {
   const k = e.code; INPUT.keys[k] = true;
   if (GAME.state === 'playing') {
     const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
-    if (k === 'KeyQ') selectArrow(GAME.lastType);
+    if (k === 'KeyX') selectArrow(GAME.lastType);
+    if (k === 'KeyQ' && !e.repeat) hookFire();
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
@@ -319,7 +320,7 @@ const GAME = {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
     ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
+    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     objReset();
@@ -535,6 +536,7 @@ function drawHUD2D(time) {
       hx.beginPath(); for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { hx.moveTo(cx + sx * r0, cy + sy * r0); hx.lineTo(cx + sx * r1, cy + sy * r1); } hx.stroke(); hx.globalAlpha = 1; }
     // damage direction arcs
     for (const h of PLAYER.hurtDirs) { const rel = h.ang - Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw)); const a = -rel - Math.PI / 2; hx.strokeStyle = `rgba(255,40,70,${clamp(h.t, 0, 1)})`; hx.lineWidth = 6; hx.beginPath(); hx.arc(cx, cy, 120, a - 0.35, a + 0.35); hx.stroke(); }
+    drawHookHUD(hx, cx, cy, W, H);
     // toasts
     hx.font = '700 15px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif';
     GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
@@ -591,14 +593,21 @@ function updatePlayer(dt) {
   const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (wading ? 0.62 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
-  const acc = P.grounded ? 12 : 3;
-  P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
-  P.x += P.vx * dt; P.z += P.vz * dt;
-  if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
-  P.vy -= 20 * dt; P.y += P.vy * dt;
+  const hooked = updateHook(dt);   // while reeling in, the grapple owns the movement
+  if (!hooked) {
+    const acc = P.grounded ? 12 : P.fling ? 0.8 : 3;   // flung off the hook: keep the momentum
+    P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
+    P.x += P.vx * dt; P.z += P.vz * dt;
+    if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
+    P.vy -= 20 * dt; P.y += P.vy * dt;
+  }
+  if (!P.grounded) P.peakY = Math.max(P.peakY ?? P.y, P.y);
   // land on whatever is under your feet: benches, planters, barriers, the fountain rim
   const gy = groundAt(P.x, P.z, P.y, 0.26);
-  if (P.y <= gy && P.vy <= 0) { if (!P.grounded && P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); P.y = gy; P.vy = 0; P.grounded = true; }
+  if (!hooked && P.y <= gy && P.vy <= 0) {
+    if (!P.grounded) { if (P.vy < -3) AUD.land(Math.min(1.5, -P.vy / 6)); hookLanded((P.peakY ?? gy) - gy); P.fling = false; }
+    P.y = gy; P.vy = 0; P.grounded = true; P.peakY = gy;
+  }
   else if (P.y > gy + 0.03) P.grounded = false;
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
@@ -695,7 +704,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time);
+  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -739,7 +748,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD,
+  OBJ, objStart, AUD, HOOK, hookFire, hookAim,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
