@@ -1411,7 +1411,7 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
   let top = -1e9, bot = 1e9; for (const t of tips) { top = Math.max(top, t[1]); bot = Math.min(bot, t[1]); }
   for (const t of tips) {
     let ox = t[0] - x, oy = 0.35, oz = t[2] - z; const oL = Math.hypot(ox, oy, oz) || 1; ox /= oL; oy /= oL; oz /= oL;   // outward from the trunk, a little upward
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 14; i++) {
       const u = R(), reach = (0.15 + 0.85 * u) * 1.05 * s, a = r(0, TAU), rr = r(0.15, 0.55) * s * (0.5 + 0.6 * u);
       const px = t[0] + ox * reach + Math.cos(a) * rr, pz = t[2] + oz * reach + Math.sin(a) * rr;
       const py = t[1] + oy * reach + r(-0.18, 0.32) * s - u * u * 0.45 * s;                     // the far ends droop under their own weight
@@ -1419,7 +1419,7 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
       const sh = 0.62 + 0.28 * inner + 0.2 * hk, tint = R();
       const c = tint < 0.14 ? [1.0 * sh, 0.8 * sh, 0.88 * sh] : tint > 0.9 ? [0.84 * sh, 0.34 * sh, 0.5 * sh] : [blossom[0] * sh, blossom[1] * sh, blossom[2] * sh];
       const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u);
-      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * r(1, 1.3), sz * r(0.62, 0.8), sz * r(1, 1.3), 0.5, r(0, 99), c, 1.1 + 0.9 * inner, 14, 7, 5, 1);
+      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * r(1.05, 1.35), sz * r(0.65, 0.82), sz * r(1.05, 1.35), 0.5, r(0, 99), c, 1.1 + 0.9 * inner, 14, 6, 4, 1);
       if (i % 5 === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
     }
   }
