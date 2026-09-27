@@ -4517,6 +4517,19 @@ function zLife(z, r, dt, time) {
   // a slack, hanging jaw that opens into a snarl as the player closes in
   if (z.gape === undefined) z.gape = rand(0.14, 0.32);
   addRot(B.jaw, z.gape + clamp((8 - dist) / 6, 0, 1) * 0.28 + (z.state === 'attack' ? 0.2 : 0), 0, 0);
+  // posture: every body carries its damage differently. A hunched spine, a head that hangs to one side,
+  // one shoulder dropped, arms hanging unevenly and a slow, drunken sway, so a crowd never reads as mannequins.
+  if (!z.crawl && z.type !== 'boss') {
+    if (!z.pose) { const sg = () => (Math.random() < 0.5 ? -1 : 1); z.pose = { hunch: rand(0.14, 0.36), tilt: rand(0.1, 0.32) * sg(), drop: rand(0.05, 0.15) * sg(), twist: rand(0.04, 0.14) * sg(), armL: rand(-0.14, 0.16), armR: rand(-0.14, 0.16), outL: rand(0, 0.14), outR: rand(0, 0.14), elL: rand(0.02, 0.3), elR: rand(0.02, 0.3), swayF: rand(0.45, 0.9) }; }
+    const Q = z.pose, bk = z.type === 'brute' ? 0.45 : z.type === 'runner' ? 0.55 : 1, still = (z.mv || 0) > 0.1 ? 0.5 : 1;
+    const sway = Math.sin(time * Q.swayF + z.seed * 3), sway2 = Math.sin(time * Q.swayF * 0.61 + z.seed);
+    addRot(B.spine, Q.hunch * bk + 0.03 * sway2 * still, Q.twist * bk, (Q.drop + 0.05 * sway * still) * bk);
+    addRot(B.neck, -Q.hunch * 0.45 * bk, 0, (Q.tilt + 0.06 * sway2 * still) * bk);   // lift the gaze back toward level, keep the lolling tilt
+    if (z.state !== 'attack') {
+      addRot(B.shoulderL, Q.armL * bk, 0, Q.outL * bk); addRot(B.shoulderR, Q.armR * bk, 0, -Q.outR * bk);
+      addRot(B.elbowL, Q.elL * bk, 0, 0); addRot(B.elbowR, Q.elR * bk, 0, 0);
+    }
+  }
   // twitches: short spasms through the hit-reaction springs
   z.twT -= dt;
   if (z.twT <= 0) { z.twT = rand(1.5, 7); const R = z.R, s = z.type === 'brute' ? 0.4 : 1; R.hv += rand(-5, 5) * s; R.yv += rand(-3, 3) * s; if (Math.random() < 0.4) R.tv += rand(-2, 2) * s; }
