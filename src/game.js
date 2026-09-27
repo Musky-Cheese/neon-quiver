@@ -150,6 +150,8 @@ function updateProjectiles(dt) {
       if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - mg) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
       for (const [p0, p1] of [[z.hipL, z.knL], [z.knL, z.ftL], [z.hipR, z.knR], [z.knR, z.ftR]]) if (segSegDist2(_seg0, _seg1, p0, p1, _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
     }
+    // the hive nest (field objective)
+    { const t = objNestHit(_seg0, _seg1, _so); if (t >= 0 && t < best) { best = t; hitKind = 'n'; } }
     // ground
     if (ny <= 0.02) { const t = (a.y - 0.02) / (a.y - ny); if (t < best) { best = t; hitKind = 'w'; } }
     // boxes (slab test)
@@ -166,6 +168,11 @@ function updateProjectiles(dt) {
     }
     if (!hitKind) { a.x = nx; a.y = ny; a.z = nz; continue; }
     const hx = a.x + (nx - a.x) * best, hy = a.y + (ny - a.y) * best, hz = a.z + (nz - a.z) * best;
+    if (hitKind === 'n') {
+      objNestDamage(52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
+      if (a.type === 2) explode(hx, hy, hz); else if (a.type === AT.FROST) frostBurst(hx, hy, hz);
+      PROJ.splice(i, 1); continue;
+    }
     if (hitKind === 'z') {
       const z = hitZ; a.hits.push(z);
       const dmgBase = 52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult;
@@ -245,6 +252,7 @@ function updateFires(dt) {
 }
 function explode(x, y, z) {
   const R = 6;
+  objBlast(x, y, z, R, 160 * PLAYER.dmgMult);
   AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z)); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9));
   flashLight(x, y + 1, z, [6, 1.2, 5.5], 26, 0.55);
   burst(x, y, z, 120, [2.8, 0.5, 2.6], 14, 0.7, 0.3, 2, 2.5);
@@ -314,6 +322,7 @@ const GAME = {
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
+    objReset();
     this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
   },
   startWave() {
@@ -326,6 +335,7 @@ const GAME = {
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
     if (boss) this.bossPending = 4;
+    objWaveStart(this.wave);
     hudWave();
   },
   spawnOne() {
@@ -353,7 +363,7 @@ const GAME = {
       if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
-      if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0) {
+      if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
         this.clearT += dt;
         if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · ${INTERMISSION}s TO RESUPPLY · N TO SKIP`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = INTERMISSION; }
       }
@@ -530,7 +540,7 @@ function drawHUD2D(time) {
     GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
     hx.globalAlpha = 1;
   }
-  drawMinimap(hx, W, H, time); drawObjective(hx, W, H);
+  drawMinimap(hx, W, H, time); drawObjective(hx, W, H); drawFieldObjectiveHUD(hx, W, H);
   // banners
   if (GAME.bannerT > 0 && GAME.banner) {
     const t = 3 - GAME.bannerT; const a = Math.min(1, t * 4, GAME.bannerT * 2);
@@ -625,7 +635,7 @@ function step(dt) {
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
-  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); }
+  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); }
   const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
@@ -679,7 +689,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time);
+  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time);
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -723,6 +733,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
+  OBJ, objStart,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
