@@ -104,6 +104,7 @@ const AUD = {
       o.connect(lp); lp.connect(g); g.connect(this.sfx); o.start(t); o.stop(t + d + 0.1);
     });
   },
+  tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   cleared() { if (!this.ctx) return; const t = this.now(); [392, 523, 659, 784].forEach((f, i) => this.tone('square', f, f, 0.25, 0.05, this.sfx, t + i * 0.09)); },
   gameOver() { if (!this.ctx) return; const t = this.now(); [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.98, 0.5, 0.08, this.sfx, t + i * 0.28)); },
   heartbeat() { if (!this.ctx) return; const t = this.now(); this.tone('sine', 60, 40, 0.12, 0.35, this.sfx, t); this.tone('sine', 55, 38, 0.12, 0.25, this.sfx, t + 0.18); },

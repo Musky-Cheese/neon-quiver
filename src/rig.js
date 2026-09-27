@@ -244,7 +244,7 @@ function drawZombieRig(z, time) {
   const r = z.rig, u = r.u, T = z.type, B = r.B;
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
-  const e = z.T.eyes, vk = (T === 'boss' ? 1.6 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
+  const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : 0.22, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const skin = P.skin, cloth = P.cloth, pants = P.pants;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);

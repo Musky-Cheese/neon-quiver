@@ -30,9 +30,12 @@ const V0 = () => [0, 0, 0];
 
 function spawnZombie(type, x, z, wave) {
   const T = ZTYPES[type];
-  const hp = (T.hp + T.hpW * Math.max(0, wave - 1)) * (type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.7 : 1);
+  // difficulty keeps climbing past wave 10: extra HP %, harder hits, faster feet (the Warden scales per encounter instead)
+  const late = Math.max(0, wave - 10);
+  const hp = (T.hp + T.hpW * Math.max(0, wave - 1)) * (type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.7 : 1 + late * 0.03);
+  const dmgK = type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.15 : 1 + Math.min(0.9, Math.max(0, wave - 1) * 0.035);
   const zz = {
-    type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.35, wave * 0.02)), scale: T.scale * rand(0.95, 1.06),
+    type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.5, wave * 0.022)), dmgK, elite: false, eyes: null, scale: T.scale * rand(0.95, 1.06),
     phase: Math.random() * TAU, state: 'walk', atkT: 0, atkCd: 0.5, flinch: 0, flash: 0, burn: 0, dieT: 0, dead: false,
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
@@ -260,10 +263,16 @@ function updateZombies(dt, time) {
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
       z.atkT += dt / z.T.atk;
-      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * (z.crawl ? 0.7 : 1), z.x, z.z); }
+      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
+}
+// elites: a tougher, faster, harder-hitting version of any regular type, marked by white-hot eyes
+function makeElite(z) {
+  z.elite = true; z.hp *= 1.7; z.maxHp = z.hp; z.dmgK *= 1.3; z.speed *= 1.12; z.scale *= 1.07;
+  z.eyes = [2.2, 2.0, 1.7];
+  return z;
 }
 function updateBoss(z, dt, dist) {
   z.slamCd -= dt; z.summonCd -= dt;
@@ -281,7 +290,7 @@ function updateBoss(z, dt, dist) {
       burst(fx, 0.4, fz, 40, [0.5, 0.45, 0.6], 7, 1.2, 0.6, 6, 1.5, 3);
       flashLight(fx, 1, fz, [4, 0.8, 3.4], 22, 0.5);
       const pd = Math.hypot(PLAYER.x - fx, PLAYER.z - fz);
-      if (pd < 7.5 && PLAYER.y < 0.9 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * (pd < 4 ? 1 : 0.6), fx, fz);
+      if (pd < 7.5 && PLAYER.y < 0.9 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (pd < 4 ? 1 : 0.6), fx, fz);
     }
     if (z.atkT >= 1) { z.state = 'walk'; z.slamCd = rand(3.5, 5.5); }
   }
@@ -390,7 +399,7 @@ function drawZombie(z, time) {
   // ---------- meshes ----------
   const thin = T === 'runner' ? 0.86 : 1, wide = T === 'brute' ? 1.22 : T === 'boss' ? 1.2 : 1;
   const armS = T === 'runner' ? 0.85 : T === 'brute' ? 1.35 : 1;
-  const e = z.T.eyes, vk = (T === 'boss' ? 1.6 : 1.0) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
+  const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.8 : 1.0) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = [e[0] * vk, e[1] * vk, e[2] * vk];
   mpart(_F.pel, MODEL.pelvis, wide, 1, wide, pants, skin, vein, fl);
   mpart(_F.tor, z.bare ? MODEL.torso_bare : MODEL.torso_shirt, thin * wide, 1, wide, cloth, skin, vein, fl);

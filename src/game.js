@@ -20,6 +20,8 @@ if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
 /* ---------------- player ---------------- */
+const REGEN = { delay: 6, rate: 2.5, cap: 0.5 };
+const INTERMISSION = 25;   // seconds between waves (visible countdown; N starts the next wave early)
 const PLAYER = {
   x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0, roll: 0, grounded: true,
   hp: 100, maxHp: 100, speedMult: 1, drawTime: 0.62, reloadTime: 0.62, dmgMult: 1, ammo: [Infinity, 4, 2, 4],
@@ -28,7 +30,7 @@ const PLAYER = {
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
-    this.hp -= d; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
+    this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
     const ang = Math.atan2(fx - this.x, fz - this.z); this.hurtDirs.push({ ang, t: 1.2 });
     if (this.hp <= 0) { this.hp = 0; GAME.gameOver(); }
   },
@@ -53,6 +55,7 @@ addEventListener('keydown', (e) => {
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
+    if (k === 'KeyN' && GAME.intermission) { GAME.interT = 0; }
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
   if (k === 'KeyM') { SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); }
 });
@@ -260,7 +263,7 @@ function updatePickups(dt) {
     const p = PICKUPS[i]; p.t += dt;
     if (p.t > 25) { PICKUPS.splice(i, 1); continue; }
     if (GAME.state === 'playing' && Math.hypot(p.x - PLAYER.x, p.z - PLAYER.z) < 1.7) {
-      if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + 25); AUD.heal(); GAME.toast('+25 HEALTH', '#6dff9a'); }
+      if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; const h = Math.round(Math.max(25, PLAYER.maxHp * 0.25)); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + h); AUD.heal(); GAME.toast(`+${h} HEALTH`, '#6dff9a'); }
       else { const n = p.at === 2 ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
       burst(p.x, 1, p.z, 30, p.kind === 'health' ? [0.4, 2.4, 0.9] : ARROWS[p.at].glow, 4, 0.5, 0.08, 0, 2);
       PICKUPS.splice(i, 1);
@@ -299,17 +302,17 @@ const GAME = {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
     ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.ammo = [Infinity, 4, 2, 4];
+    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
-    setTimeout(() => this.startWave(), 1200);
+    this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
   },
   startWave() {
     if (this.state !== 'playing') return;
     this.intermission = false; this.clearedShown = false;
     this.wave++;
     const boss = this.wave % 5 === 0;
-    const n = Math.round((6 + this.wave * 3.2) * (boss ? 0.55 : 1));
+    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
@@ -319,27 +322,35 @@ const GAME = {
   spawnOne() {
     const w = this.wave;
     const r = Math.random();
-    const pRun = w >= 2 ? Math.min(0.38, 0.1 + (w - 2) * 0.05) : 0, pBrute = w >= 3 ? Math.min(0.2, 0.06 + (w - 3) * 0.025) : 0;
+    // the mix keeps shifting toward runners and brutes well past wave 10, and elites start showing up from wave 8
+    const pRun = w >= 2 ? Math.min(0.45, 0.1 + (w - 2) * 0.045) : 0, pBrute = w >= 3 ? Math.min(0.3, 0.06 + (w - 3) * 0.022) : 0;
+    const pElite = w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0;
     const type = r < pBrute ? 'brute' : r < pBrute + pRun ? 'runner' : 'walker';
     // pick a spawn not right next to the player
     const s = navSpawnPoint();
-    spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
+    const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
+    if (Math.random() < pElite) makeElite(z);
+    // from wave 6, runners sometimes come as a pack from the same spot
+    if (type === 'runner' && w >= 6 && this.toSpawn > 2 && Math.random() < Math.min(0.35, 0.1 + (w - 6) * 0.03)) {
+      const extra = Math.min(this.toSpawn - 1, w >= 14 ? 3 : 2);
+      for (let k = 0; k < extra; k++) { spawnZombie('runner', s[0] + rand(-1.2, 1.2), s[1] + rand(-1.2, 1.2), w); this.toSpawn--; }
+    }
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
   aliveCount() { let n = 0; for (const z of ZOMBIES) if (!z.dead) n++; return n; },
   update(dt) {
     if (this.state === 'playing') {
-      const maxAlive = Math.min(30, 9 + this.wave * 2);
+      const maxAlive = Math.min(36, 9 + this.wave * 2);
       if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0) {
         this.clearT += dt;
-        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · REACH AN ARMORY TERMINAL`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = 15; }
+        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · ${INTERMISSION}s TO RESUPPLY · N TO SKIP`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = INTERMISSION; }
       }
     }
-    // 15 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
-    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { this.interT -= dt; if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
+    // 25 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
+    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick && AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
     if (this.bannerT > 0) this.bannerT -= dt;
     this.hm.t = Math.max(0, this.hm.t - dt);
     for (let i = this.toasts.length - 1; i >= 0; i--) { this.toasts[i].t -= dt; if (this.toasts[i].t <= 0) this.toasts.splice(i, 1); }
@@ -357,12 +368,12 @@ const GAME = {
     const head = part === 'head';
     this.combo++; this.comboT = 3.5;
     const mult = 1 + Math.min(8, Math.floor(this.combo / 3)) * 0.25;
-    const pts = Math.round(z.T.score * (head ? 1.5 : 1) * mult);
-    const cash = z.T.cash + (head ? 5 : 0);
+    const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
+    const cash = z.T.cash * (z.elite ? 2 : 1) + (head ? 5 : 0);
     this.score += pts; this.cash += cash; this.kills++; if (head) this.headshots++;
     AUD.kill();
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
-    if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
+    if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
     // drops
     const r = Math.random();
     if (z.type === 'boss') { for (let k = 0; k < 6; k++) dropPickup(z.x + rand(-3, 3), z.z + rand(-3, 3), k < 4 ? 'ammo' : 'health'); explode(z.x, 2, z.z); this.showBanner('WARDEN DOWN', `+${pts}`, '#ffd23a'); this.boss = null; document.getElementById('bossbar').hidden = true; shake(1.2); }
@@ -436,7 +447,10 @@ function hudFrame() {
   $('hpFill').style.transform = `scaleX(${clamp(hpK, 0, 1)})`; $('hpText').textContent = Math.ceil(PLAYER.hp); $('hpMax').textContent = '/ ' + PLAYER.maxHp;
   $('hp').classList.toggle('low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  $('remain').textContent = GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : '';
+  const rem = $('remain');
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); rem.textContent = `NEXT WAVE IN ${t}s · N TO SKIP`; rem.classList.toggle('soon', t <= 5); rem.classList.add('count'); }
+  else { rem.textContent = GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''; rem.classList.remove('soon', 'count'); }
+  $('hp').classList.toggle('regen', !!PLAYER.regen);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
   if (GAME.boss) { $('bossFill').style.transform = `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`; }
 }
@@ -578,6 +592,11 @@ function updatePlayer(dt) {
   P.dmgFlash = Math.max(0, P.dmgFlash - dt * 1.4);
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }
   P.vmIn = Math.min(1, P.vmIn + dt * 2.5);
+  // slow regen: kicks in 6 s after the last hit, 2.5 HP/s, and only up to 50% of max health.
+  // Pickups, the Med Injector and Dermal Plating are still the only way back to full.
+  const regenCap = P.maxHp * REGEN.cap;
+  P.regen = GAME.state === 'playing' && !P.dead && P.hp < regenCap && GAME.time - P.lastHurt > REGEN.delay;
+  if (P.regen) P.hp = Math.min(regenCap, P.hp + REGEN.rate * dt);
   if (P.hp / P.maxHp < 0.3) { P.beat -= dt; if (P.beat <= 0) { P.beat = 0.9; AUD.heartbeat(); } }
 }
 
