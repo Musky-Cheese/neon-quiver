@@ -273,6 +273,7 @@ function buildCity() {
     if ((ax < 36 || az < 36) && mx < 165) continue;          // street walls live here
     if (ax < 24 || az < 24) continue;                        // keep avenues open to the horizon
     if (z > 66) continue;                                    // south of the plaza is cherry forest, not city
+    if (x > 200 && Math.abs(z) < 170) continue;              // open harbour past the docks
     if (R() < 0.18) continue;
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
@@ -292,7 +293,7 @@ function buildCity() {
   // monorail track crossing over the plaza
   B(0, 24, -24, 1000, 0.9, 2.2, [0.08, 0.08, 0.1], 0, 4);
   B(0, 23.5, -24, 1000, 0.1, 0.3, NEON.cyan, 2.5);
-  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) { B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4); if (Math.abs(x) < 170) WORLD.circles.push({ x, z: -24, r: 0.9, h: 24 }); }
+  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) { B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4); if (Math.abs(x) < 250) WORLD.circles.push({ x, z: -24, r: 0.9, h: 24 }); }
 
   g = gProps;
   // ---------- plaza props ----------

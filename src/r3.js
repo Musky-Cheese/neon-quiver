@@ -265,7 +265,7 @@ void main(){
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 800;   // covers x -154..154, z -154..246
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = Math.ceil((WORLD_BOUNDS.x1 + 16 - X0) / C), H = 800;   // covers x -154..(east edge + 16), z -154..246
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;

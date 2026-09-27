@@ -688,6 +688,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
     base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
     bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
+  } else if (mat > 22.5 && mat < 23.5) {    // harbour: black oily water, long swell, rain rings, a rainbow fuel sheen
+    float sw = sin(vNqW.x * 0.35 + uTime * 0.7) * 0.5 + sin(vNqW.z * 0.23 - uTime * 0.5) * 0.5;
+    float oil = smoothstep(0.55, 0.8, vn(vNqW.xz * 0.08 + vec2(uTime * 0.01, 0.)));
+    base = vec3(0.008, 0.014, 0.016) + (0.5 + 0.5 * cos(6.2831 * (vn(vNqW.xz * 0.4) + vec3(0., 0.33, 0.67)))) * 0.03 * oil;
+    bumpH = nqRipple(vNqW.xz * 1.6, uTime) * 0.003 * max(uRain, 0.2) + sw * 0.03 + (vn(vNqW.xz * 0.9 + uTime * 0.15) - 0.5) * 0.02;
+    rough = 0.05; metal = 0.0; envK = uEnvK * 1.8; rimK = 0.0; wetRefl = 0.9;
   } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
     float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
     vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
@@ -2839,6 +2845,7 @@ function buildCity() {
     if ((ax < 36 || az < 36) && mx < 165) continue;          // street walls live here
     if (ax < 24 || az < 24) continue;                        // keep avenues open to the horizon
     if (z > 66) continue;                                    // south of the plaza is cherry forest, not city
+    if (x > 200 && Math.abs(z) < 170) continue;              // open harbour past the docks
     if (R() < 0.18) continue;
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
@@ -2858,7 +2865,7 @@ function buildCity() {
   // monorail track crossing over the plaza
   B(0, 24, -24, 1000, 0.9, 2.2, [0.08, 0.08, 0.1], 0, 4);
   B(0, 23.5, -24, 1000, 0.1, 0.3, NEON.cyan, 2.5);
-  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) { B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4); if (Math.abs(x) < 170) WORLD.circles.push({ x, z: -24, r: 0.9, h: 24 }); }
+  for (let x = -420; x <= 420; x += 60) if (Math.abs(x) > 70) { B(x, 12, -24, 1.4, 24, 1.4, [0.07, 0.07, 0.08], 0, 4); if (Math.abs(x) < 250) WORLD.circles.push({ x, z: -24, r: 0.9, h: 24 }); }
 
   g = gProps;
   // ---------- plaza props ----------
@@ -2939,7 +2946,7 @@ function drawCityDynamic(time) {
 /* ============================================================
    Districts: the Rail Yard (north), the Night Market (east), the
    Warrens (west) and the Sakura Gardens (south, through the torii)
-   hang off Sector 7 plaza.
+   hang off Sector 7 plaza. The Docks lie past the far end of the market.
    ============================================================ */
 const DISTRICTS = [
   { id: 'hub', name: 'SECTOR 7 PLAZA', x0: -40, x1: 40, z0: -40, z1: 40, env: [0, 5, 10] },
@@ -2948,17 +2955,19 @@ const DISTRICTS = [
   { id: 'warrens', name: 'THE WARRENS', x0: -138, x1: -74, z0: -32, z1: 32, env: [-84, 5, 0] },
   { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 164, z1: 228, env: [0, 5, 190] },
   { id: 'suburbs', name: 'THE SUBURBS', x0: -60, x1: 60, z0: 74, z1: 162, env: [0, 5, 125] },
+  { id: 'docks', name: 'THE DOCKS', x0: 164, x1: 228, z0: -48, z1: 40, env: [196, 5, -4] },
 ];
 function districtAt(x, z) {
   for (const d of DISTRICTS) if (x > d.x0 - 2 && x < d.x1 + 2 && z > d.z0 - 2 && z < d.z1 + 2) return d;
   // avenues belong to whichever district they lead to
   if (Math.abs(x) < 8 && z < -40) return DISTRICTS[1];
+  if (Math.abs(z) < 8 && x > 138) return DISTRICTS[6];   // the cut through the market's far wall
   if (Math.abs(z) < 8 && x > 40) return DISTRICTS[2];
   if (Math.abs(z) < 8 && x < -40) return DISTRICTS[3];
   if (Math.abs(x) < 8 && z > 40) return z < 162 ? DISTRICTS[5] : DISTRICTS[4];
   return DISTRICTS[0];
 }
-const WORLD_BOUNDS = { x0: -140, x1: 140, z0: -140, z1: 226 };
+const WORLD_BOUNDS = { x0: -140, x1: 226.5, z0: -140, z1: 226 };
 
 // terminals and ammo caches: static base geometry (the glow is drawn per frame in world.js)
 function supplyProp(g, sp) {
@@ -3066,7 +3075,8 @@ function buildDistricts(C) {
   let mk = 0; const mshop = (w) => w >= 12 ? { shop: MARKET_ORDER[mk++ % MARKET_ORDER.length] } : {};   // market frontages are all walk-in shops
   row('x', 74, 164, 32, 58, '-z', 26, 70, mshop);
   row('x', 74, 164, -58, -32, '+z', 26, 70, mshop);
-  row('z', -32, 32, 138, 164, '-x', 40, 90, mshop);
+  row('z', -32, -8, 138, 164, '-x', 40, 90, mshop);   // the far wall, split by the cut through to the docks
+  row('z', 8, 32, 138, 164, '-x', 40, 90, mshop);
   setG('props');
   const awn = [[0.35, 0.05, 0.06], [0.05, 0.2, 0.22], [0.3, 0.2, 0.04], [0.2, 0.06, 0.25], [0.08, 0.2, 0.08]];
   function stall(x, z, facing) {   // facing: +1 counter toward +z, -1 toward -z
@@ -3096,8 +3106,84 @@ function buildDistricts(C) {
   B(76, 7.2, 0, 0.6, 0.5, 14.5, [0.25, 0.05, 0.05], 0, 4);
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(billboardTexture(2), 137.6, 16, 0, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
+  addSign(billboardTexture(2), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
   WORLD.supplies.push({ kind: 'terminal', x: 79, z: 25, ry: Math.PI / 2 + 0.3, d: 'market' }, { kind: 'cache', x: 134, z: -2, d: 'market' }, { kind: 'cache', x: 108, z: -27, d: 'market' });
+
+
+  /* ---------------- THE DOCKS (far east, through the market) ---------------- */
+  // a dead container port: stacks you can get lost in, two gantry cranes over the quay, a ship that never sailed
+  setG('near');
+  quad(138, 164, -8, 8, 0.013, [0.06, 0.058, 0.055], 3);                           // the cut through the market wall
+  quad(164, 228, -48, 40, 0.012, [0.075, 0.073, 0.068], 16);                        // quay concrete
+  for (const lz of [-7.5, 7.5]) quad(166, 226, lz - 0.12, lz + 0.12, 0.02, [0.42, 0.33, 0.05], 16);   // haul-lane lines
+  for (let x = 170; x < 226; x += 5) quad(x, x + 2.4, -0.1, 0.1, 0.02, [0.42, 0.33, 0.05], 16);
+  quad(210, 226, -48, 40, 0.015, [0.06, 0.06, 0.058], 16);                          // crane apron
+  for (const rx of [211.2, 224.6]) quad(rx - 0.15, rx + 0.15, -48, 40, 0.03, [0.2, 0.19, 0.18], 4);   // crane rails
+  quad(226.8, 228.4, -48, 40, 0.04, [0.45, 0.35, 0.05], 16);                        // painted quay edge
+  const dind = (c) => ({ industrial: true, mat: 8, col: c });
+  row('x', 164, 244, -74, -48, '+z', 13, 24, () => dind([0.13 + R() * 0.04, 0.13, 0.12]));
+  row('x', 164, 244, 40, 66, '-z', 13, 24, () => dind([0.12, 0.13, 0.14 + R() * 0.03]));
+  // harbour: black oily water to the horizon, a quay wall, and the ship
+  setG('far');
+  quad(228.5, 700, -400, 400, -1.3, [0.012, 0.02, 0.024], 23);
+  B(228.6, -0.62, -4, 0.8, 1.3, 88, [0.1, 0.1, 0.1], 0, 16);
+  setG('props');
+  // the ship: hull along the quay, bridge house aft, deck cargo, running lights
+  const hull = [0.2, 0.05, 0.04];
+  B(242, 2.2, -8, 17, 9, 76, hull, 0, 8); B(242, 6.9, -8, 17.4, 0.5, 76.4, [0.1, 0.1, 0.1], 0, 4);
+  B(242, -1.5, -8, 17.2, 1.6, 76.2, [0.05, 0.05, 0.06], 0, 4);                     // boot-top at the waterline
+  rot(242, 2.6, -50.5, 12, 8.2, 12, hull, 0, 8, 0, Math.PI / 4, 0);                 // bow
+  B(242, 14, 22, 15, 14, 9, [0.52, 0.52, 0.5], 0, 8); B(242, 21.3, 22, 16, 0.6, 10, [0.1, 0.1, 0.1], 0, 4);
+  for (let i = 0; i < 5; i++) B(242, 9.5 + i * 2.6, 17.4, 12, 0.7, 0.1, [0.9, 0.75, 0.5], 1.4);   // lit bridge windows
+  B(245, 25.5, 24, 2.4, 8, 2.4, [0.15, 0.03, 0.03], 0, 4); B(245, 29.7, 24, 2.5, 0.5, 2.5, [0.05, 0.05, 0.05]);
+  B(242, 22.5, 22, 0.2, 5, 0.2, [0.1, 0.1, 0.1]); B(242, 25, 22, 0.5, 0.5, 0.5, NEON.red, 4);
+  for (let bz = -40; bz <= 10; bz += 6.4) for (let bx = -1; bx <= 1; bx++) {
+    const h = 1 + Math.floor(R() * 3);
+    for (let k = 0; k < h; k++) B(242 + bx * 5.2, 8.5 + k * 2.62, bz, 5, 2.6, 6.1, CONT[Math.floor(R() * CONT.length)], 0, 8);
+  }
+  B(242, 8, -52, 0.3, 0.3, 0.3, NEON.red, 5); B(233.3, 6, -8, 0.3, 0.3, 0.3, NEON.cyan, 4);
+  solid(233.5, 250.5, -3, 30, -58, 30);
+  // mooring: bollards and slack lines out to the hull
+  for (let bz = -44; bz <= 36; bz += 8) { B(227.2, 0.35, bz, 0.5, 0.7, 0.5, [0.12, 0.12, 0.13], 0, 4); WORLD.circles.push({ x: 227.2, z: bz, r: 0.3, h: 0.7 }); }
+  cable(227.2, 0.6, -36, 233.6, 6.5, -40, 1.2, false); cable(227.2, 0.6, 20, 233.6, 6.5, 24, 1.2, false); cable(227.2, 0.6, -4, 233.6, 6.5, -6, 1.0, false);
+  // ship-to-shore gantry cranes: legs straddle the apron, booms reach over the ship
+  const craneC = [0.34, 0.16, 0.03];
+  for (const cz of [-26, 14]) {
+    for (const lx of [211.2, 224.6]) for (const oz of [-5.5, 5.5]) { B(lx, 16, cz + oz, 1.1, 32, 1.1, craneC, 0, 8); solid(lx - 0.55, lx + 0.55, 0, 32, cz + oz - 0.55, cz + oz + 0.55); }
+    for (const oz of [-5.5, 5.5]) B(217.9, 9, cz + oz, 14.5, 0.9, 0.9, craneC, 0, 8);            // portal ties (overhead)
+    for (const lx of [211.2, 224.6]) B(lx, 31.5, cz, 1.1, 1.1, 12, craneC, 0, 8);
+    for (const oz of [-2, 2]) B(236, 33, cz + oz, 64, 1.2, 1.0, craneC, 0, 8);                 // boom + back reach
+    B(213, 36.5, cz, 4, 6, 12, [0.2, 0.2, 0.21], 0, 8);                                         // machinery house
+    B(232, 30.5, cz, 3.2, 2.6, 3.2, [0.45, 0.45, 0.43], 0, 8); B(232, 30.5, cz - 1.62, 2.6, 1.2, 0.05, [0.9, 0.8, 0.5], 1.6);   // cab
+    B(240, 25.5, cz, 0.08, 14, 0.08, [0.05, 0.05, 0.05]); B(240, 18, cz, 2.6, 0.6, 6.1, CONT[Math.floor(R() * CONT.length)], 0, 8);   // spreader with a box still hanging
+    B(267.5, 33.8, cz, 0.6, 0.6, 0.6, NEON.red, 5); B(211.2, 38.5, cz, 0.5, 0.5, 0.5, NEON.red, 5);
+    for (const lx of [211.2, 224.6]) { B(lx, 0.6, cz, 1.6, 1.2, 13, [0.3, 0.14, 0.03], 0, 8); solid(lx - 0.8, lx + 0.8, 0, 1.2, cz - 6.5, cz + 6.5); }   // bogies on the rails
+    WORLD.lights.push({ p: [218, 8, cz], r: 18, c: [1.6, 1.4, 1.1], kind: 'lamp' });
+  }
+  // the container yard: stacks in blocks, lanes between them, gaps to slip through
+  for (const [bz, alongX] of [[-12.6, true], [-15.2, true], [-24.6, true], [-27.2, true], [-37.4, true], [-40, true], [12.6, true], [15.2, true], [24.6, true], [27.2, true], [34.8, true]])
+    for (const bx of [171.5, 178, 191.5, 198]) { if (R() < 0.22) continue; const r0 = R(); container(bx, bz, alongX, r0 < 0.3 ? 1 : r0 < 0.72 ? 2 : 3); }
+  for (const [bx, bz] of [[206, -20], [206, 22], [168.5, -30], [168.5, 30]]) container(bx, bz, false, 1 + Math.floor(R() * 2));
+  // reefer rack and odds and ends on the apron
+  for (let i = 0; i < 4; i++) { B(218, 1.3 + i * 2.62, -44.2, 6.1, 2.6, 2.44, [0.7, 0.7, 0.68], 0, 8); B(215.2, 1.3 + i * 2.62, -43, 0.08, 0.3, 0.3, i % 2 ? NEON.lime : NEON.red, 2.5); }
+  solid(214.9, 221.1, 0, 10.5, -45.4, -43);
+  barrier(186, -5, 1); barrier(203, 4.5, 0); barrier(214, -9, 1);
+  crates(209, -3); crates(184, 20); crates(174, -46);
+  dumpster(165.5, -44, Math.PI / 2); dumpster(186, 38.2, 0);
+  burnBarrel(188, -33); burnBarrel(205, 31); burnBarrel(220, -12);
+  for (const [x, z] of [[176, -6], [196, 6], [218, -34], [218, 34]]) flood(x, z);
+  lamp(168, 9.5); lamp(186, -9.5); lamp(204, 9.5);
+  for (const [x, z] of [[190, -33], [205, 31], [220, -12]]) WORLD.steam.push([x, 0.1, z]);
+  // entrance arch from the market side, and the port's name on the warehouse wall
+  for (const az of [-7.5, 7.5]) { B(164.5, 4, az, 0.6, 8, 0.6, [0.3, 0.2, 0.03], 0, 4); WORLD.circles.push({ x: 164.5, z: az, r: 0.4, h: 8 }); }
+  B(164.5, 8.2, 0, 0.7, 0.6, 15.6, [0.3, 0.2, 0.03], 0, 4);
+  B(164.5, 9.4, 0, 0.45, 2.5, 9.6, [0.04, 0.04, 0.045], 0, 4);                         // sign board between the two faces
+  addSign(signTexture('PORT SEVEN', '#ffb52e', 'seg'), 164.15, 9.4, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  addSign(signTexture('THE DOCKS', '#29e7ff', 'font'), 164.85, 9.4, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  addSign(signTexture('CUSTOMS HOLD', '#ff5a3c', 'panel'), 196, 12, -47.9, 0, 12, 3, [1.3, 1.3, 1.3], 0, false);
+  // the harbour itself is off-limits ground
+  WORLD.navBlocks.push({ x0: 227.4, x1: 260, z0: -80, z1: 80 });
+  WORLD.supplies.push({ kind: 'terminal', x: 166.4, z: -13, ry: Math.PI / 2 + 0.4, d: 'docks' }, { kind: 'cache', x: 222, z: 38, d: 'docks' }, { kind: 'cache', x: 194.5, z: -46, d: 'docks' });
 
   /* ---------------- THE WARRENS (west) ---------------- */
   setG('near');
@@ -3211,7 +3297,7 @@ function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.
 function navCenter(k, out) { out[0] = NAV.x0 + (k % NAV.w + 0.5) * NAV.cell; out[1] = NAV.z0 + (Math.floor(k / NAV.w) + 0.5) * NAV.cell; return out; }
 
 function buildNav() {
-  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
+  const c = NAV.cell; NAV.w = Math.ceil((WORLD_BOUNDS.x1 + 2 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
   const N = NAV.w * NAV.h, B = new Uint8Array(N);
   const mark = (x0, x1, z0, z1) => {
     const i0 = Math.max(0, Math.floor((x0 - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((x1 - NAV.x0) / c));
@@ -3271,7 +3357,7 @@ function navTarget(x, z, out) {
   }
   navCenter(k, out); return D[k] !== NAV_INF;
 }
-function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
+function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, WORLD_BOUNDS.x1), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
 // a spawn point out of sight, 26–60 m of walking from the player
 function navSpawnPoint(minD = 26, maxD = 62) {
   let best = null, bestScore = -1;
@@ -3358,7 +3444,7 @@ function updateAmbient(dt) {
 /* ---------------- minimap ---------------- */
 const MINI = { cv: null, scale: 2 };
 function buildMinimap() {
-  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
+  const s = MINI.scale, W = Math.ceil((WORLD_BOUNDS.x1 + 2 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
   const img = x.createImageData(W, H), D = img.data;
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
@@ -4664,7 +4750,7 @@ void main(){
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = 616, H = 800;   // covers x -154..154, z -154..246
+  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = Math.ceil((WORLD_BOUNDS.x1 + 16 - X0) / C), H = 800;   // covers x -154..(east edge + 16), z -154..246
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;

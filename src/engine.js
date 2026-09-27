@@ -389,6 +389,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
     base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
     bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
+  } else if (mat > 22.5 && mat < 23.5) {    // harbour: black oily water, long swell, rain rings, a rainbow fuel sheen
+    float sw = sin(vNqW.x * 0.35 + uTime * 0.7) * 0.5 + sin(vNqW.z * 0.23 - uTime * 0.5) * 0.5;
+    float oil = smoothstep(0.55, 0.8, vn(vNqW.xz * 0.08 + vec2(uTime * 0.01, 0.)));
+    base = vec3(0.008, 0.014, 0.016) + (0.5 + 0.5 * cos(6.2831 * (vn(vNqW.xz * 0.4) + vec3(0., 0.33, 0.67)))) * 0.03 * oil;
+    bumpH = nqRipple(vNqW.xz * 1.6, uTime) * 0.003 * max(uRain, 0.2) + sw * 0.03 + (vn(vNqW.xz * 0.9 + uTime * 0.15) - 0.5) * 0.02;
+    rough = 0.05; metal = 0.0; envK = uEnvK * 1.8; rimK = 0.0; wetRefl = 0.9;
   } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
     float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
     vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;

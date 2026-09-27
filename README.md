@@ -1,6 +1,6 @@
 # Neon Quiver
 
-A first-person archery survival game that runs in the browser. Sector 7 is under quarantine: a rain-soaked cyberpunk city at night, with the plaza at its heart and three districts around it. Hold the bow, draw, release, and survive endless zombie waves that find you wherever you go.
+A first-person archery survival game that runs in the browser. Sector 7 is under quarantine: a rain-soaked cyberpunk city at night, with the plaza at its heart and districts all around it. Hold the bow, draw, release, and survive endless zombie waves that find you wherever you go.
 
 - **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the street lamps, mirror-accurate reflections in the puddles with rain ripples, light cones in the rain, procedural brick, concrete, steel and asphalt detail, bloom, and ambient occlusion on the High setting.
 - **Small download:** about 1 MB on a first visit (the page, three.js and the zombie model).
@@ -40,8 +40,10 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **Bow viewmodel with real animation:** limbs flex and cams glow as you draw, the string snaps and oscillates on release, then the hand pulls back, reaches for the quiver and nocks the next arrow. Arrows fly with gravity drop.
 - **Four arrow types:** Carbon (unlimited), Incendiary (sets zombies and the ground on fire), Plasma Charge (explodes on impact) and Rail Piercer (flat, fast, passes through five bodies).
 - **The infected:** sculpted walkers, sprinting runners and armored brutes, with hit-location staggers, falls driven by the arrow's force, crawlers from leg shots, wall pinning and moderate gore. Every 5th wave brings *The Warden*, a boss that drops from the sky, slams the ground (jump to dodge) and summons runners. Hit its glowing core for extra damage.
-- **An open city to roam:** Sector 7 plaza sits at the centre. North is the **Rail Yard** (container stacks, a parked freight train, a gantry crane and floodlights). East is the **Night Market** (rows of stalls, lantern strings, food carts and steam). West is **the Warrens** (brick tenements, fire escapes, dumpsters and burning barrels in narrow alleys). The south avenue is sealed by the quarantine gate. Zombies spawn out of sight around you and path through the streets to reach you. A minimap sits under the score.
-- **Supplies:** amber **supply caches** refill special arrows and some health, then recharge. After each wave you have 35 seconds to reach one of the cyan **Armory Terminals** (one in the plaza and one per district) and press E to spend credits on draw speed, damage, reload speed, max health, move speed, healing and special arrows. An arrow on screen points to the nearest terminal.
+- **An open city to roam:** Sector 7 plaza sits at the centre. North is the **Rail Yard** (container stacks, a parked freight train, a gantry crane and floodlights). East is the **Night Market** (rows of stalls, lantern strings, food carts and steam). Past the far end of the market lie **the Docks** (a dead container port: stacks to get lost in, two gantry cranes over the quay, a cargo ship moored in black harbour water). West is **the Warrens** (brick tenements, fire escapes, dumpsters and burning barrels in narrow alleys). South, past the freeway, are **the Suburbs** and the **Sakura Gardens**. Zombies spawn out of sight around you and path through the streets to reach you. A minimap sits under the score.
+- **Supplies:** amber **supply caches** refill special arrows and some health, then recharge. After each wave a 25-second countdown shows in the HUD (press N to start the next wave early) while you reach one of the cyan **Armory Terminals** (one in the plaza and one per district) and press E to spend credits on draw speed, damage, reload speed, max health, move speed, healing and special arrows. An arrow on screen points to the nearest terminal.
+- **Health:** after 6 seconds without taking a hit you slowly regenerate, but only up to half your max health; pickups, the Med Injector and Dermal Plating get you the rest of the way.
+- **Difficulty keeps climbing:** zombies hit harder and move faster every wave, the mix shifts toward runners and brutes, runners come in packs from wave 6, and white-eyed **elites** (tougher, faster, double rewards) appear from wave 8.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
@@ -80,7 +82,7 @@ The readable source is in `src/`:
 - `engine.js`: math, geometry and the shared material (surface detail, windows, puddles, reflections)
 - `r3.js`: the three.js scene, lights, reflections, light cones, post-processing
 - `city.js`: plaza, buildings, signs and traffic
-- `districts.js`: the Rail Yard, Night Market and Warrens
+- `districts.js`: the Rail Yard, Night Market, Docks, Warrens, Suburbs and Sakura Gardens
 - `world.js`: zombie pathfinding, spawning, supply caches, terminals and the minimap
 - `rig.js`: the skinned zombies and their animation blending
 - `bow.js`: bow viewmodel and draw/release/reload animation

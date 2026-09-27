@@ -9,7 +9,7 @@ function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.
 function navCenter(k, out) { out[0] = NAV.x0 + (k % NAV.w + 0.5) * NAV.cell; out[1] = NAV.z0 + (Math.floor(k / NAV.w) + 0.5) * NAV.cell; return out; }
 
 function buildNav() {
-  const c = NAV.cell; NAV.w = Math.ceil((142 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
+  const c = NAV.cell; NAV.w = Math.ceil((WORLD_BOUNDS.x1 + 2 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
   const N = NAV.w * NAV.h, B = new Uint8Array(N);
   const mark = (x0, x1, z0, z1) => {
     const i0 = Math.max(0, Math.floor((x0 - NAV.x0) / c)), i1 = Math.min(NAV.w - 1, Math.floor((x1 - NAV.x0) / c));
@@ -69,7 +69,7 @@ function navTarget(x, z, out) {
   }
   navCenter(k, out); return D[k] !== NAV_INF;
 }
-function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, 140), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
+function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, WORLD_BOUNDS.x1), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
 // a spawn point out of sight, 26–60 m of walking from the player
 function navSpawnPoint(minD = 26, maxD = 62) {
   let best = null, bestScore = -1;
@@ -156,7 +156,7 @@ function updateAmbient(dt) {
 /* ---------------- minimap ---------------- */
 const MINI = { cv: null, scale: 2 };
 function buildMinimap() {
-  const s = MINI.scale, W = Math.ceil((142 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
+  const s = MINI.scale, W = Math.ceil((WORLD_BOUNDS.x1 + 2 - NAV.x0) * s), H = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) * s);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d');
   const img = x.createImageData(W, H), D = img.data;
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
