@@ -196,7 +196,7 @@ function updateLights3(cam) {
   for (let i = 0; i < SPOTS.length; i++) {
     const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
     if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
-    else if ((i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;
+    else if (SETTINGS.quality >= 3 || (i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;   // Ultra refreshes every lamp shadow every frame
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
@@ -502,7 +502,7 @@ function profPoll() {
 }
 function profInstrument() {
   if (!PROF.on) return;
-  const names = new Map([[worldPass, 'world+shadows'], [vmPass, 'bow'], [bloomPass, 'bloom'], [gradePass, 'grade']]);
+  const names = new Map([[worldPass, 'world+shadows'], [gtaoPass, 'gtao'], [vmPass, 'bow'], [bloomPass, 'bloom'], [gradePass, 'grade']]);
   for (const p of composer.passes) { if (p._prof) continue; const orig = p.render.bind(p), nm = names.get(p) || p.constructor.name; p.render = (...a) => { profBegin(nm); orig(...a); profEnd(); }; p._prof = true; }
 }
 function profFrame(cpuMs) {
@@ -512,7 +512,7 @@ function profFrame(cpuMs) {
   let gpu = 0, lines = [];
   for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
-  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High'][SETTINGS.quality]}`;
+  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 3 ? '  textures ' + ULTRA.state : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 function buildComposer(W, H, q) {
@@ -523,14 +523,59 @@ function buildComposer(W, H, q) {
   composer = new EffectComposer(renderer, rt); composer.setPixelRatio(1);
   worldPass = new ScenePass(camera, true); composer.addPass(worldPass);
   gtaoPass = null;
-  // (ambient occlusion comes from the baked occlusion map now, at no per-frame cost)
+  // (Low..High: ambient occlusion comes from the baked occlusion map, at no per-frame cost)
+  if (q >= 3) {   // Ultra: real-time GTAO on top, for contact shadows at feet, corners, under cars and between bodies
+    gtaoPass = new GTAOPass(scene, camera, W, H);
+    gtaoPass.output = GTAOPass.OUTPUT.Default; gtaoPass.blendIntensity = 0.85;
+    gtaoPass.updateGtaoMaterial({ radius: 1.1, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 16, distanceFallOff: 1, screenSpaceRadius: false });
+    gtaoPass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+    // glass, glows, signs and anything else see-through must not cast fake occlusion
+    const hideT = gtaoPass._overrideVisibility.bind(gtaoPass);
+    gtaoPass._overrideVisibility = function () { hideT(); this.scene.traverse((o) => { if (o.visible && o.material && (o.material.transparent || o.material.blending === THREE.AdditiveBlending)) { o.visible = false; this._visibilityCache.push(o); } }); };
+    composer.addPass(gtaoPass);
+  }
   vmPass = new ScenePass(vmCamera, false); composer.addPass(vmPass);
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);
   composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.W = W; R3.H = H;
 }
+/* ---- Ultra: load the CC0 texture arrays on demand (only when Ultra is picked) ---- */
+const ULTRA = { state: 'none' };
+function loadUltraTextures() {
+  if (ULTRA.state !== 'none') return; ULTRA.state = 'loading';
+  const load = (n) => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = 'textures/' + n + '.jpg?v=' + TEX_VER; });
+  Promise.all(['albedo', 'normal', 'orm'].map(load)).then((ims) => {
+    const arr = ims.map((im) => {
+      const w = im.width, H = im.height, h = H / TEX_LAYERS.length;
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = H; const cx = cv.getContext('2d', { willReadFrequently: true }); cx.drawImage(im, 0, 0);
+      const src = cx.getImageData(0, 0, w, H).data, d = new Uint8Array(src.length), row = w * 4;
+      for (let L = 0; L < TEX_LAYERS.length; L++) for (let y = 0; y < h; y++) d.set(src.subarray((L * h + y) * row, (L * h + y + 1) * row), (L * h + (h - 1 - y)) * row);   // GL rows run bottom-up
+      const t = new THREE.DataArrayTexture(d, w, h, TEX_LAYERS.length);
+      t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
+      return { t, d, w, h };
+    });
+    const [A, N, O] = arr;
+    for (let L = 0; L < TEX_LAYERS.length; L++) {   // per-layer means: the photo adds detail around the city's own colours
+      let r = 0, g = 0, b = 0, ro = 0, c = 0, co = 0;
+      for (let y = 0; y < A.h; y += 8) for (let x = 0; x < A.w; x += 8) { const i = ((L * A.h + y) * A.w + x) * 4; r += (A.d[i] / 255) ** 2.2; g += (A.d[i + 1] / 255) ** 2.2; b += (A.d[i + 2] / 255) ** 2.2; c++; }
+      for (let y = 0; y < O.h; y += 8) for (let x = 0; x < O.w; x += 8) { ro += O.d[((L * O.h + y) * O.w + x) * 4 + 1] / 255; co++; }
+      NQU.uTexM.value[L].set(r / c, g / c, b / c, ro / co);
+    }
+    for (const t of [A.t, N.t, O.t]) renderer.initTexture(t);   // upload + mipmaps now, outside any frame (no mid-frame stall or half-bound state)
+    NQU.uTexA.value = A.t; NQU.uTexN.value = N.t; NQU.uTexR.value = O.t;
+    ULTRA.state = 'ready'; NQU.uTexOn.value = SETTINGS.quality >= 3 ? 1 : 0;
+  }).catch((e) => { ULTRA.state = 'failed'; console.warn('Ultra textures failed to load', e); });
+}
 function applyQuality3(q) {
+  if (q >= 3) loadUltraTextures();
+  NQU.uTexOn.value = q >= 3 && ULTRA.state === 'ready' ? 1 : 0;
+  // Ultra shadows: the moon/sun map at 4x the texels over a wider box; lamp shadows at 2x, all six lamps casting
+  const U = q >= 3, sm = U ? 4096 : 2048, box = U ? 80 : 52;
+  if (sun.shadow.mapSize.x !== sm) { sun.shadow.mapSize.set(sm, sm); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
+  Object.assign(sun.shadow.camera, { left: -box, right: box, top: box, bottom: -box }); sun.shadow.camera.updateProjectionMatrix();
+  SPOTS.forEach((sp, i) => { const ms = U ? 2048 : 1024; sp.shadow = i < (U ? N_SPOTS : N_SHADOW_SPOTS); if (sp.s.shadow.mapSize.x !== ms) { sp.s.shadow.mapSize.set(ms, ms); if (sp.s.shadow.map) { sp.s.shadow.map.dispose(); sp.s.shadow.map = null; } } sp.s.shadow.needsUpdate = true; });
   const sh = q >= 1;
   sun.castShadow = sh; for (const { s, shadow } of SPOTS) s.castShadow = sh && shadow;
 }
@@ -571,7 +616,7 @@ function render3(time, W, H, fov, cam) {
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality === 2 ? 0.45 : 0.35;
+  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too

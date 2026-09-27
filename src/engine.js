@@ -124,7 +124,13 @@ const NQU = {
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
+  // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
+  uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
+  uTexM: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0.5, 0.5, 0.5, 0.5)) },   // per layer: mean linear albedo (rgb), mean roughness (a)
+  // per layer: x = 1 / tile size in metres, y = normal strength   [asphalt, concrete, brick, rust, corrugated, pavers, plaster, cast concrete]
+  uTexS: { value: [[1 / 3.5, 1.0], [1 / 3, 0.8], [1 / 2.4, 1.1], [1 / 2, 0.9], [1 / 2, 1.0], [1 / 2.6, 1.0], [1 / 3, 0.7], [1 / 3, 0.9]].map(([a, b]) => new THREE.Vector2(a, b)) },
 };
+const TEX_LAYERS = ['asphalt', 'concrete', 'brick', 'rust', 'corrugated', 'pavers', 'plaster', 'castconc'];
 const NOISE_GLSL = `
 float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
 float vn(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
@@ -177,7 +183,23 @@ attribute vec2 nqm;
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
+uniform float uTexOn;
 ${NOISE_GLSL}
+#if !defined(NQ_Z) && !defined(NQ_VM)
+uniform sampler2DArray uTexA, uTexN, uTexR; uniform vec4 uTexM[8]; uniform vec2 uTexS[8];
+// triplanar sample of one layer: colour, AO + roughness, and a whiteout-blended world-space normal
+void nqTri(float L, vec3 W, vec3 N, float sc, out vec3 a, out vec2 ro, out vec3 n) {
+  vec3 w = pow(abs(N), vec3(4.)); w /= (w.x + w.y + w.z);
+  vec2 ux = W.zy * sc, uy = W.xz * sc, uz = W.xy * sc;
+  vec3 nx = vec3(0.), ny = vec3(0.), nz = vec3(0.); a = vec3(0.); ro = vec2(0.);
+  if (w.x > 0.02) { a += texture(uTexA, vec3(ux, L)).rgb * w.x; ro += texture(uTexR, vec3(ux, L)).rg * w.x; nx = texture(uTexN, vec3(ux, L)).rgb * 2. - 1.; }
+  if (w.y > 0.02) { a += texture(uTexA, vec3(uy, L)).rgb * w.y; ro += texture(uTexR, vec3(uy, L)).rg * w.y; ny = texture(uTexN, vec3(uy, L)).rgb * 2. - 1.; }
+  if (w.z > 0.02) { a += texture(uTexA, vec3(uz, L)).rgb * w.z; ro += texture(uTexR, vec3(uz, L)).rg * w.z; nz = texture(uTexN, vec3(uz, L)).rgb * 2. - 1.; }
+  a /= max(w.x * step(0.02, w.x) + w.y * step(0.02, w.y) + w.z * step(0.02, w.z), 1e-3);
+  nx = vec3(nx.xy + N.zy, abs(nx.z) * N.x); ny = vec3(ny.xy + N.xz, abs(ny.z) * N.y); nz = vec3(nz.xy + N.xy, abs(nz.z) * N.z);
+  n = normalize(nx.zyx * w.x + ny.xzy * w.y + nz.xyz * w.z);
+}
+#endif
 // rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
 float nqRipple(vec2 p, float t) {
   vec2 id = floor(p), f = fract(p) - 0.5; float h = 0.;
@@ -221,6 +243,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
   float bumpH = 0.0, wetRefl = 0.0;
+  float nqTL = -1., nqTS = 0.;   // Ultra texture layer + strength, chosen per material below
   vec3 N0 = normalize(vNqN);
   // baked occlusion: how much open sky this spot sees (alley floors, wall bases and corners go dark).
   // Step out of the surface first so a wall samples the street in front of it, then fade up the wall.
@@ -277,7 +300,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
       vec3 wall;
       if (mat > 8.5) {        // brick tenements
-        vec2 br = nqBrick(fc);
+        vec2 br = uTexOn > 0.5 ? vec2(0.5, 0.) : nqBrick(fc);
         wall = base * (0.75 + 0.5 * br.x) * (1. - br.y * 0.55);
         bumpH = -br.y * 0.012;
       } else {                // concrete panels: seams every floor and bay, blotchy weathering
@@ -293,6 +316,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       base = mix(wall, vec3(0.015,0.02,0.04), win);
       bumpH -= win * 0.03;
       rough = mix(mix(0.85, 0.45, streak * wetK), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
+      nqTL = mat > 8.5 ? 2. : 1.; nqTS = 0.9 * (1. - win);
     } else if (mat > 8.5) { base *= 0.8; }
   } else if (mat > 1.5 && mat < 2.5) {      // plaza tiles, wet
     vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
@@ -306,6 +330,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     bumpH = -line * 0.01 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.62, mix(0.62, 0.04, clamp(wetK, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
     wetRefl = mix(0.22, 1.0, pud) * clamp(wetK, 0., 1.);   // the whole wet surface mirrors a little, puddles fully
+    nqTL = 5.; nqTS = 0.75 * (1. - pud * 0.7);
   } else if (mat > 2.5 && mat < 3.5) {      // asphalt
     float pud = max(smoothstep(0.5,0.7, vn(vNqW.xz*0.12)), smoothstep(0.8, 0.5, nqOcc) * 0.8);     // gutters stay wet
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
@@ -323,6 +348,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
     rough = mix(0.85, mix(0.8, 0.05, clamp(wetK,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
     wetRefl = mix(0.2, 1.0, pud) * clamp(wetK, 0., 1.);
+    nqTL = 0.; nqTS = 0.9 * (1. - pud * 0.75);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
     float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
     rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
@@ -333,6 +359,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float rust = smoothstep(0.55, 0.8, vn(fcW * 1.3 + N0.xz * 5.) + streak * 0.4);
     base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
     bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
+    nqTL = 3.; nqTS = 0.55;
   } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
     base *= 0.35; rough = 0.04 + streak * 0.14 * wetK; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
   } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
@@ -377,6 +404,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float top = step(0.5, N0.y);
     base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, wetK * top);
     bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, wetK * top * 0.8); rimK = 0.3;
+    nqTL = 7.; nqTS = 0.85;
   } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
     float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
     base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
@@ -464,6 +492,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vn(vec2(fcW.x * 40., fcW.y * 2.));
     base *= (0.9 + 0.14 * n1 - 0.05 * n2 - 0.03 * n3) * (1. - smoothstep(0.45, 0.0, vNqW.y) * 0.3 * (1. - step(0.5, abs(N0.y))));
     rough = 0.85 - n2 * 0.08; rimK = 0.15; bumpH = n2 * 0.0006 + n3 * 0.0003;
+    nqTL = 6.; nqTS = 0.7;
   } else if (mat > 20.5 && mat < 22.5) {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     vec2 q = vNqW.xz / (mat > 21.5 ? 0.33 : 0.6); vec2 gd = abs(fract(q) - 0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
     float grout = smoothstep(0.482 - fw.x * 1.2, 0.494, max(gd.x, gd.y));
@@ -475,6 +504,18 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
   } else { rimK = 1.0; }
+  vec3 nqTexN = N0; float nqTexK = 0.;
+#if !defined(NQ_Z) && !defined(NQ_VM)
+  if (uTexOn > 0.5 && nqTL > -0.5 && nqTS > 0.01) {
+    int li = int(nqTL + 0.5); vec3 ta; vec2 tro; vec3 tn;
+    nqTri(nqTL, vNqW, N0, uTexS[li].x, ta, tro, tn);
+    vec3 det = pow(ta, vec3(2.2)) / max(uTexM[li].rgb, vec3(0.02));            // photo detail relative to the layer's average colour
+    base *= mix(vec3(1.), clamp(det, 0., 3.), nqTS);
+    base *= mix(1., tro.x, nqTS * 0.8);                                           // baked cavity occlusion
+    rough = clamp(mix(rough, rough * tro.y / max(uTexM[li].a, 0.05), nqTS * 0.7), 0.03, 1.);
+    nqTexN = tn; nqTexK = nqTS * uTexS[li].y;
+  }
+#endif
   diffuseColor.rgb = base * mix(1.0, nqOcc, 0.55);`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
   {   // derivative bump from the procedural height (view space)
@@ -482,7 +523,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float dhx = dFdx(bumpH), dhy = dFdy(bumpH);
     vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx); float det = dot(dpx, r1);
     if (abs(det) > 1e-9) normal = normalize(abs(det) * normal - sign(det) * (dhx * r1 + dhy * r2));
-  }`)
+  }
+  if (nqTexK > 0.) normal = normalize(normal + (viewMatrix * vec4(nqTexN - N0, 0.)).xyz * nqTexK);   // Ultra: photo-scanned surface normals`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = rough;')
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = metal;')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>

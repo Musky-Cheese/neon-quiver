@@ -691,9 +691,11 @@ function setCamera(time) {
 }
 function render(time) {
   // resolution: pixel budget per quality level, plus automatic scaling if frames run slow
-  const budget = (SETTINGS.quality === 0 ? 1.0e6 : SETTINGS.quality === 2 ? 8.3e6 : 2.4e6) * PERF.scale;   // High renders up to native 4K
+  const q = SETTINGS.quality;   // Ultra never drops resolution behind your back
+  const budget = (q === 0 ? 1.0e6 : q >= 2 ? 8.3e6 : 2.4e6) * (q >= 3 ? 1 : PERF.scale);   // High / Ultra render up to native 4K
   const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
-  let dpr = Math.min(2, devicePixelRatio || 1); if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
+  let dpr = Math.min(2, devicePixelRatio || 1); if (q >= 3) dpr = Math.min(2.25, dpr * 1.5);   // Ultra supersamples: renders at 1.5x and scales down
+  if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
   if (window.__NQ_CAPTURE) dpr = window.__NQ_CAPTURE_DPR || 1;
   const W = Math.max(1, Math.round(cw * dpr)), H = Math.max(1, Math.round(ch * dpr));
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
@@ -748,7 +750,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD, HOOK, hookFire, hookAim,
+  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

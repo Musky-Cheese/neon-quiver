@@ -49,6 +49,7 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
+- **Ultra quality** (Settings → Quality → Ultra) is for strong desktop GPUs: photo-scanned PBR surface textures (asphalt, concrete, brick, rusted and corrugated steel, pavers, plaster) projected triplanar in world space on top of the city's own shading, real-time GTAO contact shadows, 1.5x supersampling, 4x-resolution moon/sun shadows over a wider area, and full-rate 2x-resolution shadows on all six nearby lamps. It never lowers resolution automatically. Textures (3.7 MB) download only when Ultra is picked.
 - Add `?prof=1` to the URL for a performance overlay: GPU time per render pass, CPU frame time, draw calls and triangles.
 
 ## Ad and marketing assets (`ads/`)
@@ -102,3 +103,6 @@ Balance numbers you will probably want to tune live near the top of their files:
 
 - Code, art and audio were generated procedurally for this project.
 - The UI font is a subset of **TeX Gyre Heros Condensed** by GUST e-foundry, renamed "Quiver Cn" for embedding, and used under the GUST Font License.
+
+## Credits
+- Ultra surface textures: [Poly Haven](https://polyhaven.com) (CC0): asphalt_02, concrete_wall_008, red_brick_03, rusty_metal_02, corrugated_iron_02, concrete_pavers, plastered_wall_02, concrete_floor_worn_001. Re-fetch with `tools/fetch_textures.py`, pack with `tools/pack_textures.py`.

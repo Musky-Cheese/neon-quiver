@@ -12,9 +12,11 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 '''
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
-js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'rig.js', 'r3.js', 'game.js'])
+TEX_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'textures', f), 'rb').read() for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg'))).hexdigest()[:10]
+js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'rig.js', 'r3.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'
