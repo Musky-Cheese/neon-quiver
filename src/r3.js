@@ -102,7 +102,7 @@ function buildSigns() {
 }
 const DECAL_POOL = [];
 function buildDecalPool() {
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < DECAL_CAP; i++) {
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[0] }, uCol: { value: new THREE.Color(1, 1, 1) }, uTime: NQU.uTime, uMode: { value: 0 }, uSeed: { value: 0 }, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS.replace('flick = 1. - step(0.985', 'flick = 1. - 0.0*step(0.985'), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const m = new THREE.Mesh(PLANE, mat); m.matrixAutoUpdate = false; m.visible = false; m.renderOrder = 2; m.receiveShadow = false;
@@ -113,7 +113,8 @@ function syncDecals() {
   for (let i = 0; i < DECAL_POOL.length; i++) {
     const m = DECAL_POOL[i], d = DECALS[i];
     if (!d) { m.visible = false; continue; }
-    const a = Math.min(1, d.t * 6) * (d.t > 38 ? Math.max(0, 1 - (d.t - 38) / 7) : 1);
+    const fadeAt = DECAL_LIFE - 9;
+    const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
     M4.trs(m.matrix.elements, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1); m.matrixWorldNeedsUpdate = true;
     m.material.uniforms.uTex.value = DECAL_TEX[d.v]; m.material.uniforms.uA.value = a * 0.92; m.visible = true;
   }

@@ -7,7 +7,13 @@ const ZTYPES = {
   runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
+  // spitter: hangs back and lobs acid; screamer: hangs back and buffs the pack; climber: fast, scales a wall and pounces
+  spitter: { hp: 42, hpW: 6, speed: [1.3, 1.7], dmg: 6, scale: 0.96, score: 180, cash: 18, eyes: [0.25, 1, 0.35], reach: 1.3, atk: 0.85 },
+  screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, cash: 20, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
+  climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, cash: 22, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
 };
+// how long a corpse holds before it starts sinking, and before it's finally removed (blood pools use DECAL_LIFE/DECAL_CAP in fx.js)
+const CORPSE_SETTLE = 14, CORPSE_LIFE = 24, CORPSE_CAP = 26;
 // dead skin across every complexion: pallid, ashen, olive, brown, deep brown, sallow, livid, jaundiced
 const SKINS = [[0.36, 0.3, 0.25], [0.31, 0.29, 0.27], [0.25, 0.19, 0.14], [0.15, 0.095, 0.07], [0.085, 0.055, 0.042], [0.29, 0.28, 0.2], [0.27, 0.2, 0.24], [0.33, 0.27, 0.16]];
 // what they were wearing when it happened: [top, trousers]
@@ -19,6 +25,7 @@ const OUTFITS = {
   brute: [[[0.05, 0.07, 0.14], [0.05, 0.06, 0.1]], [[0.06, 0.06, 0.07], [0.06, 0.06, 0.07]]],
   boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
 };
+OUTFITS.spitter = OUTFITS.walker; OUTFITS.screamer = OUTFITS.walker; OUTFITS.climber = OUTFITS.runner;
 const CLOTHES = OUTFITS.walker.map(o => o[0]);
 const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
@@ -42,6 +49,8 @@ function spawnZombie(type, x, z, wave) {
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
     chill: 0, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
+    // spitter/screamer/climber state
+    spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
     R: { h: 0, hv: 0, t: 0, tv: 0, y: 0, yv: 0, l: 0, lv: 0 }, stumble: 0, legDmg: 0, crawl: false, crawlT: 0,
     // death physics
@@ -58,6 +67,9 @@ function spawnZombie(type, x, z, wave) {
     zz.top = r < 0.4 ? 'lean' : r < 0.65 ? 'bare' : 'shirt'; zz.gait = Math.random() < 0.6 ? 'run' : 'run_b';
     if (zz.headVar === 'c' && Math.random() < 0.5) zz.headVar = 'a';
   } else if (type === 'brute') { zz.top = 'shirt'; zz.headVar = Math.random() < 0.5 ? 'a' : 'b'; }
+  else if (type === 'spitter') { zz.top = r < 0.5 ? 'shirt' : r < 0.8 ? 'jacket' : 'bloat'; zz.gait = 'walk'; }
+  else if (type === 'screamer') { zz.top = r < 0.4 ? 'lean' : r < 0.75 ? 'bare' : 'shirt'; zz.gait = 'walk'; }
+  else if (type === 'climber') { zz.top = r < 0.55 ? 'lean' : 'bare'; zz.gait = 'run'; }
   zz.bare = zz.top === 'bare' || zz.top === 'lean';
   if (zz.headVar === 'c') zz.hair = pick([HAIRS[0], HAIRS[1], HAIRS[3], HAIRS[4]]);   // long hair reads as hair, not a grey cap
   if (type === 'boss') { zz.y = 40; zz.state = 'drop'; zz.bare = true; zz.top = 'bare'; zz.headVar = 'a'; }
@@ -174,10 +186,10 @@ function updateDying(z, dt) {
     const P = z.pin; P.t += dt;
     const k = Math.min(1, dt * 18); z.x = lerp(z.x, P.x, k); z.z = lerp(z.z, P.z, k);
     let dy = ((P.yaw - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += dy * Math.min(1, dt * 10);
-    if (z.dieT > 3.6) z.y -= dt * 0.5;
+    if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.5;
     return;
   }
-  if (z.crawl) { z.pitch = 0; if (z.dieT > 3.2) z.y -= dt * 0.5; return; }
+  if (z.crawl) { z.pitch = 0; if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.5; return; }
   // translate with the hit's momentum, slide to a stop on the ground
   z.x += z.dv[0] * dt; z.z += z.dv[2] * dt; z.y += z.dv[1] * dt;
   if (z.y > 0.001) z.dv[1] -= 12 * dt; else { z.y = Math.max(z.y, z.dieT > 3.4 ? z.y : 0); z.dv[1] = Math.max(0, z.dv[1]); const f = Math.max(0, 1 - 5 * dt); z.dv[0] *= f; z.dv[2] *= f; }
@@ -191,7 +203,7 @@ function updateDying(z, dt) {
     if (Math.abs(z.pitch) >= lim && z.y <= 0.05) { z.pitch = lim * Math.sign(z.pitch); z.pitchV = -z.pitchV * 0.18; if (Math.abs(z.pitchV) > 0.8) { shakeNear(z, 0.08); bloodBurst(z.x, 0.1, z.z, null, 6, 0.6); } else z.pitchV = 0; }
   }
   z.roll = clamp(z.roll + z.rollV * dt, -0.6, 0.6); z.rollV *= Math.max(0, 1 - 3 * dt);
-  if (z.dieT > 3.4) z.y -= dt * 0.55;
+  if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.55;
 }
 function shakeNear(z, a) { const d = Math.hypot(z.x - PLAYER.x, z.z - PLAYER.z); if (d < 10) shake(a * (1 - d / 10)); }
 
@@ -199,9 +211,17 @@ function shakeNear(z, a) { const d = Math.hypot(z.x - PLAYER.x, z.z - PLAYER.z);
 function updateZombies(dt, time) {
   const P = PLAYER;
   groanCd -= dt;
+  // corpse cap: if too many bodies are lying around, retire the oldest one (past its death flail) a little early
+  let deadN = 0; for (const zz of ZOMBIES) if (zz.dead) deadN++;
+  if (deadN > CORPSE_CAP) {
+    let oldestIdx = -1, oldestT = -1;
+    for (let j = 0; j < ZOMBIES.length; j++) { const zz = ZOMBIES[j]; if (zz.dead && zz.dieT > 2 && zz.dieT > oldestT) { oldestT = zz.dieT; oldestIdx = j; } }
+    if (oldestIdx >= 0) ZOMBIES.splice(oldestIdx, 1);
+  }
   for (let i = ZOMBIES.length - 1; i >= 0; i--) {
     const z = ZOMBIES[i];
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
+    z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
     z.chill = Math.max(0, z.chill - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
     if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
@@ -212,9 +232,12 @@ function updateZombies(dt, time) {
     }
     if (z.state === 'dying') {
       updateDying(z, dt);
-      if (z.dieT > 5.2) ZOMBIES.splice(i, 1);
+      if (z.dieT > CORPSE_LIFE) ZOMBIES.splice(i, 1);
       continue;
     }
+    if (z.type === 'spitter') { updateSpitter(z, dt, P); continue; }
+    if (z.type === 'screamer') { updateScreamer(z, dt, P); continue; }
+    if (z.type === 'climber') { updateClimber(z, dt, P); continue; }
     if (z.state === 'drop') { // boss falls from the sky
       z.vy = (z.vy || 0) - 40 * dt; z.y += z.vy * dt;
       if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(); AUD.roar(); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
@@ -236,7 +259,7 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
@@ -266,7 +289,7 @@ function updateZombies(dt, time) {
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
       z.atkT += dt / z.T.atk * (z.chill > 0 ? 0.45 : 1);
-      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1), z.x, z.z); }
+      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
@@ -322,6 +345,163 @@ function updateBoss(z, dt, dist) {
   }
 }
 
+/* -------- spitter: keeps its distance and lobs acid --------
+   -------- screamer: keeps its distance and buffs the pack --------
+   -------- climber: fast on the ground, scales a wall and pounces -------- */
+function hasLineOfSight(z, P) {
+  const ox = z.x, oy = 1.3 * z.scale, oz = z.z, dx = P.x - ox, dy = (P.y || 0) + 1.2 - oy, dz = P.z - oz, L = Math.hypot(dx, dy, dz) || 1e-3;
+  const t = rayWorld(ox, oy, oz, dx, dy, dz, L);
+  return t === null || t > L - 0.5;
+}
+function separateFrom(z, rad) {
+  for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = rad * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
+}
+const ZPROJ = [];
+function spitAt(z, P) {
+  const ox = z.x, oy = 1.35 * z.scale, oz = z.z;
+  const dx = P.x - ox, dz = P.z - oz, dist = Math.hypot(dx, dz) || 1e-3, spd = 13, t = dist / spd;
+  const vx = dx / t, vz = dz / t, vy = ((P.y || 0) + 1.1 - oy) / t + 0.5 * 9.5 * t;
+  ZPROJ.push({ x: ox, y: oy, z: oz, vx, vy, vz, t: 0, life: 3, dmg: 9 * (1 + Math.max(0, GAME.wave - 1) * 0.02) });
+  AUD.spit(PLAYER.panOf(z.x, z.z));
+  emit(ox, oy, oz, vx * 0.08, vy * 0.08 + 1, vz * 0.08, 0.3, [0.4, 0.9, 0.15], 0.06, 0, 1, 0.4);
+}
+function updateZProj(dt) {
+  for (let i = ZPROJ.length - 1; i >= 0; i--) {
+    const a = ZPROJ[i]; a.t += dt; a.vy -= 9.5 * dt;
+    const nx = a.x + a.vx * dt, ny = a.y + a.vy * dt, nz = a.z + a.vz * dt;
+    if (Math.random() < dt * 40) emit(lerp(a.x, nx, 0.5), lerp(a.y, ny, 0.5), lerp(a.z, nz, 0.5), rand(-0.2, 0.2), rand(-0.1, 0.1), rand(-0.2, 0.2), 0.3, [0.4, 0.9, 0.15], 0.05, 1, 2, 0.1);
+    let hit = false;
+    if (GAME.state === 'playing' && !PLAYER.dead) { const pd = Math.hypot(nx - PLAYER.x, ny - ((PLAYER.y || 0) + 1.1), nz - PLAYER.z); if (pd < 0.9) { PLAYER.hurt(a.dmg, a.x, a.z); hit = true; } }
+    if (!hit && ny <= 0.05) hit = true;
+    if (!hit && a.t > a.life) hit = true;
+    if (hit) {
+      burst(nx, Math.max(0.1, ny), nz, 18, [0.35, 1, 0.2], 4, 0.5, 0.07, 6, 1.3);
+      for (let k = 0; k < 3; k++) emit(nx, Math.max(0.05, ny), nz, rand(-1, 1), rand(0.2, 1), rand(-1, 1), rand(0.4, 0.8), [0.35, 0.9, 0.15], -rand(0.05, 0.12), 4, 0.8, 0);
+      ZPROJ.splice(i, 1); continue;
+    }
+    a.x = nx; a.y = ny; a.z = nz;
+  }
+}
+function drawZProj() { for (const a of ZPROJ) drawItem(MESH.sphere, M4.trs(poolM(), a.x, a.y, a.z, 0, 0, 0, 0.09, 0.09, 0.09), [0.35, 0.9, 0.15], [0.5, 1.6, 0.2]); }
+function updateSpitter(z, dt, P) {
+  const dx = P.x - z.x, dz = P.z - z.z, dist = Math.hypot(dx, dz) || 1e-3;
+  let tx = P.x, tz = P.z, hold = false;
+  if (dist < 8) { tx = z.x - dx; tz = z.z - dz; } else if (dist <= 16) hold = true;
+  const want = Math.atan2(tx - z.x, tz - z.z);
+  let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
+  const spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
+  pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
+  z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
+  // aim toward the player once inside its engagement band, whatever direction it's moving
+  if (dist >= 6 && dist <= 18) { const aim = Math.atan2(dx, dz); let ay = ((aim - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(ay, -6 * dt, 6 * dt); }
+  z.spitCd -= dt;
+  if (z.state === 'walk' && dist >= 6 && dist <= 18 && z.spitCd <= 0 && GAME.state === 'playing' && hasLineOfSight(z, P)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
+  if (z.state === 'attack') {
+    z.atkT += dt / 1.1;
+    if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; spitAt(z, P); z.spitCd = rand(2.6, 4.2); }
+    if (z.atkT >= 1) z.state = 'walk';
+  }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.05); z.jaw = 1; }
+  z.jaw = Math.max(0, z.jaw - dt * 1.2);
+}
+function screamPulse(z) {
+  AUD.scream(PLAYER.panOf(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
+  for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop' || o.type === 'boss') continue; if (Math.hypot(o.x - z.x, o.z - z.z) < 9) o.buffT = Math.max(o.buffT, 6); }
+  for (let k = 0; k < 40; k++) { const a = Math.random() * TAU, v = rand(2, 6); emit(z.x, 1.4 * z.scale, z.z, Math.cos(a) * v, rand(0.5, 2), Math.sin(a) * v, 0.6, [0.9, 0.25, 1], 0.06, 1, 2, 0.2); }
+}
+function updateScreamer(z, dt, P) {
+  const dx = P.x - z.x, dz = P.z - z.z, dist = Math.hypot(dx, dz) || 1e-3;
+  let tx = P.x, tz = P.z;
+  if (dist < 5.5) { tx = z.x - dx; tz = z.z - dz; }
+  const want = Math.atan2(tx - z.x, tz - z.z);
+  let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
+  let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  const reach = z.T.reach * z.scale + 0.35;
+  if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
+  z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
+  pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
+  z.phase += dt * 5 * (spd > 0.1 ? 1 : 0.2);
+  z.screamCd -= dt;
+  if (z.state === 'walk' && z.screamCd <= 0 && GAME.state === 'playing') { z.state = 'roar'; z.roarT = 0; z.screamCd = rand(9, 13); z.screamed = false; }
+  if (z.state === 'roar') { z.roarT += dt; z.jaw = 1; if (z.roarT > 0.15 && !z.screamed) { screamPulse(z); z.screamed = true; } if (z.roarT > 1.1) z.state = 'walk'; }
+  z.atkCd -= dt;
+  if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
+  if (z.state === 'attack') {
+    z.atkT += dt / z.T.atk;
+    if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
+    if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.4, 0.8); }
+  }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 40) { z.groan = rand(5, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.15); z.jaw = Math.max(z.jaw, 0.6); }
+  z.jaw = Math.max(0, z.jaw - dt * 1.2);
+}
+function findClimbWall(z) {
+  let best = null, bestD = 2.4;
+  for (const b of WORLD.boxes) {
+    if (b.y1 < 3.2 || b.y1 > 9) continue;
+    const cx = clamp(z.x, b.x0, b.x1), cz = clamp(z.z, b.z0, b.z1), d = Math.hypot(z.x - cx, z.z - cz);
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  return best;
+}
+function updateClimber(z, dt, P) {
+  const dist = Math.hypot(P.x - z.x, P.z - z.z) || 1e-3;
+  if (z.climbState === 'ground') {
+    let tx = P.x, tz = P.z;
+    if (NAV.ready && dist > 4.5 && navTarget(z.x, z.z, _nc)) { tx = _nc[0]; tz = _nc[1]; }
+    const want = Math.atan2(tx - z.x, tz - z.z);
+    let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
+    let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    const reach = z.T.reach * z.scale + 0.35;
+    if (dist < reach * 0.8) spd = 0;
+    z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
+    pushOutCircle(z, 0.3 * z.scale); separateFrom(z, 0.5);
+    z.phase += dt * 9 * (spd > 0.1 ? 1 : 0.2);
+    z.climbCd -= dt;
+    if (z.climbCd <= 0 && dist > 7 && dist < 26) {
+      const wall = findClimbWall(z);
+      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.panOf(z.x, z.z), 0.12, 1.3); }
+      else z.climbCd = rand(2, 4);
+    }
+    if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
+    if (z.state === 'attack') {
+      z.atkT += dt / z.T.atk;
+      if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
+      if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.6); }
+    }
+    z.atkCd -= dt;
+  } else if (z.climbState === 'climb') {
+    z.climbT += dt; const k = Math.min(1, z.climbT / 1.1);
+    z.y = lerp(z.climbFrom, z.climbTo, easeOut(k)); z.state = 'walk';
+    if (k >= 1) { z.climbState = 'perch'; z.perchT = 0; }
+  } else if (z.climbState === 'perch') {
+    z.perchT += dt;
+    const want = Math.atan2(P.x - z.x, P.z - z.z); let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(dyaw, -4 * dt, 4 * dt);
+    if (z.perchT > 0.7) {
+      const dx = P.x - z.x, dz = P.z - z.z, d = Math.hypot(dx, dz) || 1;
+      z.climbState = 'pounce'; z.pounceT = 0;
+      const spd = Math.min(d / 0.9, 14);
+      z.dvx = dx / d * spd; z.dvz = dz / d * spd; z.dvy = 3.5;
+      AUD.pounce(PLAYER.panOf(z.x, z.z));
+    }
+  } else if (z.climbState === 'pounce') {
+    z.pounceT += dt; z.dvy -= 16 * dt;
+    z.x += z.dvx * dt; z.z += z.dvz * dt; z.y = Math.max(0, z.y + z.dvy * dt);
+    pushOutCircle(z, 0.3 * z.scale);
+    if (z.y <= 0.02 && z.pounceT > 0.15) {
+      z.y = 0; z.climbState = 'ground'; z.climbCd = rand(5, 9); shakeNear(z, 0.15);
+      burst(z.x, 0.2, z.z, 20, [0.35, 0.3, 0.15], 5, 0.35, 0.08, 6, 1.4);
+      const pd = Math.hypot(PLAYER.x - z.x, PLAYER.z - z.z);
+      if (pd < 2.1 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * 1.3, z.x, z.z);
+    }
+  }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 8); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.15 - dist / 300, 0.03, 0.15), 1.25); z.jaw = 1; }
+  z.jaw = Math.max(0, z.jaw - dt * 1.2);
+}
+
 /* -------- pose + draw -------- */
 const _F = {}; ['root', 'pel', 'tor', 'neck', 'jaw', 'shL', 'shR', 'elL', 'elR', 'hipL', 'hipR', 'knL', 'knR'].forEach(k => _F[k] = M4.create());
 const _tmpM = M4.create();
@@ -354,6 +534,14 @@ function zPose(z, time) {
   if (T === 'runner') { shL = -0.5 - w * 0.95; shR = -0.5 + w * 0.95; elL = elR = -1.3; headRx = 0.35; spread = 0.2; }
   if (T === 'brute') { shL = -0.35 + w * 0.35; shR = -0.35 - w * 0.35; elL = elR = -0.5; spread = 0.3; }
   if (T === 'boss') { shL = -0.6 + w * 0.3; shR = -0.6 - w * 0.3; elL = elR = -0.7; spread = 0.35; }
+  if (T === 'spitter') { lean = 0.3; headRx = 0.05; }
+  if (T === 'screamer') { lean = 0.24; }
+  if (T === 'climber') {
+    lean = 0.4; shL = -0.55 - w * 0.5; shR = -0.55 + w * 0.5; elL = elR = -1.05; headRx = 0.3; spread = 0.22;
+    if (z.climbState === 'climb') { lean = 0.7; shL = -2.4; shR = -2.2; elL = elR = -0.25; headRx = -0.35; moving = 0.6; }
+    else if (z.climbState === 'perch') { lean = 0.42; shL = -1.7 + w * 0.15; shR = -1.6 - w * 0.15; }
+    else if (z.climbState === 'pounce') { lean = -0.35; shL = shR = -2.7; elL = elR = -0.15; headRx = -0.45; }
+  }
   if (z.state === 'attack') {
     const a = z.atkT; const up = a < 0.5 ? easeOut(a / 0.5) : 1 - easeInOut((a - 0.5) / 0.5);
     shL = lerp(shL, -2.6, up); shR = lerp(shR, -2.5, up * 0.9); if (a > 0.5) { shL = lerp(-2.6, -0.6, easeOut((a - 0.5) / 0.3)); shR = lerp(-2.5, -0.7, easeOut((a - 0.5) / 0.35)); }

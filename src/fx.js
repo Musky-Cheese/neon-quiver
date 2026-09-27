@@ -65,12 +65,14 @@ function bloodBurst(x, y, z, dir, n, spread = 1, scale = 1) {
   for (let i = 0; i < Math.ceil(n / 4); i++) emit(x, y, z, rand(-0.4, 0.4), rand(-0.1, 0.4), rand(-0.4, 0.4), rand(0.3, 0.6), [0.22, 0.015, 0.015], -rand(0.12, 0.22) * scale, 0.5, 2, 0.5, 0.8); // mist
 }
 const DECALS = [];
+const DECAL_LIFE = 110;   // blood pools linger a lot longer before they fade (was 45s)
+const DECAL_CAP = 150;    // and more of them can be on the ground at once (was 90)
 function addDecal(x, z, r) {
   if (Math.abs(x) > 60 || Math.abs(z) > 60) return;
   DECALS.push({ x, z, r: clamp(r, 0.08, 1.4), rot: Math.random() * TAU, t: 0, v: Math.floor(Math.random() * 4) });
-  if (DECALS.length > 90) DECALS.shift();
+  if (DECALS.length > DECAL_CAP) DECALS.shift();
 }
-function updateDecals(dt) { for (let i = DECALS.length - 1; i >= 0; i--) { const d = DECALS[i]; d.t += dt; if (d.t > 45) DECALS.splice(i, 1); } }
+function updateDecals(dt) { for (let i = DECALS.length - 1; i >= 0; i--) { const d = DECALS[i]; d.t += dt; if (d.t > DECAL_LIFE) DECALS.splice(i, 1); } }
 const DECAL_TEX = [];
 function makeDecalTextures() {
   for (let v = 0; v < 4; v++) {

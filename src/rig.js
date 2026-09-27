@@ -120,8 +120,8 @@ function zAction(r, name) {
   if (!a) { a = r.actions[name] = r.mixer.clipAction(ZRIG.clips[name]); a.setLoop(ZRIG.clips[name].userData.loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = true; }
   return a;
 }
-const LOCO = { walker: 'walk', runner: 'run', brute: 'heavy', boss: 'boss_walk' };
-const PHASE_RATE = { walker: 5.2, runner: 11, brute: 4.2, boss: 3.2 };
+const LOCO = { walker: 'walk', runner: 'run', brute: 'heavy', boss: 'boss_walk', spitter: 'walk', screamer: 'walk', climber: 'run' };
+const PHASE_RATE = { walker: 5.2, runner: 11, brute: 4.2, boss: 3.2, spitter: 5, screamer: 5, climber: 9 };
 function zWantClip(z) {
   if (z.crawl) return z.state === 'attack' ? 'crawl_attack' : 'crawl';
   if (z.state === 'attack') return 'attack';

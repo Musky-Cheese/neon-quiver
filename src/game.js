@@ -319,7 +319,7 @@ const GAME = {
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
-    ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
+    ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
@@ -345,8 +345,16 @@ const GAME = {
     const r = Math.random();
     // the mix keeps shifting toward runners and brutes well past wave 10, and elites start showing up from wave 8
     const pRun = w >= 2 ? Math.min(0.45, 0.1 + (w - 2) * 0.045) : 0, pBrute = w >= 3 ? Math.min(0.3, 0.06 + (w - 3) * 0.022) : 0;
+    // spitters and screamers start from wave 4, climbers from wave 5 — all stay a rare mix-in
+    const pSpit = w >= 4 ? Math.min(0.14, (w - 4) * 0.012) : 0, pScream = w >= 5 ? Math.min(0.1, (w - 5) * 0.01) : 0, pClimb = w >= 5 ? Math.min(0.14, (w - 5) * 0.013) : 0;
     const pElite = w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0;
-    const type = r < pBrute ? 'brute' : r < pBrute + pRun ? 'runner' : 'walker';
+    let type;
+    if (r < pBrute) type = 'brute';
+    else if (r < pBrute + pSpit) type = 'spitter';
+    else if (r < pBrute + pSpit + pScream) type = 'screamer';
+    else if (r < pBrute + pSpit + pScream + pClimb) type = 'climber';
+    else if (r < pBrute + pSpit + pScream + pClimb + pRun) type = 'runner';
+    else type = 'walker';
     // pick a spawn not right next to the player
     const s = navSpawnPoint();
     const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
@@ -645,7 +653,7 @@ function step(dt) {
       // far bodies (45 m+) animate every other step: nobody can see the difference, and big hordes cost half the skinning
       z._pdt = (z._pdt || 0) + dt;
       if (z.rig && z.state !== 'dying' && (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 2025 && ((STEPN.n + (z.seed * 10 | 0)) & 1)) continue;
-      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
@@ -707,7 +715,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHook();
+  drawProjectiles(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -728,7 +736,7 @@ function wireUI() {
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
 function toTitle() {
-  GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true;
+  GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true;
   for (let i = 0; i < 9; i++) { const zz = spawnZombie(pick(['walker', 'walker', 'walker', 'runner', 'brute']), rand(-30, 30), rand(-30, 30), 1); zz.speed *= 0.5; }
   setScreen('title'); updateTitleStats(); drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); AUD.intensity = 0.35;
 }
@@ -748,7 +756,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX,
@@ -766,7 +774,7 @@ window.NQ = {
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  clear() { ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; },
+  clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + 1.62), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };
 boot();
