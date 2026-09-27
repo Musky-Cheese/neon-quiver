@@ -631,7 +631,11 @@ function step(dt) {
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') {
-    updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) poseZombieRig(z, dt, t); } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+    updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) {
+      // far bodies (45 m+) animate every other step: nobody can see the difference, and big hordes cost half the skinning
+      z._pdt = (z._pdt || 0) + dt;
+      if (z.rig && z.state !== 'dying' && (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 2025 && ((STEPN.n + (z.seed * 10 | 0)) & 1)) continue;
+      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
@@ -653,10 +657,12 @@ function frame(now) {
     if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
   }
   if (GAME.noLoop) return;
+  const c0 = performance.now();
   if (!GAME.frozen) step(dt);
   render(GAME.time);
   if (GAME.state !== 'title') hudFrame();
   drawHUD2D(GAME.time);
+  profFrame(performance.now() - c0);
 }
 
 /* ---------------- render ---------------- */

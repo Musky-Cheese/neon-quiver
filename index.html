@@ -5213,6 +5213,37 @@ void main(){
 }`,
 };
 let composer = null, worldPass, gtaoPass, vmPass, bloomPass, gradePass;
+/* ---- GPU profiler (?prof=1): per-pass GPU time via EXT_disjoint_timer_query_webgl2, plus draw calls / triangles ---- */
+const PROF = { on: false, ext: null, gl: null, pending: [], free: [], acc: {}, cpu: 0, n: 0, el: null, t: 0 };
+try { PROF.on = new URLSearchParams(location.search).has('prof'); } catch (e) { }
+if (PROF.on) {
+  PROF.gl = renderer.getContext(); PROF.ext = PROF.gl.getExtension('EXT_disjoint_timer_query_webgl2'); renderer.info.autoReset = false;
+  PROF.el = document.createElement('pre');
+  Object.assign(PROF.el.style, { position: 'fixed', left: '8px', bottom: '8px', zIndex: 99, margin: 0, padding: '6px 9px', font: '11px/1.35 monospace', color: '#bff6ff', background: 'rgba(0,0,0,0.72)', pointerEvents: 'none', whiteSpace: 'pre' });
+  document.body.appendChild(PROF.el);
+}
+function profBegin(name) { if (!PROF.ext) return; const gl = PROF.gl, q = PROF.free.pop() || gl.createQuery(); gl.beginQuery(PROF.ext.TIME_ELAPSED_EXT, q); PROF.pending.push({ name, q }); }
+function profEnd() { if (PROF.ext) PROF.gl.endQuery(PROF.ext.TIME_ELAPSED_EXT); }
+function profPoll() {
+  if (!PROF.ext) return; const gl = PROF.gl, dis = gl.getParameter(PROF.ext.GPU_DISJOINT_EXT);
+  while (PROF.pending.length) { const p = PROF.pending[0]; if (!gl.getQueryParameter(p.q, gl.QUERY_RESULT_AVAILABLE)) break; PROF.pending.shift();
+    const ms = gl.getQueryParameter(p.q, gl.QUERY_RESULT) / 1e6; PROF.free.push(p.q); if (dis) continue; const a = PROF.acc[p.name] || (PROF.acc[p.name] = { s: 0, n: 0 }); a.s += ms; a.n++; }
+}
+function profInstrument() {
+  if (!PROF.on) return;
+  const names = new Map([[worldPass, 'world+shadows'], [vmPass, 'bow'], [bloomPass, 'bloom'], [gradePass, 'grade']]);
+  for (const p of composer.passes) { if (p._prof) continue; const orig = p.render.bind(p), nm = names.get(p) || p.constructor.name; p.render = (...a) => { profBegin(nm); orig(...a); profEnd(); }; p._prof = true; }
+}
+function profFrame(cpuMs) {
+  if (!PROF.on) return; profPoll(); PROF.cpu += cpuMs; PROF.n++;
+  const inf = renderer.info.render; PROF.calls = inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
+  if (performance.now() - PROF.t < 500) return; PROF.t = performance.now();
+  let gpu = 0, lines = [];
+  for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
+  const alive = ZOMBIES.filter(z => !z.dead).length;
+  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High'][SETTINGS.quality]}`;
+  PROF.cpu = 0; PROF.n = 0;
+}
 function buildComposer(W, H, q) {
   if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); if (gtaoPass) gtaoPass.dispose(); bloomPass.dispose(); }
   if (msRT) { msRT.dispose(); msRT = null; }
@@ -5225,7 +5256,7 @@ function buildComposer(W, H, q) {
   vmPass = new ScenePass(vmCamera, false); composer.addPass(vmPass);
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);
-  composer.setSize(W, H);
+  composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.W = W; R3.H = H;
 }
 function applyQuality3(q) {
@@ -5910,7 +5941,11 @@ function step(dt) {
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') {
-    updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) poseZombieRig(z, dt, t); } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+    updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) {
+      // far bodies (45 m+) animate every other step: nobody can see the difference, and big hordes cost half the skinning
+      z._pdt = (z._pdt || 0) + dt;
+      if (z.rig && z.state !== 'dying' && (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 2025 && ((STEPN.n + (z.seed * 10 | 0)) & 1)) continue;
+      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
@@ -5932,10 +5967,12 @@ function frame(now) {
     if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
   }
   if (GAME.noLoop) return;
+  const c0 = performance.now();
   if (!GAME.frozen) step(dt);
   render(GAME.time);
   if (GAME.state !== 'title') hudFrame();
   drawHUD2D(GAME.time);
+  profFrame(performance.now() - c0);
 }
 
 /* ---------------- render ---------------- */
