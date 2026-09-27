@@ -224,6 +224,9 @@ function zLife(z, r, dt, time) {
   // breathing: ragged chest heave, jaw working
   const br = Math.sin(time * 1.9 * z.breath + z.seed), br2 = Math.max(0, Math.sin(time * 3.8 * z.breath + z.seed * 2));
   addRot(B.spine, 0.025 * br, 0, 0); addRot(B.shoulderL, 0, 0, -0.02 * br); addRot(B.shoulderR, 0, 0, 0.02 * br); addRot(B.jaw, 0.12 * br2, 0, 0);
+  // a slack, hanging jaw that opens into a snarl as the player closes in
+  if (z.gape === undefined) z.gape = rand(0.14, 0.32);
+  addRot(B.jaw, z.gape + clamp((8 - dist) / 6, 0, 1) * 0.28 + (z.state === 'attack' ? 0.2 : 0), 0, 0);
   // twitches: short spasms through the hit-reaction springs
   z.twT -= dt;
   if (z.twT <= 0) { z.twT = rand(1.5, 7); const R = z.R, s = z.type === 'brute' ? 0.4 : 1; R.hv += rand(-5, 5) * s; R.yv += rand(-3, 3) * s; if (Math.random() < 0.4) R.tv += rand(-2, 2) * s; }
@@ -245,7 +248,7 @@ function drawZombieRig(z, time) {
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
-  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : 0.22, pul = 0.6 + 0.4 * Math.sin(time * 6);
+  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const skin = P.skin, cloth = P.cloth, pants = P.pants;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);

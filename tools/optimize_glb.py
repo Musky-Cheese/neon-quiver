@@ -133,6 +133,7 @@ def main(src, dst, keep=0.5):
             F = get(J, B, pr['indices']).reshape(-1, 3).astype(np.int64)
             tris0 += len(F)
             k = keep if len(F) > 900 else min(1.0, keep + 0.25)
+            if m.get('name', '').startswith(('head_', 'jaw')): k = max(k, 0.85)   # faces carry the fine sculpt: barely decimate them
             F2, alive = decimate(P, F, k) if k < 1 else (F, np.ones(len(P), bool))
             used = np.zeros(len(P), bool); used[F2.ravel()] = True
             remap = -np.ones(len(P), np.int64); remap[used] = np.arange(used.sum())
