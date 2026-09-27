@@ -142,17 +142,17 @@ const rainGeo = (function () {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
 const rainMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB }, transparent: true, depthWrite: false,
+  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0.7 }, uWind: { value: 0.4 } }, transparent: true, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vA, vK;
+  vertexShader: `attribute vec2 aP2; uniform float uTime, uDens, uWind; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vA, vK;
 void main(){ float S = 50.;
   float x = mod(position.x - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
   float z = mod(position.y - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
-  float y = mod(position.z - uTime*(24.+aP2.x*8.), 36.) - 6. + cameraPosition.y;
-  // the downpour comes and goes: slow heavy/light spells, drifting patches, gusts that swing the slant
-  float spell = 0.5 + 0.5 * sin(uTime * 0.21) * sin(uTime * 0.067 + 1.3);
+  float y = mod(position.z - uTime*(24.+aP2.x*8.)*(0.85 + 0.3*uDens), 36.) - 6. + cameraPosition.y;
+  // how much falls is the weather's call (weather.js); drifting patches keep it uneven, gusts swing the slant
+  float spell = uWind;
   float patchD = 0.5 + 0.5 * sin(x * 0.09 + uTime * 0.35) * sin(z * 0.075 - uTime * 0.27);
-  float dens = clamp(0.2 + 0.7 * spell + 0.45 * (patchD - 0.5), 0.12, 1.);
+  float dens = clamp(uDens * (0.7 + 0.6 * patchD), 0., 1.);
   float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
   vK = step(rnd, dens) * (0.45 + 0.8 * fract(rnd * 13.7));
   if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);   // dry under a ceiling
@@ -162,6 +162,23 @@ void main(){ float S = 50.;
   fragmentShader: `precision mediump float; varying float vA, vK; uniform float uAlpha; uniform vec3 uRainCol; void main(){ gl_FragColor = vec4(uRainCol*uAlpha*(0.3+vA*0.7)*vK, 0.); }`,
 });
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
+// snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
+const snowMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.9 }, uCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0 }, uWind: { value: 0.3 }, uPx: { value: 1 } },
+  transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
+  vertexShader: `attribute vec2 aP2; uniform float uTime, uDens, uWind, uPx; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vK;
+void main(){ float S = 24.; float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
+  float sw = sin(uTime * (0.7 + rnd) + position.x * 3.1) * 0.7, sw2 = cos(uTime * (0.5 + rnd * 0.8) + position.y * 2.3) * 0.5;
+  float x = mod(position.x * 0.48 + uWind * uTime * 3. + sw - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
+  float z = mod(position.y * 0.48 + sw2 - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
+  float y = mod(position.z * 0.55 - uTime*(1.3 + rnd * 1.1), 20.) - 4. + cameraPosition.y;
+  vK = step(rnd, uDens) * step(aP2.y, 0.5) * (0.5 + 0.5 * fract(rnd * 13.7));
+  if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);
+  vec4 mv = viewMatrix * vec4(x, y, z, 1.); gl_Position = projectionMatrix * mv;
+  gl_PointSize = vK > 0. ? clamp(uPx * (0.07 + 0.07 * fract(rnd * 5.3)) / max(-mv.z, 0.1) * 1000., 1.5, 16. * uPx) : 0.; }`,
+  fragmentShader: `precision mediump float; varying float vK; uniform float uAlpha; uniform vec3 uCol; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.12, d) * vK * uAlpha; gl_FragColor = vec4(uCol * a, 0.); }`,
+});
+const snowPts = new THREE.Points(rainGeo, snowMat); snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -185,7 +202,7 @@ const _dyn = [], _stat = [], _lampsNear = [];
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
 function updateLights3(cam) {
   const T = THEME;
-  hemi.color.setRGB(T.ambHi[0], T.ambHi[1], T.ambHi[2]); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
+  const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
   // the sun's shadow box follows the player (snapped so the shadow texels don't swim)
   const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
   sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
@@ -329,7 +346,7 @@ const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
 function captureEnv(d) {
   if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = null;
-  const vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false;
+  const vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = false;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = false;
   const saveOn = NQU.uReflOn.value; NQU.uReflOn.value = 0;
@@ -337,7 +354,7 @@ function captureEnv(d) {
   renderer.shadowMap.needsUpdate = true;
   cubeCam.update(renderer, scene);
   NQU.uReflOn.value = saveOn;
-  partPoints.visible = vis; rainLines.visible = true;
+  partPoints.visible = vis; rainLines.visible = true; snowPts.visible = true;
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = true;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = m.n > 0;
   if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
@@ -410,9 +427,9 @@ function renderReflection(r) {
   NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
   const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
-  partPoints.visible = false; rainLines.visible = false;
+  partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
   r.render(scene, reflCam);
-  partPoints.visible = true; rainLines.visible = true;
+  partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
 }
 
@@ -606,10 +623,16 @@ function render3(time, W, H, fov, cam) {
     else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
     m.material.uniforms.uCol.value.setRGB(s.col[0] * T.sign * k, s.col[1] * T.sign * k, s.col[2] * T.sign * k);
   }
-  rainMat.uniforms.uAlpha.value = T.rain; rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol);
-  NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain;
-  NQU.uAirK.value = SETTINGS.quality === 0 ? 0 : 0.0078 * (0.6 + T.rain) * (T.airK !== undefined ? T.airK : 1);
-  VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain) * (SETTINGS.quality === 0 ? 0.6 : 1);
+  // weather (weather.js) on top of the Look: how much falls, rain or snow, wind, how wet or white the streets are, lightning
+  const rk = wxRainK(), sk = wxSnowK(), wetK = T.rain > 0.2 ? 1 : 0.5;
+  rainMat.uniforms.uAlpha.value = Math.max(0.35, T.rain) * (0.75 + 0.45 * rk); rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol); rainMat.uniforms.uDens.value = rk * wetK; rainMat.uniforms.uWind.value = WX.wind + WX.gust;
+  snowMat.uniforms.uDens.value = sk; snowMat.uniforms.uWind.value = WX.wind + WX.gust * 0.6; snowMat.uniforms.uPx.value = H / 1000;
+  snowMat.uniforms.uCol.value.setRGB(T.rainCol[0] * 0.8 + 0.25, T.rainCol[1] * 0.8 + 0.25, T.rainCol[2] * 0.8 + 0.27);
+  NQU.uWet.value = T.wet * WX.wet * (1 - WX.cover * 0.85); NQU.uSnowCov.value = WX.cover;
+  NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain * rk * 1.4;
+  NQU.uAirK.value = SETTINGS.quality === 0 ? 0 : 0.0078 * (0.6 + T.rain * (0.3 + rk + sk * 1.2)) * (T.airK !== undefined ? T.airK : 1);
+  VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain * (0.3 + rk + sk * 0.8)) * (SETTINGS.quality === 0 ? 0.6 : 1);
+  if (WX.flash > 0) { const f = WX.flash * (0.6 + 0.4 * Math.random()); SKY_U.uCloud.value.setRGB(T.cloud[0] + f * 0.6, T.cloud[1] + f * 0.62, T.cloud[2] + f * 0.75); SKY_U.uMid.value.setRGB(T.mid[0] + f * 0.25, T.mid[1] + f * 0.26, T.mid[2] + f * 0.32); }
   updateLights3(cam);
   // dynamic geometry
   flushList(WORLD_ITEMS, false); flushList(VM_ITEMS, true);
@@ -620,7 +643,7 @@ function render3(time, W, H, fov, cam) {
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo; U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too

@@ -323,7 +323,7 @@ const GAME = {
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
-    objReset();
+    objReset(); wxReset();
     this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
   },
   startWave() {
@@ -648,7 +648,7 @@ function step(dt) {
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
-  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); }
+  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); updateWeather(dt); }
   const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
@@ -750,7 +750,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU,
+  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

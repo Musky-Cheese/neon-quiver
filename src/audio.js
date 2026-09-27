@@ -130,6 +130,18 @@ const AUD = {
   hookRelease() { if (!this.ctx) return; this.tone('triangle', 700, 300, 0.12, 0.05); },
   _reelT: 0,
   hookReel(dt, k) { if (!this.ctx) return; this._reelT -= dt; if (this._reelT > 0) return; this._reelT = 0.05; this.burst('bandpass', 700 + 1400 * k, 900 + 1600 * k, 6, 0.06, 0.05); },
+  weather(rain, snow, wind) {
+    if (!this.ctx || !this.rainG) return; const t = this.now();
+    this.rainG.gain.setTargetAtTime(0.02 + 0.24 * rain, t, 0.8);
+    this.windG.gain.setTargetAtTime(0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
+    this.windF.frequency.setTargetAtTime(320 + 260 * wind + 120 * Math.sin(t * 0.4), t, 0.6);
+  },
+  thunder(k) {
+    if (!this.ctx) return; const t = this.now(), v = clamp(k, 0.25, 1.2);
+    this.burst('lowpass', 900, 60, 0.7, 3.6, 0.5 * v, this.amb, t, 0.02);
+    this.burst('lowpass', 240, 40, 0.5, 5, 0.45 * v, this.amb, t + 0.15, 0.3);
+    if (k > 0.9) this.burst('highpass', 2500, 700, 0.6, 0.35, 0.28 * v, this.amb, t, 0.002);   // close strike: the crack
+  },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
   tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
@@ -140,7 +152,9 @@ const AUD = {
   startAmbient() {
     const c = this.ctx;
     const r = this.noiseSrc(); const rf = c.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 2600; rf.Q.value = 0.4;
-    const rg = c.createGain(); rg.gain.value = 0.16; r.connect(rf); rf.connect(rg); rg.connect(this.amb); r.start();
+    const rg = c.createGain(); rg.gain.value = 0.16; r.connect(rf); rf.connect(rg); rg.connect(this.amb); r.start(); this.rainG = rg;
+    // wind: a low hollow howl that rises in gusts, storms and snow
+    const wn = this.noiseSrc(), wf = c.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 420; wf.Q.value = 1.4; const wg = c.createGain(); wg.gain.value = 0; wn.connect(wf); wf.connect(wg); wg.connect(this.amb); wn.start(); this.windG = wg; this.windF = wf;
     const r2 = this.noiseSrc(); const rf2 = c.createBiquadFilter(); rf2.type = 'lowpass'; rf2.frequency.value = 260; const rg2 = c.createGain(); rg2.gain.value = 0.25; r2.connect(rf2); rf2.connect(rg2); rg2.connect(this.amb); r2.start();
     [41.2, 41.7, 61.8].forEach(f => { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; const g = c.createGain(); g.gain.value = 0.05; o.connect(lp); lp.connect(g); g.connect(this.amb); o.start(); });
     // occasional distant siren

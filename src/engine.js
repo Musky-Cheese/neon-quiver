@@ -126,6 +126,7 @@ const NQU = {
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
   uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
+  uSnowCov: { value: 0 },   // weather.js: how snowed-over the city is
   uTexM: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0.5, 0.5, 0.5, 0.5)) },   // per layer: mean linear albedo (rgb), mean roughness (a)
   // per layer: x = 1 / tile size in metres, y = normal strength   [asphalt, concrete, brick, rust, corrugated, pavers, plaster, cast concrete]
   uTexS: { value: [[1 / 3.5, 1.0], [1 / 3, 0.8], [1 / 2.4, 1.1], [1 / 2, 0.9], [1 / 2, 1.0], [1 / 2.6, 1.0], [1 / 3, 0.7], [1 / 3, 0.9]].map(([a, b]) => new THREE.Vector2(a, b)) },
@@ -183,7 +184,7 @@ attribute vec2 nqm;
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
-uniform float uTexOn;
+uniform float uTexOn, uSnowCov;
 ${NOISE_GLSL}
 #if !defined(NQ_Z) && !defined(NQ_VM)
 uniform sampler2DArray uTexA, uTexN, uTexR; uniform vec4 uTexM[8]; uniform vec2 uTexS[8];
@@ -514,6 +515,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base *= mix(1., tro.x, nqTS * 0.8);                                           // baked cavity occlusion
     rough = clamp(mix(rough, rough * tro.y / max(uTexM[li].a, 0.05), nqTS * 0.7), 0.03, 1.);
     nqTexN = tn; nqTexK = nqTS * uTexS[li].y;
+  }
+  // snow settles on anything facing the sky (not water, glass, holograms, or indoors), in drifts, thinner under cover
+  if (uSnowCov > 0.01 && !(mat > 17.5 && mat < 18.5) && !(mat > 22.5 && mat < 23.5) && !(mat > 9.5 && mat < 10.5) && !(mat > 4.5 && mat < 5.5)) {
+    float up = smoothstep(0.55, 0.9, N0.y);
+    float drift = smoothstep(0.25, 0.6, vn(vNqW.xz * 0.7) * 0.55 + vn(vNqW.xz * 3.1) * 0.2 + uSnowCov * 0.65);
+    float snowM = uSnowCov * up * clamp(nqOcc * 1.4 - 0.2, 0., 1.) * (1. - nqIn) * drift;
+    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vn(vNqW.xz * 9.)), snowM);
+    rough = mix(rough, 0.72, snowM); wetRefl *= 1. - snowM; emis *= 1. - snowM * 0.85; nqTexK *= 1. - snowM; bumpH *= 1. - snowM;
   }
 #endif
   diffuseColor.rgb = base * mix(1.0, nqOcc, 0.55);`)

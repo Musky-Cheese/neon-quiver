@@ -145,7 +145,7 @@ function updateAmbient(dt) {
   if (PLAYER.y < 0.05 && inPond(px, pz) && Math.hypot(PLAYER.vx, PLAYER.vz) > 1 && Math.random() < dt * 24)
     emit(px + rand(-0.3, 0.3), 0.05, pz + rand(-0.3, 0.3), rand(-0.8, 0.8), rand(1, 2), rand(-0.8, 0.8), 0.35, [0.45, 0.55, 0.62], 0.04, 9, 0, 0, 0.7);
   // rain splashes on the ground around the camera
-  const n = THEME.rain * dt * 90;
+  const n = THEME.rain * wxRainK() * 1.4 * dt * 90;   // splashes follow the weather
   for (let i = 0; i < n; i++) {
     if (Math.random() > n - i) break;
     const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * 14, x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;

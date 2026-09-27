@@ -46,6 +46,7 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **Difficulty keeps climbing:** zombies hit harder and move faster every wave, the mix shifts toward runners and brutes, runners come in packs from wave 6, and white-eyed **elites** (tougher, faster, double rewards) appear from wave 8.
 - **Grappling hook (Q):** fire at any wall, pole, crane or container within 36 m and get reeled toward it, keeping your momentum when it lets go (Q again cuts the rope; 8 s cooldown). You always come back down to the street, and falls over 5 m hurt, so the reticle turns green / amber / red to show what the landing will cost. X switches back to your last arrow.
 - **Field objectives:** from wave 3, most waves throw up an optional goal mid-fight: hold a **Data Uplink** ring for 20 seconds while runners converge, or destroy a **Hive Nest** that keeps birthing the infected (the wave can't end while it lives). Both pay credits and drop supplies.
+- **Weather that changes:** every minute or two the sky shifts between dry spells, drizzle, steady rain, wind-driven downpours with lightning and thunder, and snow that settles white on the streets and melts when the rain returns. Streets soak and dry gradually.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
