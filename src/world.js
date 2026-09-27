@@ -125,6 +125,7 @@ function drawSupplies(time) {
 /* ---------------- ambient emitters: steam vents, burn barrels, rain splashes ---------------- */
 function updateAmbient(dt) {
   const px = PLAYER.x, pz = PLAYER.z;
+  AUD.harbour(GAME.state === 'title' ? 0 : clamp((px - 150) / 30, 0, 1) * clamp((60 - Math.abs(pz + 4)) / 20, 0, 1), dt);   // water, horns, cranes near the Docks
   for (const s of WORLD.steam) {
     if (Math.abs(s[0] - px) > 45 || Math.abs(s[2] - pz) > 45) continue;
     if (Math.random() < dt * 14) emit(s[0] + rand(-0.2, 0.2), s[1], s[2] + rand(-0.2, 0.2), rand(-0.2, 0.2), rand(0.8, 1.6), rand(-0.2, 0.2), rand(1.4, 2.4), [0.1, 0.1, 0.11], -rand(0.4, 0.8), -0.3, 0.6, 0.9, 0.5);

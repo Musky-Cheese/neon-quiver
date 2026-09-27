@@ -107,6 +107,24 @@ const AUD = {
       o.connect(lp); lp.connect(g); g.connect(this.sfx); o.start(t); o.stop(t + d + 0.1);
     });
   },
+  // ---------------- harbour ambience: lapping water (faded in near the Docks), a far-off horn, crane steel creaking ----------------
+  harb: null,
+  harbour(k, dt) {
+    if (!this.ctx) return; const c = this.ctx;
+    if (!this.harb) {
+      const s = this.noiseSrc(), f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 380; f.Q.value = 0.7;
+      const sw = c.createGain(); sw.gain.value = 0.5; const lfo = c.createOscillator(); lfo.frequency.value = 0.17; const lg = c.createGain(); lg.gain.value = 0.45; lfo.connect(lg); lg.connect(sw.gain);
+      const g = c.createGain(); g.gain.value = 0; s.connect(f); f.connect(sw); sw.connect(g); g.connect(this.amb); s.start(); lfo.start();
+      const hl = c.createBiquadFilter(); hl.type = 'lowpass'; hl.frequency.value = 420; hl.connect(this.amb);
+      this.harb = { g, hl, horn: rand(6, 20), creak: rand(3, 9) };
+    }
+    const H = this.harb, t = this.now();
+    H.g.gain.setTargetAtTime(0.55 * k, t, 0.6);
+    if (k < 0.05) return;
+    H.horn -= dt; H.creak -= dt;
+    if (H.horn <= 0) { H.horn = rand(28, 55); for (const f of [82, 87.5, 164]) this.tone('sawtooth', f, f * 0.985, 2.6, 0.07 * k * (f > 100 ? 0.4 : 1), H.hl, t, 0.35); }
+    if (H.creak <= 0) { H.creak = rand(7, 16); this.burst('bandpass', rand(300, 500), rand(700, 1100), 18, 1.2, 0.05 * k, this.amb, t, 0.2); this.tone('triangle', rand(90, 130), rand(70, 90), 0.9, 0.025 * k, this.amb, t + 0.2, 0.15); }
+  },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
   tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
