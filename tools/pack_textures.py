@@ -3,6 +3,7 @@ that the Ultra quality level loads as texture arrays:
   textures/albedo.jpg  1024 x 8192  (8 layers, sRGB colour)
   textures/normal.jpg  1024 x 8192  (8 layers, OpenGL normal maps)
   textures/orm.jpg      512 x 4096  (8 layers: R = ambient occlusion, G = roughness)
+plus *_half.jpg at half resolution for Balanced.
 Layer order must match TEX_LAYERS in src/engine.js."""
 import os, sys
 from PIL import Image
@@ -21,4 +22,8 @@ for i, L in enumerate(LAYERS):
 alb.save(os.path.join(out, 'albedo.jpg'), quality=84, optimize=True, progressive=True)
 nor.save(os.path.join(out, 'normal.jpg'), quality=90, optimize=True, progressive=True)
 orm.save(os.path.join(out, 'orm.jpg'), quality=86, optimize=True, progressive=True)
-for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg'): print(f, os.path.getsize(os.path.join(out, f)) // 1024, 'KB')
+# half-resolution set for Balanced
+alb.resize((S // 2, S // 2 * len(LAYERS)), Image.LANCZOS).save(os.path.join(out, 'albedo_half.jpg'), quality=84, optimize=True, progressive=True)
+nor.resize((S // 2, S // 2 * len(LAYERS)), Image.LANCZOS).save(os.path.join(out, 'normal_half.jpg'), quality=90, optimize=True, progressive=True)
+orm.resize((s // 2, s // 2 * len(LAYERS)), Image.LANCZOS).save(os.path.join(out, 'orm_half.jpg'), quality=86, optimize=True, progressive=True)
+for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg', 'albedo_half.jpg', 'normal_half.jpg', 'orm_half.jpg'): print(f, os.path.getsize(os.path.join(out, f)) // 1024, 'KB')

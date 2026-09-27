@@ -512,7 +512,7 @@ function profFrame(cpuMs) {
   let gpu = 0, lines = [];
   for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
-  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 3 ? '  textures ' + ULTRA.state : ''}`;
+  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 function buildComposer(W, H, q) {
@@ -540,11 +540,13 @@ function buildComposer(W, H, q) {
   composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.W = W; R3.H = H;
 }
-/* ---- Ultra: load the CC0 texture arrays on demand (only when Ultra is picked) ---- */
-const ULTRA = { state: 'none' };
-function loadUltraTextures() {
-  if (ULTRA.state !== 'none') return; ULTRA.state = 'loading';
-  const load = (n) => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = 'textures/' + n + '.jpg?v=' + TEX_VER; });
+/* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
+const ULTRA = { state: 'none', res: null };
+const wantTexRes = (q) => q >= 2 ? 'full' : q >= 1 ? 'half' : null;
+function loadUltraTextures(res) {
+  if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
+  const sfx = res === 'half' ? '_half' : '';
+  const load = (n) => new Promise((ok, rej) => { const im = new Image(); im.onload = () => ok(im); im.onerror = rej; im.src = 'textures/' + n + sfx + '.jpg?v=' + TEX_VER; });
   Promise.all(['albedo', 'normal', 'orm'].map(load)).then((ims) => {
     const arr = ims.map((im) => {
       const w = im.width, H = im.height, h = H / TEX_LAYERS.length;
@@ -564,13 +566,15 @@ function loadUltraTextures() {
       NQU.uTexM.value[L].set(r / c, g / c, b / c, ro / co);
     }
     for (const t of [A.t, N.t, O.t]) renderer.initTexture(t);   // upload + mipmaps now, outside any frame (no mid-frame stall or half-bound state)
+    for (const u of [NQU.uTexA, NQU.uTexN, NQU.uTexR]) if (u.value) u.value.dispose();   // swapping half <-> full
     NQU.uTexA.value = A.t; NQU.uTexN.value = N.t; NQU.uTexR.value = O.t;
-    ULTRA.state = 'ready'; NQU.uTexOn.value = SETTINGS.quality >= 3 ? 1 : 0;
-  }).catch((e) => { ULTRA.state = 'failed'; console.warn('Ultra textures failed to load', e); });
+    ULTRA.state = 'ready'; ULTRA.res = res; NQU.uTexOn.value = wantTexRes(SETTINGS.quality) ? 1 : 0;
+    const w = wantTexRes(SETTINGS.quality); if (w && w !== res) loadUltraTextures(w);   // quality changed while loading
+  }).catch((e) => { ULTRA.state = NQU.uTexA.value ? 'ready' : 'failed'; console.warn('surface textures failed to load', e); });
 }
 function applyQuality3(q) {
-  if (q >= 3) loadUltraTextures();
-  NQU.uTexOn.value = q >= 3 && ULTRA.state === 'ready' ? 1 : 0;
+  const tr = wantTexRes(q); if (tr) loadUltraTextures(tr);
+  NQU.uTexOn.value = tr && NQU.uTexA.value ? 1 : 0;
   // Ultra shadows: the moon/sun map at 4x the texels over a wider box; lamp shadows at 2x, all six lamps casting
   const U = q >= 3, sm = U ? 4096 : 2048, box = U ? 80 : 52;
   if (sun.shadow.mapSize.x !== sm) { sun.shadow.mapSize.set(sm, sm); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }

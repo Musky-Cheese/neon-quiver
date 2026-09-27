@@ -126,8 +126,27 @@ function buildCity() {
     propShopInterior({ g, Bl, BlP, Sl, W, D, RH, R: mulberry(1000 + shopN++ * 97), M: Mr, MS, wp, glass, halo,
       light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
   }
+  // real depth on the street face: stone sills and lintels on the painted window grid (2.4 m bays, 3.3 m floors, world-aligned
+  // exactly like the facade shader), a ledge every other floor and a cornice at the roofline. Lower floors only: that's what you see.
+  function facadeDetail(x0, x1, z0, z1, h, face, col, groundTop, sills) {
+    const alongX = face === '-z' || face === '+z', a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
+    const plane = face === '-z' ? z0 : face === '+z' ? z1 : face === '-x' ? x0 : x1, out = face[0] === '-' ? -1 : 1;
+    const stone = [col[0] * 1.25 + 0.035, col[1] * 1.25 + 0.035, col[2] * 1.25 + 0.035];
+    const bx = (along, y, oOut, sA, sy, sO, c = stone) => { const cc = plane + out * oOut; if (alongX) B(along, y, cc, sA, sy, sO, c, 0, 16); else B(cc, y, along, sO, sy, sA, c, 0, 16); };
+    const floors = Math.floor(h / 3.3), kMin = Math.max(0, Math.ceil((groundTop + 0.4) / 3.3 - 0.22)), kMax = Math.min(floors - 1, kMin + 4);
+    for (let k = kMin; k <= kMax; k++) {
+      const ys = (k + 0.22) * 3.3, yl = (k + 0.78) * 3.3; if (yl + 0.3 > h - 1.2) break;
+      for (let id = Math.ceil(a0 / 2.4 + 0.02); (id + 1) * 2.4 <= a1 - 0.05; id++) {
+        const c = (id + 0.5) * 2.4;
+        if (sills) bx(c, ys - 0.06, 0.1, 1.86, 0.12, 0.2);
+        bx(c, yl + 0.08, 0.06, 1.78, 0.16, 0.12);
+      }
+      if ((k - kMin) % 2 === 1) bx((a0 + a1) / 2, (k + 1) * 3.3 + 0.02, 0.08, a1 - a0, 0.14, 0.16);
+    }
+    if (h > 8) bx((a0 + a1) / 2, h - 0.3, 0.2, a1 - a0 + 0.3, 0.45, 0.4);
+  }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
-    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0, h0 = h;
     const col = opt.col || facadeCols[Math.floor(R() * facadeCols.length)];
     if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop);
     else { B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1); solid(x0, x1, 0, h, z0, z1); }
@@ -145,6 +164,7 @@ function buildCity() {
     else { fx = x1 + 0.02; fz = cz; ry = Math.PI / 2; tx = 0; tz = 1; span = d; }
     const nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const P = (along, y, out) => [fx + tx * along + nx * out, y, fz + tz * along + nz * out];
+    if (!opt.industrial) facadeDetail(x0, x1, z0, z1, h0, face, col, opt.tenement ? 3 : 6.7, !opt.tenement);
     if (opt.industrial) {   // warehouse: roll-up shutters, a hazard strip and a caged work light, no shop signs
       const n = Math.max(1, Math.floor(span / 9));
       for (let i = 0; i < n; i++) { const a = (i - (n - 1) / 2) * (span / n); const p = P(a, 2.6, 0.06); B(p[0], 2.6, p[2], tx ? 4.2 : 0.12, 5.2, tz ? 4.2 : 0.12, [0.2, 0.19, 0.17], 0, 8);
