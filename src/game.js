@@ -106,7 +106,7 @@ function fireArrow(power) {
   // tiny spread when not fully drawn
   const spr = (1 - power) * 0.012 + (BOW.hold > 2.2 ? 0.004 : 0);
   const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr;
-  const n = type === AT.SCATTER ? 6 : 1, cone = type === AT.SCATTER ? 0.1 : 0;
+  const n = type === AT.SCATTER ? 6 : 1, cone = type === AT.SCATTER ? 0.08 : 0;
   for (let s = 0; s < n; s++) {
     const jx = dx + (Math.random() - 0.5) * cone * 2, jy = dy + (Math.random() - 0.5) * cone * 1.4, jz = dz + (Math.random() - 0.5) * cone * 2, jl = Math.hypot(jx, jy, jz);
     PROJ.push({
