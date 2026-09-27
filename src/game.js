@@ -680,7 +680,7 @@ async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
   buildCity(); buildNav(); buildWorld3();
-  await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb');
+  await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
   wireUI();
   toTitle();
   $('loading').hidden = true;

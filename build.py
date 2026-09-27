@@ -1,4 +1,4 @@
-import base64, os, shutil
+import base64, os, shutil, hashlib
 root = os.path.dirname(os.path.abspath(__file__))
 S = lambda f: open(os.path.join(root, 'src', f)).read()
 fonts = ''
@@ -13,7 +13,8 @@ import { Pass } from 'three/addons/postprocessing/Pass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 '''
-js = IMPORTS + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
+RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
+js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'zombies.js', 'rig.js', 'r3.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'
