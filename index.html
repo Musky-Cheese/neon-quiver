@@ -189,7 +189,7 @@ button, select, input { font-family: var(--f); }
     </div>
     <div class="hud-tr"><div class="lbl">Credits</div><div id="cash" class="num">¢0</div></div>
     <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div><i class="hpcap"></i></div></div></div>
-    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel · X last arrow · Q grapple</div></div>
+    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel · X last arrow · hold Q to aim the grapple</div></div>
   </div>
 
   <section id="scr-title" class="screen">
@@ -222,7 +222,7 @@ button, select, input { font-family: var(--f); }
           <kbd>Right click</kbd><span>Let the string down</span>
           <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
           <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
-          <kbd>Q</kbd><span>Grappling hook: pulls you toward walls, poles and cranes. High anchors mean long falls, and falls hurt</span>
+          <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
           <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
           <kbd>P / Esc</kbd><span>Pause · <kbd>M</kbd> music</span>
         </div>
@@ -4041,7 +4041,7 @@ const _hh = [0, 0, 0];
 function updateHook(dt) {
   const P = PLAYER;
   HOOK.cd = Math.max(0, HOOK.cd - dt);
-  HOOK.aimT -= dt; if (HOOK.aimT <= 0) { HOOK.aimT = 0.05; HOOK.aim = HOOK.state === 'idle' ? hookAim() : null; }
+  HOOK.aimT -= dt; if (HOOK.aimT <= 0) { HOOK.aimT = 0.05; HOOK.aim = HOOK.state === 'idle' && HOOK.aiming ? hookAim() : null; }   // only while Q is held
   if (HOOK.state === 'whiff') { HOOK.t += dt; if (HOOK.t > 0.35) HOOK.state = 'idle'; return false; }
   if (HOOK.state === 'fly') {
     HOOK.t += dt; const k = Math.min(1, HOOK.t / HOOK.flyT);
@@ -4082,7 +4082,7 @@ function drawHook() {
 // reticle: a ring round the crosshair when a hook point is in range, coloured by how far you'd fall
 function drawHookHUD(hx, cx, cy, W, H) {
   const h = HOOK.aim, cdK = HOOK.cd / HOOK_CFG.cooldown;
-  if (HOOK.state === 'idle' && h && cdK <= 0) {
+  if (HOOK.state === 'idle' && HOOK.aiming && h && cdK <= 0) {   // preview only while Q is held
     const risk = hookRisk(h.drop), col = risk <= 0 ? '#a6ff3a' : risk < 40 ? '#ffb52e' : '#ff3040';
     const p = toScreen(h.x, h.y, h.z, W, H);
     if (p) { hx.strokeStyle = col; hx.lineWidth = 2; hx.globalAlpha = 0.9; hx.beginPath(); hx.arc(p[0], p[1], 7, 0, TAU); hx.stroke();
@@ -5736,7 +5736,8 @@ addEventListener('keydown', (e) => {
   if (GAME.state === 'playing') {
     const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
     if (k === 'KeyX') selectArrow(GAME.lastType);
-    if (k === 'KeyQ' && !e.repeat) hookFire();
+    // grapple: hold Q to preview the anchor and fall risk, release to fire; Q while reeling cuts the rope
+    if (k === 'KeyQ' && !e.repeat) { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
@@ -5744,8 +5745,8 @@ addEventListener('keydown', (e) => {
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
   if (k === 'KeyM') { SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); }
 });
-addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; });
-addEventListener('blur', () => { INPUT.keys = {}; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
+addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
+addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
 addEventListener('mousemove', (e) => { if (GAME.state !== 'playing') return; if (INPUT.locked || INPUT.freeLook) { INPUT.dx += e.movementX || 0; INPUT.dy += e.movementY || 0; } });
 gameEl.addEventListener('mousedown', (e) => {
   if (GAME.state !== 'playing') return;

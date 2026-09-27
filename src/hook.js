@@ -72,7 +72,7 @@ const _hh = [0, 0, 0];
 function updateHook(dt) {
   const P = PLAYER;
   HOOK.cd = Math.max(0, HOOK.cd - dt);
-  HOOK.aimT -= dt; if (HOOK.aimT <= 0) { HOOK.aimT = 0.05; HOOK.aim = HOOK.state === 'idle' ? hookAim() : null; }
+  HOOK.aimT -= dt; if (HOOK.aimT <= 0) { HOOK.aimT = 0.05; HOOK.aim = HOOK.state === 'idle' && HOOK.aiming ? hookAim() : null; }   // only while Q is held
   if (HOOK.state === 'whiff') { HOOK.t += dt; if (HOOK.t > 0.35) HOOK.state = 'idle'; return false; }
   if (HOOK.state === 'fly') {
     HOOK.t += dt; const k = Math.min(1, HOOK.t / HOOK.flyT);
@@ -113,7 +113,7 @@ function drawHook() {
 // reticle: a ring round the crosshair when a hook point is in range, coloured by how far you'd fall
 function drawHookHUD(hx, cx, cy, W, H) {
   const h = HOOK.aim, cdK = HOOK.cd / HOOK_CFG.cooldown;
-  if (HOOK.state === 'idle' && h && cdK <= 0) {
+  if (HOOK.state === 'idle' && HOOK.aiming && h && cdK <= 0) {   // preview only while Q is held
     const risk = hookRisk(h.drop), col = risk <= 0 ? '#a6ff3a' : risk < 40 ? '#ffb52e' : '#ff3040';
     const p = toScreen(h.x, h.y, h.z, W, H);
     if (p) { hx.strokeStyle = col; hx.lineWidth = 2; hx.globalAlpha = 0.9; hx.beginPath(); hx.arc(p[0], p[1], 7, 0, TAU); hx.stroke();

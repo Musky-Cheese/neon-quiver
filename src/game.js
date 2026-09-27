@@ -52,7 +52,8 @@ addEventListener('keydown', (e) => {
   if (GAME.state === 'playing') {
     const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
     if (k === 'KeyX') selectArrow(GAME.lastType);
-    if (k === 'KeyQ' && !e.repeat) hookFire();
+    // grapple: hold Q to preview the anchor and fall risk, release to fire; Q while reeling cuts the rope
+    if (k === 'KeyQ' && !e.repeat) { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
@@ -60,8 +61,8 @@ addEventListener('keydown', (e) => {
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
   if (k === 'KeyM') { SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); }
 });
-addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; });
-addEventListener('blur', () => { INPUT.keys = {}; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
+addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
+addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
 addEventListener('mousemove', (e) => { if (GAME.state !== 'playing') return; if (INPUT.locked || INPUT.freeLook) { INPUT.dx += e.movementX || 0; INPUT.dy += e.movementY || 0; } });
 gameEl.addEventListener('mousedown', (e) => {
   if (GAME.state !== 'playing') return;
