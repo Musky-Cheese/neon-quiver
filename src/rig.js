@@ -6,8 +6,9 @@
    procedural physics pose from zPose().
    ============================================================ */
 const ZRIG = { ready: false, clips: {}, geos: {}, parts: {}, boneNames: [], inverses: null, rootTemplate: null, bindMatrix: null, pool: {}, live: new Set() };
-const CLIP_RANGES = { walk: [0, 36, 1], run: [42, 60, 1], heavy: [66, 110, 1], boss_walk: [116, 172, 1], idle: [178, 238, 1], attack: [244, 270, 0], crawl: [276, 316, 1], crawl_attack: [322, 346, 0], slam: [352, 400, 0], roar: [406, 448, 0] };
-const PARTMAP = [['torso_shirt', 0], ['torso_bare', 0], ['uarm_sleeve', 1], ['uarm_bare', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_a', 5], ['head_b', 5], ['jaw', 6], ['brute_vest', 7], ['brute_pad', 7], ['brute_helmet', 8], ['boss_hump', 9]];
+const CLIP_RANGES = { walk: [0, 36, 1], run: [42, 60, 1], heavy: [66, 110, 1], boss_walk: [116, 172, 1], idle: [178, 238, 1], attack: [244, 274, 0], crawl: [280, 320, 1], crawl_attack: [326, 350, 0], slam: [356, 404, 0], roar: [410, 452, 0],
+  walk_b: [458, 498, 1], walk_c: [504, 540, 1], run_b: [546, 564, 1], idle_b: [570, 642, 1] };
+const PARTMAP = [['torso_', 0], ['uarm_', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_', 5], ['jaw', 6], ['brute_helmet', 8], ['brute_', 7], ['boss_hump', 9]];
 const LOGICAL = ['root', 'pelvis', 'spine', 'neck', 'jaw', 'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'hipL', 'hipR', 'kneeL', 'kneeR'];
 
 async function loadZombieRig(url = 'models/zombie.glb') {
@@ -50,13 +51,17 @@ async function loadZombieRig(url = 'models/zombie.glb') {
 
 function zVariant(z) {
   const kind = z.type === 'brute' ? 'brute' : z.type === 'boss' ? 'boss' : 'n';
-  return (z.bare ? 'torso_bare' : 'torso_shirt') + '|' + (z.headVar === 'b' ? 'head_b' : 'head_a') + '|' + (z.sleeve && !z.bare ? 'uarm_sleeve' : 'uarm_bare') + '|' + kind;
+  const top = ZRIG.parts['torso_' + z.top] ? z.top : z.bare ? 'bare' : 'shirt';
+  const arm = top === 'jacket' || kind === 'brute' ? 'jacket' : z.sleeve && !z.bare && top !== 'bloat' ? 'sleeve' : 'bare';
+  const head = ZRIG.parts['head_' + z.headVar] ? z.headVar : 'a';
+  return 'torso_' + top + '|head_' + head + '|' + arm + '|' + kind;
 }
 function zGeometry(key) {
   if (ZRIG.geos[key]) return ZRIG.geos[key];
   const [torso, head, arm, kind] = key.split('|');
-  const names = [torso, head, 'jaw', arm + 'L', arm + 'R', 'farmL', 'farmR', 'pelvis', 'thighL', 'thighR', 'shinL', 'shinR'];
-  if (kind === 'brute') names.push('brute_vest', 'brute_padL', 'brute_padR', 'brute_helmet');
+  const fa = arm === 'jacket' && ZRIG.parts.farm_jacketL ? 'farm_jacket' : 'farm';
+  const names = [torso, head, 'jaw', 'uarm_' + arm + 'L', 'uarm_' + arm + 'R', fa + 'L', fa + 'R', 'pelvis', 'thighL', 'thighR', 'shinL', 'shinR'];
+  if (kind === 'brute') names.push('brute_vest', 'brute_padL', 'brute_padR', 'brute_helmet', 'brute_kneeL', 'brute_kneeR', 'brute_guardL', 'brute_guardR');
   if (kind === 'boss') names.push('brute_padL', 'brute_padR', 'boss_hump');
   const list = names.map(n => ZRIG.parts[n]).filter(Boolean);
   const g = mergeGeometries(list, false); g.computeBoundingSphere();
@@ -124,7 +129,8 @@ function zWantClip(z) {
   if (z.state === 'roar') return 'roar';
   if (z.state === 'drop') return 'idle';
   if (z.state === 'dying') return z.rig.cur || 'idle';
-  return (z.mv || 0) > 0.1 ? LOCO[z.type] : 'idle';
+  if ((z.mv || 0) > 0.1) return (z.type === 'walker' || z.type === 'runner') && ZRIG.clips[z.gait] ? z.gait : LOCO[z.type];
+  return ZRIG.clips[z.idleClip] ? z.idleClip : 'idle';
 }
 
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), _qa = new THREE.Quaternion();
@@ -151,7 +157,7 @@ function poseZombieRig(z, dt, time) {
     if (timed !== undefined && timed !== null && z.state !== 'dying') { act.timeScale = 0; act.time = clamp(timed, 0, 0.999) * dur; }
     else if (z.state === 'dying') act.timeScale = 0;
     else if (r.cur === 'idle') act.timeScale = 1;
-    else { const rate = z.crawl ? 3.2 : PHASE_RATE[z.type]; act.timeScale = rate / (TAU / dur) * (z.crawl ? 1 : clamp((z.mv || 0) / Math.max(0.5, z.speed), 0.6, 1.25)); }
+    else { const rate = z.crawl ? 3.2 : PHASE_RATE[z.type] * (r.cur === 'walk_b' ? 0.85 : 1) * (0.92 + 0.16 * ((z.seed * 7.31) % 1)); act.timeScale = rate / (TAU / dur) * (z.crawl ? 1 : clamp((z.mv || 0) / Math.max(0.5, z.speed), 0.6, 1.25)); }
   }
   r.mixer.update(dt);
   // ---------- procedural layers ----------
@@ -172,8 +178,10 @@ function poseZombieRig(z, dt, time) {
     addRot(B.spine, R.t - z.flinch * 0.2 + 0.3 * legs, R.y, 0);
     addRot(B.jaw, z.jaw * 0.45, 0, 0);
     if (legs > 0) { addRot(B.kneeL, 0.9 * legs, 0, 0); addRot(B.kneeR, 0.7 * legs, 0, 0); addRot(B.hipL, -0.5 * legs, 0, 0); addRot(B.hipR, -0.4 * legs, 0, 0); B.pelvis.position.y -= 0.12 * legs; }
-    if (z.type === 'runner') { addRot(B.spine, 0.38, 0, 0); addRot(B.neck, -0.28, 0, 0); }   // hunched, head up to keep the gaze level
-    if (z.type === 'walker' && !z.crawl) addRot(B.neck, 0, 0, Math.sin(time * 2.1 + z.seed) * 0.12);
+    if (z.type === 'runner') { addRot(B.spine, 0.3, 0, 0); addRot(B.neck, -0.22, 0, 0); }   // hunched, head up to keep the gaze level
+    if (z.type === 'walker' && !z.crawl) addRot(B.neck, 0, 0, Math.sin(time * 2.1 + z.seed) * 0.08);
+    if (z.type === 'brute') { addRot(B.shoulderL, 0, 0, 0.16); addRot(B.shoulderR, 0, 0, -0.16); }   // arms in closer to the body under the gear
+    zLife(z, r, dt, time);
   }
   if (w > 0) {
     // physics-driven death pose (pins, crumples, falls) takes over from the clip
@@ -188,6 +196,7 @@ function poseZombieRig(z, dt, time) {
   // ---------- root transform ----------
   const m = r.mesh;
   m.position.set(z.x, z.y, z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
+  m.castShadow = SETTINGS.quality > 0 || (PLAYER.x - z.x) ** 2 + (PLAYER.z - z.z) ** 2 < 400;   // Low: only nearby bodies cast shadows
   m.updateMatrixWorld(true);
   // ---------- hit volumes from the skeleton ----------
   const hs = z.type === 'boss' ? 0.85 : 1;
@@ -199,6 +208,35 @@ function poseZombieRig(z, dt, time) {
   return r;
 }
 
+/* ---- the living layer: head tracking the player, ragged breathing, twitches, reaching when close, leaning into turns ---- */
+function zLife(z, r, dt, time) {
+  const B = r.B, alive = z.state !== 'dying' && z.state !== 'drop';
+  const dx = PLAYER.x - z.x, dz = PLAYER.z - z.z, dist = Math.hypot(dx, dz) || 1;
+  // head tracks the player: yaw relative to the body, pitch toward the player's eyes
+  let rel = Math.atan2(dx, dz) - z.yaw; rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+  const want = alive && dist < 14 && Math.abs(rel) < 1.9 ? clamp(rel, -0.75, 0.75) : 0;
+  const wantP = alive && dist < 14 ? clamp(-Math.atan2((PLAYER.y || 0) + 1.6 - (z.y + 1.7 * z.scale), dist), -0.4, 0.4) : 0;
+  const k = 1 - Math.exp(-dt * 4);
+  z.look += (want - z.look) * k; z.lookP += (wantP - z.lookP) * k;
+  const wy = z.crawl ? 0.4 : 1;
+  addRot(B.neck, z.lookP * 0.6 * wy, z.look * 0.65 * wy, 0); addRot(B.spine, 0, z.look * 0.3 * wy, 0);
+  if (!alive) return;
+  // breathing: ragged chest heave, jaw working
+  const br = Math.sin(time * 1.9 * z.breath + z.seed), br2 = Math.max(0, Math.sin(time * 3.8 * z.breath + z.seed * 2));
+  addRot(B.spine, 0.025 * br, 0, 0); addRot(B.shoulderL, 0, 0, -0.02 * br); addRot(B.shoulderR, 0, 0, 0.02 * br); addRot(B.jaw, 0.12 * br2, 0, 0);
+  // twitches: short spasms through the hit-reaction springs
+  z.twT -= dt;
+  if (z.twT <= 0) { z.twT = rand(1.5, 7); const R = z.R, s = z.type === 'brute' ? 0.4 : 1; R.hv += rand(-5, 5) * s; R.yv += rand(-3, 3) * s; if (Math.random() < 0.4) R.tv += rand(-2, 2) * s; }
+  // reach for the player when close
+  if (z.state !== 'attack' && !z.crawl && z.type !== 'boss') {
+    const reach = clamp((3.2 - dist) / 2, 0, 1) * (Math.abs(rel) < 1 ? 1 : 0);
+    if (reach > 0) { addRot(B.shoulderL, -0.7 * reach, 0, 0); addRot(B.shoulderR, -0.6 * reach, 0, 0); addRot(B.elbowL, 0.25 * reach, 0, 0); addRot(B.elbowR, 0.25 * reach, 0, 0); }
+  }
+  // lean into turns
+  const dyaw = z._py === undefined ? 0 : Math.atan2(Math.sin(z.yaw - z._py), Math.cos(z.yaw - z._py)); z._py = z.yaw;
+  z.bank = (z.bank || 0) + (clamp(dt > 0 ? dyaw / dt : 0, -3, 3) * 0.06 - (z.bank || 0)) * k;
+  addRot(B.spine, 0, 0, -z.bank * (z.type === 'runner' ? 1.6 : 1));
+}
 const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
 function drawZombieRig(z, time) {
@@ -206,8 +244,8 @@ function drawZombieRig(z, time) {
   const r = z.rig, u = r.u, T = z.type, B = r.B;
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
-  const e = z.T.eyes, vk = (T === 'boss' ? 1.6 : 1.0) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
-  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.15 : 2.6, pul = 0.6 + 0.4 * Math.sin(time * 6);
+  const e = z.T.eyes, vk = (T === 'boss' ? 1.6 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
+  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : 0.22, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const skin = P.skin, cloth = P.cloth, pants = P.pants;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
@@ -218,8 +256,8 @@ function drawZombieRig(z, time) {
   setV(u.uPT.value[5], z.hair); setV(u.uPE.value[5], e, eyeGlow);
   setV(u.uPT.value[6], skin); u.uPE.value[6].set(0, 0, 0);
   if (T === 'boss') { u.uPT.value[7].set(0.22, 0.16, 0.24); u.uPS.value[7].set(0.12, 0.09, 0.14); u.uPE.value[7].set(2 * pul, 0.3, 1.8 * pul); }
-  else { setV(u.uPT.value[7], ARMOUR_PLATE); setV(u.uPS.value[7], ARMOUR_DARK); u.uPE.value[7].set(1.7, 0.13, 0.35); }
-  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 3.2, e[1] * 3, e[2] * 3]);
+  else { setV(u.uPT.value[7], ARMOUR_PLATE); setV(u.uPS.value[7], ARMOUR_DARK); u.uPE.value[7].set(0, 0, 0); }
+  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 0.55, e[1] * 0.5, e[2] * 0.5]);
   setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
   u.uFlash.value = fl; u.uSeed.value = z.seed;
@@ -232,14 +270,6 @@ function drawZombieRig(z, time) {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
-  }
-  if (T === 'brute' && !z.headless) {   // gas mask: rubber face plate, twin filters, lenses lit by the eyes
-    const lg = dying ? [0.3, 0, 0.05] : [e[0] * 3.2, e[1] * 3, e[2] * 3];
-    part(neck, 0, 0.1, 0.1, 0.075, 0.06, 0.045, [0.05, 0.05, 0.055], null, fl);
-    for (const s of [-1, 1]) {
-      part(neck, s * 0.06, 0.07, 0.13, 0.03, 0.045, 0.03, [0.12, 0.13, 0.12], null, fl, MESH.cyl || MESH.box, 1.2, 0, s * 0.5);
-      part(neck, s * 0.045, 0.175, 0.105, 0.028, 0.024, 0.012, [0.2, 0.05, 0.05], lg, 0);
-    }
   }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {

@@ -150,12 +150,21 @@ def build_meshes(arm):
     add(build_mesh('torso_bare', 'torso_bare', jpos('spine'), w_torso))
     add(build_mesh('head_a', 'head_a', jpos('neck'), w_head))
     add(build_mesh('head_b', 'head_b', jpos('neck'), w_head))
+    add(build_mesh('head_c', 'head_c', jpos('neck'), w_head))
+    add(build_mesh('head_d', 'head_d', jpos('neck'), w_head))
+    add(build_mesh('torso_jacket', 'torso_jacket', jpos('spine'), w_torso))
+    add(build_mesh('torso_lean', 'torso_lean', jpos('spine'), w_torso))
+    add(build_mesh('torso_bloat', 'torso_bloat', jpos('spine'), w_torso))
     add(build_mesh('jaw', 'jaw', jpos('jaw'), rigid('jaw')))
     for s, mir in (('L', True), ('R', False)):
         # left side is mirrored from the right-hand sculpts where handedness matters
         add(build_mesh('uarm_sleeve.' + s, 'uarm_sleeve', jpos('shoulder.' + s), w_uarm(s)))
         add(build_mesh('uarm_bare.' + s, 'uarm_bare', jpos('shoulder.' + s), w_uarm(s)))
         add(build_mesh('farm.' + s, 'farm', jpos('elbow.' + s), w_farm(s), mirror=mir))
+        add(build_mesh('uarm_jacket.' + s, 'uarm_jacket', jpos('shoulder.' + s), w_uarm(s)))
+        add(build_mesh('farm_jacket.' + s, 'farm_jacket', jpos('elbow.' + s), w_farm(s), mirror=mir))
+        add(build_mesh('brute_knee.' + s, 'brute_knee', jpos('knee.' + s), rigid('knee.' + s)))
+        add(build_mesh('brute_guard.' + s, 'brute_guard', jpos('elbow.' + s), rigid('elbow.' + s)))
         add(build_mesh('thigh.' + s, 'thigh', jpos('hip.' + s), w_thigh(s)))
         add(build_mesh('shin.' + s, 'shin', jpos('knee.' + s), w_shin(s)))
         add(build_mesh('brute_pad.' + s, 'brute_pad', (jpos('shoulder.' + s)[0], jpos('shoulder.' + s)[1] + 0.02, 0), rigid('shoulder.' + s)))
@@ -170,75 +179,109 @@ def build_meshes(arm):
 # ---------- animation: procedural gaits sampled into keyframes ----------
 FPS = 30
 def pose_for(clip, t, kind):
-    """Returns dict bone -> (rx, ry, rz) plus 'loc' for pelvis (offset from rest). t in [0,1) for loops."""
+    """Returns dict bone -> (rx, ry, rz) plus 'loc' for pelvis (offset from rest). t in [0,1) for loops.
+    Conventions: +rx on hip/knee swings the leg back / flexes the knee, -rx on a shoulder raises the arm forward,
+    +rx on the spine leans forward, -rx on the neck tips the head back."""
     TAU = math.tau
     p = t * TAU
+    limp = clip == 'walk_b'
+    if limp: p = p + 0.45 * math.sin(p)                 # hurry off the bad leg
     w, c = math.sin(p), math.cos(p)
-    P = {}
-    moving = 1.0
-    lean = {'walker': 0.28, 'runner': 0.5, 'brute': 0.22, 'boss': 0.3}[kind]
-    shL, shR, elL, elR, spread, headRx = -1.35, -1.25, -0.25, -0.35, 0.12, -0.15
+    lean = {'walker': 0.3, 'runner': 0.5, 'brute': 0.18, 'boss': 0.3}[kind]
+    ampL = ampR = 0.5
+    shL, shR, elL, elR, spread, headRx, headRy = -0.3, -0.3, -0.35, -0.4, 0.08, 0.1, 0.0
     twist = w * 0.12
-    hipY = abs(c) * 0.05
-    hipLa = w * 0.55 * (1.35 if kind == 'runner' else 1); hipRa = -hipLa
-    knLa = max(0, -c) * 0.9 + 0.05; knRa = max(0, c) * 0.9 + 0.05
-    pelRx = 0.0; roll = 0.0; jaw = 0.15; spineRz = math.sin(p * 0.5) * 0.05
+    hipY = abs(c) * 0.04 - 0.02
+    knLa = max(0, -c) * 0.95 + 0.08 + 0.12 * max(0, c) * max(0, w)
+    knRa = max(0, c) * 0.95 + 0.08 + 0.12 * max(0, -c) * max(0, -w)
+    pelRx = 0.0; pelRz = c * 0.06; roll = 0.0; jaw = 0.15; spineRz = -pelRz * 0.7
     if kind == 'walker':
-        shL += math.sin(p * 0.5) * 0.18; shR += math.cos(p * 0.5) * 0.18
-        roll = math.sin(p) * 0.12 + 0.1                     # lolling head
-        hipLa *= 0.9; knRa *= 0.7                            # dragging right leg
+        if clip == 'walk':        # shamble: arms hanging and swinging loosely, head lolling forward
+            shL = -0.25 - w * 0.22; shR = -0.3 + w * 0.2; elL, elR = -0.3 - 0.1 * max(0, -w), -0.45 - 0.1 * max(0, w)
+            roll = 0.16 + math.sin(p * 0.5) * 0.1; headRx = 0.2 + 0.05 * abs(c); lean = 0.32
+        elif clip == 'walk_b':    # limp: stiff dragging right leg, hip hike, one arm reaching, the other dead
+            ampR = 0.22; knRa = 0.06 + 0.1 * max(0, c); pelRz = c * 0.15; spineRz = -pelRz * 0.8
+            hipY = abs(c) * 0.035 - 0.02 - 0.045 * max(0, -c)
+            shL = -1.05 + math.sin(p * 0.5) * 0.12; elL = -0.25; shR = -0.08 + w * 0.12; elR = -0.12; spread = 0.1
+            roll = -0.28 + 0.06 * w; headRx = 0.05; lean = 0.36
+        elif clip == 'walk_c':    # reaching: both arms out for prey, head up
+            shL = -1.25 + math.sin(p * 0.5) * 0.15; shR = -1.15 - math.sin(p * 0.5 + 1) * 0.15; elL = elR = -0.3
+            roll = math.sin(p) * 0.08; headRx = -0.12; lean = 0.24
+    hipLa = w * ampL; hipRa = -w * ampR
     if kind == 'runner':
-        shL, shR = -0.5 - w * 0.95, -0.5 + w * 0.95; elL = elR = -1.3; headRx = 0.35; spread = 0.2
-        hipY = abs(c) * 0.08
+        ampL = ampR = 0.8; hipLa = w * ampL; hipRa = -w * ampR
+        knLa = max(0, -c) * 1.4 + 0.15; knRa = max(0, c) * 1.4 + 0.15; hipY = abs(c) * 0.08 - 0.04; pelRz = c * 0.05
+        headRx = 0.35; twist = w * 0.16
+        if clip == 'run':         # frantic sprint: pumping, uneven arms
+            shL, shR = -0.4 - w * 0.95, -0.4 + w * 0.95; elL = -1.2 - 0.35 * max(0, w); elR = -1.3 - 0.3 * max(0, -w); spread = 0.2
+        else:                     # run_b: arms thrown forward, flailing
+            shL = -1.35 + 0.35 * math.sin(p + 0.5); shR = -1.3 + 0.35 * math.sin(p + 2.1); elL = -0.2 - 0.3 * max(0, w); elR = -0.25 - 0.3 * max(0, -w)
+            spread = 0.25; lean = 0.55; headRx = 0.3
     if kind == 'brute':
-        shL, shR = -0.35 + w * 0.35, -0.35 - w * 0.35; elL = elR = -0.5; spread = 0.3; hipY = abs(c) * 0.035
+        ampL = ampR = 0.42; hipLa = w * ampL; hipRa = -w * ampR
+        knLa = max(0, -c) * 0.8 + 0.12; knRa = max(0, c) * 0.8 + 0.12
+        hipY = abs(c) * 0.035 - 0.03 - 0.025 * (1 - abs(c)) ** 4    # stomp: drops hard at each footfall
+        shL, shR = -0.25 - w * 0.3, -0.25 + w * 0.3; elL = elR = -0.45; spread = 0.3; twist = w * 0.2; headRx = 0.12; pelRz = c * 0.08
     if kind == 'boss':
         shL, shR = -0.6 + w * 0.3, -0.6 - w * 0.3; elL = elR = -0.7; spread = 0.35
-    if clip == 'idle':
+    if clip in ('idle', 'idle_b'):
         b = math.sin(p)
-        hipLa = hipRa = 0.02; knLa = knRa = 0.08; hipY = 0.01 * b; twist = 0.05 * math.sin(p * 0.5)
-        shL = -1.1 + 0.08 * b; shR = -1.0 - 0.08 * b; headRx = -0.1 + 0.08 * math.sin(p * 2); roll = 0.2 * math.sin(p * 0.5); jaw = 0.25 + 0.15 * max(0, b)
-    if clip == 'attack':
+        hipLa = hipRa = 0.02; knLa = knRa = 0.1; hipY = 0.008 * b - 0.01; twist = 0.05 * math.sin(p * 0.5); pelRz = 0.04 * math.sin(p * 0.5)
+        if clip == 'idle':        # swaying, ragged breathing, jaw working
+            shL = -0.2 + 0.06 * b; shR = -0.15 - 0.06 * b; elL, elR = -0.35, -0.3; headRx = 0.25 + 0.08 * math.sin(p * 2); roll = 0.2 * math.sin(p * 0.5)
+            jaw = 0.2 + 0.2 * max(0, math.sin(p * 3)); lean = 0.28 + 0.03 * b
+        else:                     # idle_b: hunched, sniffing the air, head sweeping side to side
+            lean = 0.5; shL = shR = -0.12; elL = elR = -0.2; headRx = -0.25 + 0.1 * math.sin(p * 4); headRy = 0.55 * math.sin(p); roll = 0.1 * math.sin(p * 2)
+            jaw = 0.3 + 0.1 * math.sin(p * 6)
+    if clip == 'attack':          # wind up, lunge, grab and bite, recover
         a = t
-        up = (1 - (1 - a / 0.5) ** 3) if a < 0.5 else 1 - ease_in_out((a - 0.5) / 0.5)
-        shL = lerp(shL, -2.6, up); shR = lerp(shR, -2.5, up * 0.9)
-        if a > 0.5: shL = lerp(-2.6, -0.6, ease_out((a - 0.5) / 0.3)); shR = lerp(-2.5, -0.7, ease_out((a - 0.5) / 0.35))
-        lean += 0.25 if a > 0.5 else -0.1; jaw = 0.6; hipLa = hipRa = 0.1; knLa = knRa = 0.15; hipY = 0; twist = 0.25 * math.sin(a * math.pi)
+        up = smooth(a / 0.35); lun = smooth((a - 0.3) / 0.25); rec = smooth((a - 0.68) / 0.32)
+        k = lun * (1 - rec)
+        shL = lerp(lerp(-0.3, -1.9, up), -1.25, lun); shR = lerp(lerp(-0.3, -1.8, up), -1.15, lun)
+        shL = lerp(shL, -0.3, rec); shR = lerp(shR, -0.3, rec)
+        elL = lerp(-0.3, -1.25, k); elR = lerp(-0.35, -1.35, k); spread = 0.18 - 0.1 * k
+        lean = lerp(lerp(0.3, 0.08, up * (1 - lun)), 0.62, k); headRx = lerp(-0.2 * up, 0.35, k); jaw = 0.25 + 0.7 * smooth((a - 0.45) / 0.12) * (1 - rec)
+        hipLa = -0.35 * k; knLa = 0.1 + 0.25 * k; hipRa = 0.22 * k; knRa = 0.12 + 0.1 * k; hipY = -0.05 * k; twist = 0.2 * math.sin(a * math.pi)
+        pelRz = 0.0; spineRz = 0.0; roll = 0.0
     if clip in ('crawl', 'crawl_attack'):
-        hipY = 0.2 - 0.95; pelRx = 1.42; lean = 0.08; headRx = -1.1; twist = w * 0.15
-        shL, shR = -2.35 + 0.75 * w, -2.35 - 0.75 * w; elL = -0.2 - 0.5 * max(0, w); elR = -0.2 - 0.5 * max(0, -w); spread = 0.35
-        hipLa, hipRa = 0.12 + 0.08 * w, 0.1 - 0.08 * w; knLa, knRa = 0.35, 0.2; roll = 0.1 * w; jaw = 0.3
+        hipY = 0.2 - 0.95; pelRx = 1.42; lean = 0.08; headRx = -1.1 + 0.08 * w; twist = w * 0.15; pelRz = 0.05 * c; spineRz = 0
+        shL, shR = -2.35 + 0.75 * w, -2.35 - 0.75 * w; elL = -0.2 - 0.7 * max(0, w); elR = -0.2 - 0.7 * max(0, -w); spread = 0.35
+        hipLa, hipRa = 0.1 + 0.06 * w, 0.08 - 0.03 * w; knLa, knRa = 0.3 + 0.1 * max(0, w), 0.12; roll = 0.12 * w; jaw = 0.3 + 0.2 * max(0, c)
         if clip == 'crawl_attack':
-            a = t; shL = -2.9 + a * 1.5; shR = -2.7 + a * 1.2; jaw = 0.7; twist = 0
+            a = t; shL = -2.9 + a * 1.5; shR = -2.7 + a * 1.2; jaw = 0.8; twist = 0; headRx = -1.25
     if clip == 'slam':
-        a = t; hipLa = hipRa = 0.05; knLa = knRa = 0.1; hipY = 0
+        a = t; hipLa = hipRa = 0.05; knLa = knRa = 0.1; hipY = 0; pelRz = spineRz = 0
         if a < 0.55: k = ease_out(a / 0.55); shL = shR = lerp(-0.6, -3.1, k); elL = elR = lerp(-0.7, -0.4, k); lean = lerp(lean, -0.25, k)
         else: k = ease_out(min(1, (a - 0.55) / 0.1)); shL = shR = lerp(-3.1, -1.0, k); elL = elR = -0.2; lean = lerp(-0.25, 0.75, k); knLa = knRa = 0.1 + 0.4 * k; hipLa = hipRa = -0.3 * k; hipY = -0.08 * k
         jaw = 0.7
     if clip == 'roar':
-        a = t; k = math.sin(min(1, a / 0.3) * math.pi / 2)
+        a = t; k = math.sin(min(1, a / 0.3) * math.pi / 2); pelRz = spineRz = 0
         headRx = lerp(headRx, -0.7, k); shL = shR = lerp(shL, -0.9, k); spread = lerp(spread, 0.9, k); lean = lerp(lean, -0.15, k); jaw = lerp(0.15, 0.9, k)
         hipLa = hipRa = 0.02; knLa = knRa = 0.1; hipY = 0; twist = 0.04 * math.sin(a * 40)
-    P['pelvis'] = (pelRx, twist, 0.0); P['loc'] = (0, hipY, 0)
+    P = {}
+    P['pelvis'] = (pelRx, twist, pelRz); P['loc'] = (0, hipY, 0)
     P['spine'] = (lean, -twist * 1.5, spineRz)
-    P['neck'] = (headRx, 0.0, roll)
+    P['neck'] = (headRx, headRy + twist * 0.6, roll - spineRz * 0.5)
     P['jaw'] = (jaw, 0, 0)
     P['shoulder.L'] = (shL, 0, -spread); P['shoulder.R'] = (shR, 0, spread)
     P['elbow.L'] = (elL, 0, 0); P['elbow.R'] = (elR, 0, 0)
-    P['hip.L'] = (hipLa, 0, 0.03); P['hip.R'] = (hipRa, 0, -0.03)
+    P['hip.L'] = (hipLa, 0, 0.03 - pelRz); P['hip.R'] = (hipRa, 0, -0.03 - pelRz)
     P['knee.L'] = (knLa, 0, 0); P['knee.R'] = (knRa, 0, 0)
     return P
 
 def lerp(a, b, t): return a + (b - a) * t
+def smooth(t): t = max(0.0, min(1.0, t)); return t * t * (3 - 2 * t)
 def ease_out(t): t = max(0, min(1, t)); return 1 - (1 - t) ** 3
 def ease_in_out(t):
     t = max(0, min(1, t)); return 4 * t * t * t if t < 0.5 else 1 - (-2 * t + 2) ** 3 / 2
 
 # name, kind, clip, frames (loops sample t in [0,1) and repeat the first key at the end)
 CLIPS = [('walk', 'walker', 'walk', 36, True), ('run', 'runner', 'run', 18, True), ('heavy', 'brute', 'walk', 44, True),
-         ('boss_walk', 'boss', 'walk', 56, True), ('idle', 'walker', 'idle', 60, True), ('attack', 'walker', 'attack', 26, False),
+         ('boss_walk', 'boss', 'walk', 56, True), ('idle', 'walker', 'idle', 60, True), ('attack', 'walker', 'attack', 30, False),
          ('crawl', 'walker', 'crawl', 40, True), ('crawl_attack', 'walker', 'crawl_attack', 24, False),
-         ('slam', 'boss', 'slam', 48, False), ('roar', 'boss', 'roar', 42, False)]
+         ('slam', 'boss', 'slam', 48, False), ('roar', 'boss', 'roar', 42, False),
+         ('walk_b', 'walker', 'walk_b', 40, True), ('walk_c', 'walker', 'walk_c', 36, True), ('run_b', 'runner', 'run_b', 18, True),
+         ('idle_b', 'walker', 'idle_b', 72, True)]
 
 def animate(arm):
     arm.animation_data_create()

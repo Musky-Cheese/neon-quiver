@@ -9,7 +9,7 @@
 # Coordinate convention: Y is up, +Z is the direction a zombie faces (game space).
 
 import bpy, bmesh, json, math, os, random, time, traceback
-from mathutils import Vector, noise
+from mathutils import Vector, Matrix, noise
 from mathutils.bvhtree import BVHTree
 
 OUT = globals().get("NQ_OUT") or r"C:\Users\fouad\Downloads\neon-quiver\tools\sculpts"
@@ -180,60 +180,120 @@ def box_mesh(center, size, bevel=0.0, segs=2):
     me = bpy.data.meshes.new('bx'); bm.to_mesh(me); bm.free(); return me
 
 # ================= ZOMBIE PARTS =================
+# Realism pass: anatomical masses (deltoids, pecs, scapulae, quads, calves), clothing with real
+# thickness, hems, collars and torn flaps, four head types, sculpted riot gear with a gas mask.
 EYES = [V((-0.042, 0.168, 0.092)), V((0.042, 0.168, 0.092))]
 HEAD_C, HEAD_R = V((0, 0.155, 0.01)), V((0.094, 0.122, 0.108))
 
+def chain_dist(p, pts):
+    """signed distance to a chain of spheres [(center, r), ...] (negative inside)"""
+    best = 1e9
+    for i in range(len(pts) - 1):
+        a, ra = pts[i]; b, rb = pts[i + 1]
+        ab = b - a; L2 = max(1e-9, ab.dot(ab)); t = clamp((p - a).dot(ab) / L2, 0, 1)
+        best = min(best, (p - (a + ab * t)).length - (ra + (rb - ra) * t))
+    return best
+
+def _hair_clumps():
+    rnd = random.Random(33); out = [[(V((0, 0.235, 0.02)), 0.07), (V((0, 0.215, -0.04)), 0.078), (V((0, 0.16, -0.075)), 0.072)]]   # crown, lying on the scalp
+    n = 18
+    for i in range(n):
+        a = math.radians(58 + (360 - 116) * i / (n - 1) + rnd.uniform(-5, 5))   # skip the face (front +-58 deg)
+        s, c = math.sin(a), math.cos(a); j = rnd.uniform(-0.012, 0.012); L = rnd.uniform(0.0, 0.07)
+        out.append([(V((s * 0.083, 0.215, 0.01 + c * 0.092)), 0.03), (V((s * 0.104 + j, 0.125, 0.0 + c * 0.108)), 0.022),
+                    (V((s * 0.1 + j, 0.03 - L * 0.4, c * 0.1 - 0.02)), 0.017), (V((s * 0.092 + j * 1.5, -0.04 - L, c * 0.088 - 0.04)), 0.009)])
+    return out
+LONG_HAIR = _hair_clumps()
+
 def build_head(variant):
+    """a: bald, caved scalp wound  b: patchy hair  c: long matted hair, finer features  d: torn cheek, missing eye"""
     ob = ico_obj('head', 1.0, 5)
     me = evaluated_mesh(ob)
+    fine = variant == 'c'
     def shape(p):
         d = p.normalized()
-        q = V((HEAD_C.x + d.x * HEAD_R.x, HEAD_C.y + d.y * HEAD_R.y, HEAD_C.z + d.z * HEAD_R.z))
-        # narrow the lower face / jaw area, flatten the back of the skull a bit
-        if q.y < 0.11: q.x *= 0.82 + 0.18 * smooth01((q.y - 0.04) / 0.07)
+        q = V((HEAD_C.x + d.x * HEAD_R.x * (0.94 if fine else 1.0), HEAD_C.y + d.y * HEAD_R.y, HEAD_C.z + d.z * HEAD_R.z))
+        if q.y < 0.11: q.x *= (0.78 if fine else 0.84) + 0.18 * smooth01((q.y - 0.04) / 0.07)   # jaw taper
         if q.z < -0.04: q.z = -0.04 + (q.z + 0.04) * 0.9
+        if q.y < 0.06 and q.z > 0.0: q.z += 0.012 * smooth01((0.06 - q.y) / 0.03) * smooth01(1 - abs(q.x) / 0.05)   # chin
         return q
     deform(me, shape)
     def sculpt(p, n):
         o = 0.0
-        for e in EYES: o -= 0.028 * gauss((p - e).length, 0.03)                       # deep sockets
         front = smooth01((p.z - 0.03) / 0.05)
-        o += 0.013 * gauss(p.y - 0.198, 0.012) * front * smooth01(1 - abs(p.x) / 0.08)   # brow ridge
+        for i, e in enumerate(EYES):
+            de = (p - e).length
+            deep = 0.036 if (variant == 'd' and i == 0) else 0.027
+            o -= deep * gauss(de, 0.03)                                                  # sockets
+            if not (variant == 'd' and i == 0):
+                o += 0.0045 * gauss(de - 0.026, 0.006)                                   # eyelid rims
+            o += 0.004 * gauss((p - (e + V((0, -0.024, 0.004)))).length, 0.012)          # under-eye bags
+        o += 0.014 * gauss(p.y - 0.199, 0.012) * front * smooth01(1 - abs(p.x) / 0.085)  # brow ridge
+        o -= 0.004 * gauss(p.y - 0.186, 0.006) * front * smooth01(1 - abs(p.x) / 0.07)   # brow crease
         for sx in (-1, 1):
-            o += 0.012 * gauss((p - V((sx * 0.062, 0.128, 0.07))).length, 0.022)         # cheekbones
-            o -= 0.012 * gauss((p - V((sx * 0.066, 0.095, 0.06))).length, 0.022)         # hollow cheeks
-            o -= 0.006 * gauss((p - V((sx * 0.085, 0.18, 0.02))).length, 0.02)          # temples
-            o += 0.010 * gauss((p - V((sx * 0.094, 0.15, -0.005))).length, 0.013)        # ears
-        o += 0.020 * gauss(abs(p.x), 0.012) * gauss(p.y - 0.14, 0.02) * front            # nose bridge
-        o -= 0.016 * gauss((p - V((0, 0.128, 0.112))).length, 0.013)                     # rotted nose hole
-        o -= 0.014 * gauss(p.y - 0.085, 0.011) * gauss(abs(p.x), 0.035) * front          # lip line / mouth slit
-        o += 0.0035 * fbm(p, 55, 3)                                                       # skin grit
+            o += 0.012 * gauss((p - V((sx * 0.062, 0.128, 0.07))).length, 0.022)          # cheekbones
+            o -= 0.013 * gauss((p - V((sx * 0.066, 0.095, 0.06))).length, 0.022)          # hollow cheeks
+            o -= 0.006 * gauss((p - V((sx * 0.085, 0.18, 0.02))).length, 0.02)           # temples
+            o += 0.007 * gauss((p - V((sx * 0.07, 0.062, 0.01))).length, 0.02)           # jaw angle
+            # ears: a rim with a hollow bowl
+            ec = V((sx * 0.095, 0.15, -0.008)); de = (p - ec).length
+            o += 0.013 * gauss(de, 0.016) - 0.006 * gauss(de, 0.006) + 0.003 * gauss(de - 0.014, 0.004)
+            # nasolabial folds
+            f = V((sx * (0.022 + (0.125 - p.y) * 0.25), p.y, 0.1))
+            o -= 0.004 * gauss((p - f).length, 0.006) * gauss(p.y - 0.105, 0.02) * front
+        o += 0.021 * gauss(abs(p.x), 0.012) * gauss(p.y - 0.14, 0.02) * front            # nose bridge
+        o += 0.008 * gauss((p - V((0, 0.125, 0.112))).length, 0.016)                    # nose tip mass
+        o -= 0.018 * gauss((p - V((0, 0.12, 0.117))).length, 0.009)                     # rotted nostrils
+        o += 0.006 * gauss(p.y - 0.094, 0.006) * gauss(abs(p.x), 0.03) * front           # upper lip
+        o += 0.005 * gauss(p.y - 0.074, 0.006) * gauss(abs(p.x), 0.028) * front          # lower lip
+        o -= 0.016 * gauss(p.y - 0.085, 0.006) * gauss(abs(p.x), 0.032) * front          # mouth slit (lips pulled back)
+        o += 0.0035 * fbm(p, 55, 3) + 0.0015 * fbm(p, 140, 2, 3)                          # skin grit, pores
         if variant == 'a':
-            o -= 0.012 * gauss((p - V((0.05, 0.25, 0.0))).length, 0.03)                  # caved scalp wound
+            o -= 0.014 * gauss((p - V((0.05, 0.25, 0.0))).length, 0.03)                  # caved scalp wound
+        if variant == 'b':
+            hair = smooth01((p.y - 0.19) / 0.02) * smooth01((0.07 - p.z) / 0.04) * smooth01((fbm(p, 30, 2, 5) + 0.15) * 3)
+            o += 0.004 * hair
+        if variant == 'd':
+            o -= 0.022 * gauss((p - V((0.058, 0.098, 0.072))).length, 0.02)               # torn cheek
         return o
     displace(me, sculpt)
-    ob2 = remesh_from_mesh('head', me, 0.0045, 3)
-    me = decimate('head', evaluated_mesh(ob2), 2600)
+    if variant == 'c':   # long matted hair: separate volume, remeshed together with the head
+        hm = []
+        for ch in LONG_HAIR:
+            vs = [tuple(c) for c, r in ch]; rs = [r for c, r in ch]
+            hob = skin_obj('hair', vs, [(i, i + 1) for i in range(len(vs) - 1)], rs, 2, 0.004, 2)
+            hme = evaluated_mesh(hob)
+            displace(hme, lambda p, n: 0.004 * fbm(V((p.x * 4, p.y * 0.5, p.z * 4)), 40, 2, 61) - 0.002)   # strands
+            hm.append(hme)
+        me = join_meshes('headhair', [me] + hm)
+    ob2 = remesh_from_mesh('head', me, 0.004, 2)
+    me = decimate('head', evaluated_mesh(ob2), 4200 if variant == 'c' else 3600)
     teeth = []
-    for i in range(7):
-        x = (i - 3) * 0.011
-        teeth.append(box_mesh((x, 0.083, 0.093 - abs(x) * 0.35), (0.009, 0.013, 0.008), 0.0015, 1))
-    eyes = [small_sphere(tuple(e + V((0, 0, -0.006))), 0.017, 2) for e in EYES]
+    for i in range(8):
+        x = (i - 3.5) * 0.0105
+        teeth.append(box_mesh((x, 0.084, 0.094 - abs(x) * 0.38), (0.0085, 0.012 + 0.002 * (i % 3), 0.007), 0.0015, 1))
+    eyes = [small_sphere(tuple(e + V((0, 0, -0.006))), 0.017, 2) for i, e in enumerate(EYES) if not (variant == 'd' and i == 0)]
     def mask(p, n):
         cloth, blood, em, bright = 0.0, 0.0, 0.0, 1.0
-        if variant == 'b':  # patchy hair (tinted by the per-draw hair colour)
-            hair = smooth01((p.y - 0.19) / 0.02) * smooth01((0.07 - p.z) / 0.04)
-            hair *= smooth01((fbm(p, 30, 2, 5) + 0.15) * 3)
-            cloth = hair
+        if variant == 'b':
+            cloth = smooth01((p.y - 0.19) / 0.02) * smooth01((0.07 - p.z) / 0.04) * smooth01((fbm(p, 30, 2, 5) + 0.15) * 3)
+        if variant == 'c':
+            face = smooth01((p.z - 0.02) / 0.03) * smooth01((0.2 - p.y) / 0.02) * smooth01(1 - abs(p.x) / 0.085)
+            inhair = min(1.0, max(0.0, 1.0 - (min(chain_dist(p, ch) for ch in LONG_HAIR) + 0.004) / 0.008))
+            cloth = max(inhair, smooth01((p.y - 0.2) / 0.015)) * (1 - face)
         if variant == 'a':
-            blood = smooth01(1 - (p - V((0.05, 0.25, 0.0))).length / 0.04)
-        blood = max(blood, smooth01((fbm(p, 18, 2, 9) - 0.38) * 5) * 0.8)
-        blood = max(blood, gauss(p.y - 0.083, 0.012) * gauss(abs(p.x), 0.04) * smooth01(p.z / 0.08) * 0.9)  # mouth gore
-        for e in EYES: bright *= 1 - 0.55 * gauss((p - e).length, 0.032)
-        # glowing infection veins
-        v = abs(fbm(p, 22, 2, 3)); em = 0.55 * smooth01((0.035 - v) / 0.02) * smooth01((0.12 - abs(p.x)) / 0.05)
-        return cloth, blood, em * (1 - cloth), bright
-    export('head_' + variant, me, mask, ao_dist=0.05, emissive_parts=[(join_meshes('eyes', eyes), 1.0), (join_meshes('teeth', teeth), 0.0)])
+            blood = smooth01(1 - (p - V((0.05, 0.25, 0.0))).length / 0.045)
+        if variant == 'd':
+            blood = max(smooth01(1 - (p - V((0.058, 0.098, 0.072))).length / 0.035), smooth01(1 - (p - EYES[0]).length / 0.03) * 0.9)
+            bright *= 1 - 0.6 * gauss((p - EYES[0]).length, 0.02)
+        blood = max(blood, smooth01((fbm(p, 18, 2, 9) - 0.42) * 5) * 0.7)
+        blood = max(blood, gauss(p.y - 0.078, 0.014) * gauss(abs(p.x), 0.04) * smooth01(p.z / 0.08))   # mouth gore, chin drip
+        blood = max(blood, gauss(abs(p.x), 0.012) * smooth01((0.08 - p.y) / 0.03) * smooth01(p.z / 0.08) * 0.8)
+        for e in EYES: bright *= 1 - 0.5 * gauss((p - e).length, 0.03)
+        bright *= 1 - 0.35 * gauss((p - V((0, 0.12, 0.117))).length, 0.01)
+        v = abs(fbm(p, 22, 2, 3)); em = 0.4 * smooth01((0.03 - v) / 0.02) * smooth01((0.12 - abs(p.x)) / 0.05)
+        return cloth, blood * (1 - cloth * 0.6), em * (1 - cloth), bright
+    export('head_' + variant, me, mask, ao_dist=0.05, emissive_parts=[(join_meshes('eyes', eyes), 1.0), (join_meshes('teeth', teeth), 0.9)])
 
 def build_jaw():
     verts = [(0, 0.0, 0.0), (0, -0.03, 0.05), (0, -0.045, 0.09)]
@@ -241,133 +301,284 @@ def build_jaw():
     me = evaluated_mesh(ob)
     deform(me, lambda p: V((p.x * 1.15, p.y * 0.55, p.z)))
     displace(me, lambda p, n: 0.003 * fbm(p, 50, 2))
-    me = decimate('jaw', me, 700)
+    me = decimate('jaw', me, 800)
     teeth = [box_mesh(((i - 3) * 0.011, -0.012, 0.085 - abs((i - 3) * 0.011) * 0.35), (0.009, 0.011, 0.008), 0.0015, 1) for i in range(7)]
     export('jaw', me, lambda p, n: (0, max(0.6 * smooth01((p.z - 0.05) / 0.03) * smooth01((p.y + 0.01) / 0.02), 0), 0, 1), ao_dist=0.03,
-           emissive_parts=[(join_meshes('jt', teeth), 0.0)])
+           emissive_parts=[(join_meshes('jt', teeth), 0.9)])
 
+# torso skeleton (spine-local; the pelvis sits below y 0, shoulders at y ~0.52)
+def torso_skel(variant):
+    v = [(0, -0.06, 0.0), (0, 0.12, 0.015), (0, 0.29, 0.01), (0, 0.42, -0.005), (0, 0.52, -0.02), (0, 0.6, -0.012), (0, 0.68, 0.0)]
+    r = [0.145, 0.128, 0.155, 0.17, 0.14, 0.07, 0.056]
+    e = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6)]
+    def add(pts, rs, parent):
+        nonlocal v, r, e
+        k = len(v); v += pts; r += rs; e.append((parent, k))
+        for i in range(1, len(pts)): e.append((k + i - 1, k + i))
+    for sx in (-1, 1):
+        add([(sx * 0.11, 0.55, 0.005), (sx * 0.2, 0.535, -0.02), (sx * 0.262, 0.505, -0.015)], [0.06, 0.07, 0.072], 4)   # clavicle -> deltoid
+        add([(sx * 0.085, 0.435, 0.065)], [0.085], 3)                                                                    # pecs
+        add([(sx * 0.1, 0.44, -0.09)], [0.085], 3)                                                                       # scapulae
+        add([(sx * 0.13, 0.33, -0.03)], [0.1], 2)                                                                        # lats
+        add([(sx * 0.085, 0.585, -0.03)], [0.06], 5)                                                                     # trapezius
+    if variant == 'jacket':
+        add([(0, 0.6, -0.13), (0, 0.52, -0.16)], [0.09, 0.07], 5)                                                        # hood bunched on the back
+    return v, e, r
+
+BITE = V((-0.07, 0.2, 0.1))
 def build_torso(variant):
-    verts = [(0, -0.06, 0.0), (0, 0.12, 0.012), (0, 0.29, 0.005), (0, 0.44, -0.012), (0, 0.555, -0.02), (0, 0.66, 0.0),
-             (-0.21, 0.515, -0.025), (0.21, 0.515, -0.025), (-0.265, 0.5, -0.02), (0.265, 0.5, -0.02)]
-    edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (3, 6), (3, 7), (6, 8), (7, 9)]
-    radii = [0.145, 0.13, 0.165, 0.185, 0.12, 0.055, 0.075, 0.075, 0.062, 0.062]
-    ob = skin_obj('torso', verts, edges, radii, 2, 0.008)
+    v, e, r = torso_skel(variant)
+    bare, jacket = variant in ('bare', 'lean'), variant == 'jacket'
+    lean, bloat = variant == 'lean', variant == 'bloat'
+    if jacket: r = [x + 0.012 for x in r]
+    if lean: r = [x * (0.86 if i < 5 else 0.94) for i, x in enumerate(r)]
+    if bloat: r[1] = 0.17; r[2] = 0.185
+    ob = skin_obj('torso', v, e, r, 2, 0.007)
     me = evaluated_mesh(ob)
-    deform(me, lambda p: V((p.x, p.y, p.z * (0.68 if p.y < 0.55 else 0.8) + (0.018 if p.y > 0.3 else 0))))
-    bare = variant == 'bare'
+    deform(me, lambda p: V((p.x, p.y, p.z * (0.74 if p.y < 0.55 else 0.82) + (0.018 if p.y > 0.3 else 0))))
+    if bloat: deform(me, lambda p: p + V((0, -0.02 * gauss(p.y - 0.15, 0.1), 0.06 * gauss(p.y - 0.17, 0.11) * smooth01((p.z + 0.02) / 0.06))))
+    def cover(p):
+        """1 where cloth covers the body"""
+        if bare: return 0.0
+        top = 0.64 if jacket else 0.575
+        if p.y > top + 0.01 * fbm(p, 20, 1, 3): return 0.0
+        if jacket:
+            return 0.0 if (p.z > 0.03 and abs(p.x) < 0.035 + 0.05 * smooth01((p.y - 0.3) / 0.3) and p.y > 0.3) else 1.0   # open zip at the neck
+        tear = fbm(p, 7, 3, 4)
+        if tear > 0.46: return 0.0
+        if p.z > 0.06 and gauss((p - BITE).length, 0.06) > 0.5: return 0.0
+        if bloat and p.z > 0.02 and p.y < 0.34 - 0.06 * abs(fbm(p, 12, 2, 5)) and abs(p.x) < 0.13: return 0.0   # shirt split over the gut
+        return 1.0
     def sculpt(p, n):
-        o = 0.004 * fbm(p, 35, 3)
-        front = smooth01(p.z / 0.06); side = smooth01((abs(p.x) - 0.06) / 0.08)
-        ribs = gauss(p.y - 0.36, 0.1) * (front * 0.6 + side)
-        o += (0.007 if bare else 0.002) * math.sin(p.y * 2 * math.pi / 0.042) * ribs          # ribcage
-        o -= 0.012 * gauss(p.y - 0.12, 0.05) * gauss(p.x, 0.07) * front * (1 if bare else 0.3) # sunken belly
-        o += 0.008 * gauss(p.y - 0.47, 0.04) * front * smooth01(abs(p.x) / 0.05)              # pecs / collar
-        o -= 0.014 * gauss((p - V((-0.07, 0.2, 0.1))).length, 0.035)                          # bite wound
-        o += 0.006 * gauss(p.y - 0.585, 0.025) * smooth01((abs(p.x) - 0.05) / 0.05)           # trapezius
-        if not bare:
-            cl = shirt(p)
-            o += 0.006 * cl + 0.004 * cl * fbm(p, 14, 2, 2)                                    # cloth folds
+        o = 0.003 * fbm(p, 35, 3) + 0.0012 * fbm(p, 120, 2, 7)
+        front = smooth01(p.z / 0.06); back = smooth01(-p.z / 0.06); side = smooth01((abs(p.x) - 0.06) / 0.08)
+        ribs = gauss(p.y - 0.34, 0.1) * (front * 0.6 + side)
+        cl = cover(p)
+        skin = 1 - cl
+        o += (0.007 if bare else 0.0025) * math.sin(p.y * 2 * math.pi / 0.04) * ribs * (0.4 + 0.6 * skin)   # ribcage
+        o -= 0.006 * gauss(p.x, 0.012) * front * smooth01((p.y - 0.25) / 0.1) * smooth01((0.5 - p.y) / 0.05)  # sternum
+        o -= 0.007 * gauss(p.x, 0.014) * back * smooth01((p.y + 0.02) / 0.1) * smooth01((0.56 - p.y) / 0.05)  # spine groove
+        for sx in (-1, 1):
+            o += 0.005 * gauss(p.y - 0.555, 0.01) * gauss(p.x - sx * 0.1, 0.05) * front                        # clavicles
+            o -= 0.003 * gauss((p - V((sx * 0.045, 0.02, 0.1))).length, 0.03) * skin                            # hip hollows
+        o -= 0.014 * gauss(p.y - 0.12, 0.05) * gauss(p.x, 0.07) * front * (1 if bare else 0.3)                 # sunken belly
+        o -= 0.006 * gauss((p - V((0, 0.08, 0.1))).length, 0.008) * skin                                        # navel
+        o -= 0.016 * gauss((p - BITE).length, 0.035)                                                            # bite wound
+        if variant == 'bare': o -= 0.02 * gauss((p - V((0.06, 0.1, 0.1))).length, 0.04)                         # torn-open flank
+        if lean:
+            o += 0.004 * math.sin(p.y * 2 * math.pi / 0.04) * ribs                                              # deeper ribs
+            o += 0.008 * gauss(p.x, 0.012) * back * (0.5 + 0.5 * math.cos(p.y * 2 * math.pi / 0.035))          # vertebrae
+            o -= 0.01 * gauss(p.y - 0.12, 0.05) * gauss(p.x, 0.07) * front                                      # caved belly
+        if bloat:
+            o += 0.004 * fbm(p, 20, 2, 12) * gauss(p.y - 0.17, 0.1) * skin                                      # stretched, blistered skin
+        if cl > 0:
+            thick = 0.014 if jacket else 0.007
+            fold = fbm(V((p.x * 1.6, p.y * 0.5, p.z * 1.6)), 14, 2, 2)                     # vertical drape folds
+            creases = math.sin(p.y * 2 * math.pi / 0.05 + fbm(p, 8, 1, 9) * 4) * gauss(p.y - 0.02, 0.07)   # bunching at the waist
+            o += thick + 0.006 * fold + 0.003 * creases
+            if p.y < 0.03: o += (0.03 - p.y) * (0.5 if jacket else 0.35) * (0.6 + 0.4 * fbm(p, 12, 1, 5))  # loose hem hangs away
+            if jacket:
+                o -= 0.004 * gauss(abs(p.x) - 0.035, 0.004) * front * smooth01((0.34 - p.y) / 0.02)           # zip seam
+                for sx in (-1, 1): o += 0.006 * gauss((p - V((sx * 0.1, 0.05, 0.12))).length, 0.04)             # pockets
+                o += 0.012 * gauss(p.y - 0.63, 0.012)                                                           # collar ring
+            else:
+                o += 0.004 * gauss(p.y - 0.572, 0.006)                                                          # shirt collar
         return o
-    def shirt(p):
-        if p.y > 0.575: return 0.0
-        tear = fbm(p, 9, 3, 4)
-        return 0.0 if tear > 0.38 or (p.z > 0.06 and gauss((p - V((-0.07, 0.2, 0.1))).length, 0.06) > 0.5) else 1.0
     displace(me, sculpt)
-    me = decimate('torso', me, 3400)
+    me = decimate('torso', me, 5200)
     def mask(p, n):
-        cloth = 0.0 if bare else shirt(p)
-        blood = max(smooth01(1 - (p - V((-0.07, 0.2, 0.1))).length / 0.06), smooth01((fbm(p, 12, 2, 8) - 0.35) * 4) * 0.7)
-        if not bare: blood = max(blood * (1 - cloth * 0.5), cloth * smooth01((fbm(p, 6, 2, 11) - 0.25) * 3) * 0.6)
-        v = abs(fbm(p, 16, 2, 6)); em = 0.5 * smooth01((0.03 - v) / 0.02) * (1 - cloth)
-        return cloth, blood, em, 1.0
+        cloth = cover(p)
+        blood = max(smooth01(1 - (p - BITE).length / 0.07), smooth01((fbm(p, 12, 2, 8) - 0.38) * 4) * 0.6)
+        if variant == 'bare': blood = max(blood, smooth01(1 - (p - V((0.06, 0.1, 0.1))).length / 0.06))
+        if cloth: blood = max(blood * 0.5, smooth01((fbm(p, 6, 2, 11) - 0.3) * 3) * 0.55 * smooth01((0.4 - p.y) / 0.3 + 0.3))   # soaked from the collar down
+        bright = 1.0 - 0.3 * smooth01((0.03 - p.y) / 0.08) * cloth                                             # dark under the hem
+        if bloat: bright *= 1 - 0.25 * gauss(p.y - 0.17, 0.08) * smooth01(fbm(p, 10, 2, 21) * 3) * (1 - cloth)   # bruised, gassy discolouring
+        v = abs(fbm(p, 16, 2, 6)); em = 0.4 * smooth01((0.03 - v) / 0.02) * (1 - cloth)
+        return cloth, blood, em, bright
     export('torso_' + variant, me, mask, ao_dist=0.08)
 
 def build_pelvis():
-    verts = [(0, 0.09, 0.0), (0, -0.04, 0.0), (-0.105, -0.07, 0.0), (0.105, -0.07, 0.0)]
-    ob = skin_obj('pelvis', verts, [(0, 1), (1, 2), (1, 3)], [0.14, 0.15, 0.09, 0.09], 2, 0.008)
+    verts = [(0, 0.09, 0.0), (0, -0.04, 0.0), (-0.105, -0.07, 0.0), (0.105, -0.07, 0.0), (0, -0.03, -0.07)]
+    ob = skin_obj('pelvis', verts, [(0, 1), (1, 2), (1, 3), (1, 4)], [0.14, 0.15, 0.095, 0.095, 0.1], 2, 0.007)
     me = evaluated_mesh(ob)
-    deform(me, lambda p: V((p.x, p.y, p.z * 0.72)))
-    displace(me, lambda p, n: 0.004 * fbm(p, 14, 2, 1) + 0.006 * gauss(p.y - 0.07, 0.012))
-    me = decimate('pelvis', me, 1100)
-    export('pelvis', me, lambda p, n: (1.0, smooth01((fbm(p, 8, 2, 12) - 0.3) * 3) * 0.5, 0, 0.55 if abs(p.y - 0.07) < 0.012 else 1.0), ao_dist=0.07)
+    deform(me, lambda p: V((p.x, p.y, p.z * 0.74)))
+    def sculpt(p, n):
+        o = 0.008 + 0.004 * fbm(p, 14, 2, 1) + 0.007 * gauss(p.y - 0.07, 0.01)            # jeans + belt
+        o -= 0.004 * gauss(p.x, 0.01) * smooth01(p.z / 0.05) * smooth01((0.05 - p.y) / 0.05)   # fly seam
+        o -= 0.003 * gauss(p.x, 0.01) * smooth01(-p.z / 0.05)                                  # back seam
+        return o
+    displace(me, sculpt)
+    me = decimate('pelvis', me, 1400)
+    def mask(p, n):
+        belt = abs(p.y - 0.07) < 0.012
+        return (1.0, smooth01((fbm(p, 8, 2, 12) - 0.3) * 3) * 0.45, 0, 0.45 if belt else 1.0)
+    export('pelvis', me, mask, ao_dist=0.07)
 
 def build_uarm(variant):
-    ob = skin_obj('uarm', [(0, 0.03, 0), (0, -0.1, 0.0), (0, -0.33, 0)], [(0, 1), (1, 2)], [0.062, 0.056, 0.042], 2, 0.005)
+    ob = skin_obj('uarm', [(0, 0.03, 0), (0, -0.08, 0.0), (0, -0.2, 0.005), (0, -0.33, 0)], [(0, 1), (1, 2), (2, 3)], [0.066, 0.06, 0.05, 0.042], 2, 0.0045)
     me = evaluated_mesh(ob)
-    displace(me, lambda p, n: 0.003 * fbm(p, 40, 3) + 0.006 * gauss(p.y + 0.06, 0.05) * smooth01(-p.x / 0.03))
-    me = decimate('uarm', me, 900)
-    sleeve = variant == 'sleeve'
+    sleeve, jacket = variant == 'sleeve', variant == 'jacket'
+    def covered(p):
+        if jacket: return True
+        return sleeve and p.y > -0.19 + 0.05 * fbm(p, 20, 2, 4)
+    def sculpt(p, n):
+        o = 0.003 * fbm(p, 40, 3)
+        o += 0.008 * gauss(p.y + 0.02, 0.05)                                  # deltoid cap
+        o += 0.006 * gauss(p.y + 0.16, 0.06) * smooth01(p.z / 0.03)           # biceps
+        o += 0.006 * gauss(p.y + 0.13, 0.07) * smooth01(-p.z / 0.03)          # triceps
+        if covered(p):
+            o += (0.016 if jacket else 0.007) + 0.005 * fbm(V((p.x * 2, p.y * 0.4, p.z * 2)), 18, 2, 7)
+            if sleeve: o += 0.006 * gauss(p.y + 0.19 - 0.05 * fbm(p, 20, 2, 4), 0.008)    # rolled cuff
+            if jacket: o += 0.004 * math.sin(p.y * 2 * math.pi / 0.045) * gauss(p.y + 0.3, 0.05)   # bunching at the elbow
+        return o
+    displace(me, sculpt)
+    me = decimate('uarm', me, 1200)
     def mask(p, n):
-        cloth = 1.0 if sleeve and p.y > -0.19 + 0.05 * fbm(p, 20, 2, 4) else 0.0
-        blood = smooth01((fbm(p, 15, 2, 14) - 0.35) * 4) * 0.7
-        v = abs(fbm(p, 20, 2, 16)); em = 0.5 * smooth01((0.03 - v) / 0.02) * (1 - cloth)
+        cloth = 1.0 if covered(p) else 0.0
+        blood = smooth01((fbm(p, 15, 2, 14) - 0.38) * 4) * 0.6
+        v = abs(fbm(p, 20, 2, 16)); em = 0.4 * smooth01((0.03 - v) / 0.02) * (1 - cloth)
         return cloth, blood, em, 1.0
     export('uarm_' + variant, me, mask, ao_dist=0.05)
 
-def build_farm():
-    verts = [(0, 0.02, 0), (0, -0.14, 0.004), (0, -0.285, 0.004), (0, -0.315, 0.012), (0, -0.37, 0.022),
-             ]
-    edges = [(0, 1), (1, 2), (2, 3), (3, 4)]
-    radii = [0.047, 0.043, 0.032, 0.028, (0.036)]
-    # four clawed fingers + thumb
+def build_farm(variant='bare'):
+    jacket = variant == 'jacket'
+    verts = [(0, 0.02, 0), (0, -0.1, 0.004), (0, -0.2, 0.004), (0, -0.285, 0.004), (0, -0.315, 0.012), (0, -0.37, 0.022)]
+    edges = [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
+    radii = [0.047, 0.046, 0.037, 0.031, 0.028, 0.036]
     fx = [-0.024, -0.008, 0.008, 0.024]
     for i, x in enumerate(fx):
-        k = len(verts)
-        verts += [(x, -0.395, 0.03), (x * 1.1, -0.435, 0.05), (x * 1.15, -0.455, 0.082)]
-        edges += [(4, k), (k, k + 1), (k + 1, k + 2)]
+        k = len(verts); L = 1.0 - 0.12 * abs(i - 1.5)
+        verts += [(x, -0.395, 0.03), (x * 1.1, -0.395 - 0.04 * L, 0.05), (x * 1.15, -0.395 - 0.06 * L, 0.082)]
+        edges += [(5, k), (k, k + 1), (k + 1, k + 2)]
         radii += [0.012, 0.0105, 0.007]
     k = len(verts)
     verts += [(0.032, -0.35, 0.03), (0.046, -0.385, 0.058), (0.044, -0.405, 0.082)]
-    edges += [(4, k), (k, k + 1), (k + 1, k + 2)]
+    edges += [(5, k), (k, k + 1), (k + 1, k + 2)]
     radii += [0.013, 0.011, 0.008]
-    ob = skin_obj('farm', verts, edges, radii, 2, 0.0028, 4)
+    ob = skin_obj('farm', verts, edges, radii, 2, 0.0026, 4)
     me = evaluated_mesh(ob)
     deform(me, lambda p: V((p.x, p.y, p.z * (0.8 if p.y > -0.3 else 1.0))))
-    displace(me, lambda p, n: 0.0025 * fbm(p, 45, 3) + 0.004 * gauss(p.y + 0.06, 0.06))
-    me = decimate('farm', me, 1800)
+    def sleeved(p): return jacket and p.y > -0.27 + 0.02 * fbm(p, 20, 1, 3)
+    def sculpt(p, n):
+        o = 0.0025 * fbm(p, 45, 3) + 0.005 * gauss(p.y + 0.06, 0.06)                   # forearm flexor mass
+        o += 0.002 * gauss(p.y + 0.4, 0.01) * smooth01(p.z / 0.02)                      # knuckles
+        if sleeved(p): o += 0.014 + 0.005 * fbm(V((p.x * 2, p.y * 0.5, p.z * 2)), 16, 2, 9) + 0.006 * gauss(p.y + 0.26, 0.01)   # cuff
+        return o
+    displace(me, sculpt)
+    me = decimate('farm', me, 2000)
     def mask(p, n):
+        cloth = 1.0 if sleeved(p) else 0.0
         blood = max(smooth01((fbm(p, 14, 2, 21) - 0.3) * 4) * 0.7, smooth01((-p.y - 0.43) / 0.02) * 0.9)
         bright = 0.55 if p.y < -0.44 else 1.0   # dark claws
-        v = abs(fbm(p, 22, 2, 18)); em = 0.5 * smooth01((0.03 - v) / 0.02) * smooth01((p.y + 0.3) / 0.05)
-        return 0.0, blood, em, bright
-    export('farm', me, mask, ao_dist=0.03)
+        v = abs(fbm(p, 22, 2, 18)); em = 0.4 * smooth01((0.03 - v) / 0.02) * smooth01((p.y + 0.3) / 0.05) * (1 - cloth)
+        return cloth, blood * (1 - cloth * 0.4), em, bright
+    export('farm' if variant == 'bare' else 'farm_' + variant, me, mask, ao_dist=0.03)
 
 def build_thigh():
-    ob = skin_obj('thigh', [(0, 0.05, 0), (0, -0.2, 0.012), (0, -0.445, 0.0)], [(0, 1), (1, 2)], [0.088, 0.077, 0.056], 2, 0.006)
+    ob = skin_obj('thigh', [(0, 0.05, 0), (0, -0.12, 0.012), (0, -0.3, 0.008), (0, -0.445, 0.0)], [(0, 1), (1, 2), (2, 3)], [0.09, 0.083, 0.068, 0.056], 2, 0.0055)
     me = evaluated_mesh(ob)
-    def hole(p): return fbm(p, 11, 3, 25) > 0.33 and p.z > 0
-    displace(me, lambda p, n: 0.004 * fbm(p, 12, 2, 3) + (0.0 if hole(p) else 0.005))
-    me = decimate('thigh', me, 1000)
-    export('thigh', me, lambda p, n: (0.0 if hole(p) else 1.0, smooth01((fbm(p, 10, 2, 30) - 0.3) * 3) * (0.9 if hole(p) else 0.45), 0, 1.0), ao_dist=0.06)
+    def hole(p): return (fbm(p, 7, 3, 25) > 0.47 and p.z > 0) or (gauss(p.y + 0.42, 0.04) * smooth01(p.z / 0.03) * (fbm(p, 12, 2, 26) + 0.6) > 0.75)   # a few big rips, torn-out knees
+    def sculpt(p, n):
+        o = 0.004 * fbm(p, 12, 2, 3)
+        o += 0.006 * gauss(p.y + 0.2, 0.1) * smooth01(p.z / 0.03)                           # quads
+        o += 0.004 * gauss(p.y + 0.18, 0.1) * smooth01(-p.z / 0.03)                          # hamstrings
+        if not hole(p):
+            o += 0.011 + 0.004 * math.sin(p.y * 2 * math.pi / 0.06 + 3 * fbm(p, 6, 1, 4)) * gauss(p.y + 0.42, 0.05)   # jeans, bunched at the knee
+            o += 0.003 * fbm(V((p.x * 2, p.y * 0.3, p.z * 2)), 14, 2, 8)
+        return o
+    displace(me, sculpt)
+    me = decimate('thigh', me, 1300)
+    export('thigh', me, lambda p, n: (0.0 if hole(p) else 1.0, smooth01((fbm(p, 10, 2, 30) - 0.3) * 3) * (0.9 if hole(p) else 0.4), 0, 1.0), ao_dist=0.06)
 
 def build_shin():
-    verts = [(0, 0.02, 0), (0, -0.2, -0.012), (0, -0.415, 0.0), (0, -0.46, -0.03), (0, -0.465, 0.07), (0, -0.465, 0.14)]
-    ob = skin_obj('shin', verts, [(0, 1), (1, 2), (2, 3), (2, 4), (4, 5)], [0.058, 0.053, 0.04, 0.046, 0.045, 0.04], 2, 0.006)
+    verts = [(0, 0.02, 0), (0, -0.12, -0.02), (0, -0.25, -0.01), (0, -0.4, 0.0), (0, -0.455, -0.035), (0, -0.462, 0.06), (0, -0.465, 0.13)]
+    ob = skin_obj('shin', verts, [(0, 1), (1, 2), (2, 3), (3, 4), (3, 5), (5, 6)], [0.058, 0.057, 0.046, 0.04, 0.047, 0.047, 0.042], 2, 0.0055)
     me = evaluated_mesh(ob)
-    deform(me, lambda p: V((p.x * (1.15 if p.y < -0.42 else 1.0), max(p.y, -0.495), p.z)))
-    displace(me, lambda p, n: 0.004 * fbm(p, 12, 2, 5) + (0.006 if p.y < -0.41 else 0.004))
-    me = decimate('shin', me, 1000)
+    deform(me, lambda p: V((p.x * (1.18 if p.y < -0.42 else 1.0), max(p.y, -0.495), p.z)))
+    def sculpt(p, n):
+        shoe = p.y < -0.405
+        o = 0.004 * fbm(p, 12, 2, 5)
+        o += 0.008 * gauss(p.y + 0.12, 0.07) * smooth01(-p.z / 0.02)                        # calf
+        if shoe:
+            o += 0.007 - 0.003 * gauss(p.y + 0.475, 0.005)                                  # sole edge
+            o += 0.002 * math.sin(p.z * 2 * math.pi / 0.02) * smooth01((p.y + 0.43) / 0.02) * smooth01(p.z / 0.02)   # laces
+        else:
+            o += 0.012 + 0.003 * fbm(V((p.x * 2, p.y * 0.3, p.z * 2)), 14, 2, 6)            # loose trouser leg
+            o += 0.006 * gauss(p.y + 0.39, 0.012) * (0.6 + 0.4 * fbm(p, 20, 1, 2))           # ragged cuff
+        return o
+    displace(me, sculpt)
+    me = decimate('shin', me, 1300)
     def mask(p, n):
         shoe = p.y < -0.405
-        return 1.0, smooth01((fbm(p, 10, 2, 33) - 0.3) * 3) * 0.4, 0, 0.32 if shoe else 1.0
+        mud = smooth01((-0.3 - p.y) / 0.12) * smooth01((fbm(p, 9, 2, 40) + 0.2) * 2)
+        return 1.0, smooth01((fbm(p, 10, 2, 33) - 0.3) * 3) * 0.35, 0, (0.3 if shoe else 1.0) * (1 - 0.35 * mud)
     export('shin', me, mask, ao_dist=0.06)
 
-# ---------- brute armor (colours baked: cloth=plate accent) ----------
+# ---------- brute: riot gear (plate carrier with pouches, pauldrons, helmet with gas mask, knee pads, forearm guards) ----------
 def build_brute():
-    vest = join_meshes('vest', [box_mesh((0, 0.36, 0.012), (0.5, 0.42, 0.33), 0.06, 3),
-                                box_mesh((0, 0.4, 0.172), (0.36, 0.26, 0.03), 0.012, 2),
-                                box_mesh((0, 0.17, 0.155), (0.3, 0.12, 0.04), 0.012, 2)])
-    ob = remesh_from_mesh('vest', vest, 0.008, 2); me = decimate('vest', evaluated_mesh(ob), 1600)
-    displace(me, lambda p, n: 0.002 * fbm(p, 25, 2, 40))
-    export('brute_vest', me, lambda p, n: (1.0 if p.z > 0.15 else 0.35, smooth01((fbm(p, 9, 2, 41) - 0.3) * 3) * 0.5,
-                                           1.0 if (abs(p.y - 0.44) < 0.012 and p.z > 0.18 and abs(p.x) < 0.15) else 0.0, 1.0), ao_dist=0.06)
-    pad = ico_obj('pad', 1.0, 4); pm = evaluated_mesh(pad)
-    deform(pm, lambda p: V((p.x * 0.15, max(p.y, -0.2) * 0.1 + 0.02, p.z * 0.15)))
-    export('brute_pad', pm, lambda p, n: (0.6, 0.2 * smooth01(fbm(p, 20, 2, 44) * 3), 1.0 if abs(p.y - 0.005) < 0.006 else 0.0, 1.0), ao_dist=0.03)
-    hel = ico_obj('helmet', 1.0, 4); hm = evaluated_mesh(hel)
-    deform(hm, lambda p: V((HEAD_C.x + p.x * 0.112, HEAD_C.y + 0.012 + max(p.y, -0.35) * 0.132, HEAD_C.z + p.z * 0.125)))
-    export('brute_helmet', hm, lambda p, n: (0.35, 0.0, 1.0 if (abs(p.y - 0.17) < 0.012 and p.z > 0.07) else 0.0,
-                                             0.4 if (abs(p.y - 0.17) < 0.02 and p.z > 0.06) else 1.0), ao_dist=0.03)
+    v = [(0, -0.02, 0.0), (0, 0.12, 0.015), (0, 0.29, 0.01), (0, 0.42, -0.005), (0, 0.5, -0.02), (-0.085, 0.435, 0.065), (0.085, 0.435, 0.065),
+         (-0.1, 0.44, -0.09), (0.1, 0.44, -0.09), (-0.13, 0.33, -0.03), (0.13, 0.33, -0.03), (-0.12, 0.52, -0.01), (0.12, 0.52, -0.01)]
+    e = [(0, 1), (1, 2), (2, 3), (3, 4), (3, 5), (3, 6), (3, 7), (3, 8), (2, 9), (2, 10), (4, 11), (4, 12)]
+    r = [x + 0.03 for x in (0.15, 0.14, 0.165, 0.18, 0.15, 0.09, 0.09, 0.09, 0.09, 0.105, 0.105, 0.07, 0.07)]
+    ob = skin_obj('vest_base', v, e, r, 2, 0.009, 3)
+    base = evaluated_mesh(ob)
+    deform(base, lambda p: V((p.x, p.y, p.z * 0.8 + 0.02)))
+    parts = [base,
+             box_mesh((0, 0.38, 0.16), (0.3, 0.24, 0.035), 0.014, 2),                 # front plate
+             box_mesh((0, 0.38, -0.15), (0.3, 0.26, 0.03), 0.014, 2)]                 # back plate
+    for i, x in enumerate((-0.1, 0.0, 0.1)):
+        parts.append(box_mesh((x, 0.16, 0.175), (0.085, 0.1, 0.05), 0.012, 2))       # magazine pouches
+        parts.append(box_mesh((x, 0.215, 0.2), (0.09, 0.02, 0.04), 0.006, 1))        # pouch flaps
+    parts.append(box_mesh((0.13, 0.46, 0.18), (0.05, 0.08, 0.035), 0.01, 2))          # radio pouch
+    parts.append(box_mesh((0, 0.0, 0.02), (0.36, 0.06, 0.3), 0.02, 2))                # duty belt
+    for sx in (-1, 1): parts.append(box_mesh((sx * 0.16, 0.0, 0.1), (0.07, 0.08, 0.06), 0.012, 2))   # belt pouches
+    me = join_meshes('vest', parts)
+    ob = remesh_from_mesh('vest', me, 0.007, 2); me = evaluated_mesh(ob)
+    displace(me, lambda p, n: 0.0015 * fbm(p, 25, 2, 40) - 0.004 * gauss(((p.y - 0.3) * 30) % 1.0 - 0.5, 0.05) * smooth01((abs(p.z) - 0.15) / 0.02))
+    me = decimate('vest', me, 3200)
+    def vmask(p, n):
+        pouch = p.z > 0.15 and p.y < 0.25
+        strap = abs(abs(p.x) - 0.12) < 0.02 and p.y > 0.45
+        return (0.25 if pouch or strap else 1.0, smooth01((fbm(p, 9, 2, 41) - 0.35) * 3) * 0.45, 0.0, 0.8 if pouch else 1.0)
+    export('brute_vest', me, vmask, ao_dist=0.06)
+    # pauldron: two overlapping curved shells
+    shells = []
+    for k, (oy, s) in enumerate(((0.03, 1.0), (-0.035, 0.86))):
+        pad = ico_obj('pad%d' % k, 1.0, 4); pm = evaluated_mesh(pad)
+        deform(pm, lambda p, oy=oy, s=s: V((p.x * 0.088 * s, max(p.y, 0.0) * 0.07 * s + oy, p.z * 0.1 * s)))
+        shells.append(pm)
+    pm = join_meshes('pad', shells)
+    export('brute_pad', pm, lambda p, n: (1.0, 0.25 * smooth01(fbm(p, 20, 2, 44) * 3), 0.0, 1.0 - 0.3 * gauss(p.y - 0.03, 0.005)), ao_dist=0.03)
+    # riot helmet + gas mask
+    hel = ico_obj('helmet', 1.0, 5); hm = evaluated_mesh(hel)
+    deform(hm, lambda p: V((HEAD_C.x + p.x * 0.118, HEAD_C.y + 0.016 + max(p.y, -0.15) * 0.135, HEAD_C.z - 0.005 + p.z * 0.13 * (1.0 if p.z < 0 else 0.3 + 0.7 * smooth01((p.y - 0.15) / 0.25)))))
+    brim = box_mesh((0, HEAD_C.y + 0.07, 0.1), (0.2, 0.012, 0.07), 0.006, 2)                                  # raised visor
+    mask_face = ico_obj('mask', 1.0, 4); mf = evaluated_mesh(mask_face)
+    deform(mf, lambda p: V((p.x * 0.078, 0.11 + p.y * 0.075, 0.07 + p.z * 0.06)))
+    filt = []
+    for sx in (-1, 1):   # twin filter canisters on the cheeks
+        c = bmesh.new()
+        try: bmesh.ops.create_cone(c, cap_ends=True, segments=16, radius1=0.028, radius2=0.028, depth=0.035)
+        except TypeError: bmesh.ops.create_cone(c, cap_ends=True, segments=16, diameter1=0.028, diameter2=0.028, depth=0.035)
+        bmesh.ops.rotate(c, verts=c.verts[:], cent=(0, 0, 0), matrix=Matrix.Rotation(math.radians(70), 3, 'X') @ Matrix.Rotation(math.radians(sx * 35), 3, 'Y'))
+        bmesh.ops.translate(c, verts=c.verts[:], vec=V((sx * 0.055, 0.08, 0.125)))
+        m = bpy.data.meshes.new('flt'); c.to_mesh(m); c.free(); filt.append(m)
+    me = join_meshes('helmet', [hm, brim, mf] + filt)
+    ob = remesh_from_mesh('helmet', me, 0.0035, 1); me = decimate('helmet', evaluated_mesh(ob), 3400)
+    lenses = [small_sphere((sx * 0.042, 0.168, 0.118), 0.02, 2) for sx in (-1, 1)]
+    for L in lenses: deform(L, lambda p: V((p.x, p.y, 0.118 + (p.z - 0.118) * 0.35)))
+    def hmask(p, n):
+        rubber = p.y < 0.19 and p.z > 0.02
+        return (0.0 if rubber else 1.0, 0.2 * smooth01((fbm(p, 12, 2, 46) - 0.3) * 3), 0.0, 0.55 if rubber else 1.0)
+    export('brute_helmet', me, hmask, ao_dist=0.03, emissive_parts=[(join_meshes('lens', lenses), 1.0)])
+    # knee pads + forearm guards (rigid to the knee / elbow)
+    kp = ico_obj('knee', 1.0, 3); km = evaluated_mesh(kp)
+    deform(km, lambda p: V((p.x * 0.07, p.y * 0.085 - 0.02, max(p.z, -0.2) * 0.05 + 0.06)))
+    export('brute_knee', km, lambda p, n: (1.0, 0.2 * smooth01(fbm(p, 20, 2, 47) * 3), 0.0, 1.0), ao_dist=0.03)
+    gd = skin_obj('guard', [(0, -0.06, 0.012), (0, -0.27, 0.018)], [(0, 1)], [0.038, 0.032], 2, 0.004, 2)
+    gm = evaluated_mesh(gd); deform(gm, lambda p: V((p.x * 1.05, p.y, max(p.z, 0.0) + 0.01)))
+    gm = decimate('guard', gm, 500)
+    export('brute_guard', gm, lambda p, n: (1.0, 0.2 * smooth01(fbm(p, 20, 2, 48) * 3), 0.0, 1.0), ao_dist=0.03)
 
 # ---------- boss growth: hunched spiky mass on the upper back ----------
 def build_boss_hump():
@@ -477,9 +688,10 @@ def build_gauntlet_forearm():
 def run():
     t0 = time.time()
     scene_setup()
-    jobs = [('head_a', lambda: build_head('a')), ('head_b', lambda: build_head('b')), ('jaw', build_jaw),
-            ('torso_shirt', lambda: build_torso('shirt')), ('torso_bare', lambda: build_torso('bare')), ('pelvis', build_pelvis),
-            ('uarm_sleeve', lambda: build_uarm('sleeve')), ('uarm_bare', lambda: build_uarm('bare')), ('farm', build_farm),
+    jobs = [('head_a', lambda: build_head('a')), ('head_b', lambda: build_head('b')), ('head_c', lambda: build_head('c')), ('head_d', lambda: build_head('d')), ('jaw', build_jaw),
+            ('torso_shirt', lambda: build_torso('shirt')), ('torso_bare', lambda: build_torso('bare')), ('torso_jacket', lambda: build_torso('jacket')), ('torso_lean', lambda: build_torso('lean')), ('torso_bloat', lambda: build_torso('bloat')), ('pelvis', build_pelvis),
+            ('uarm_sleeve', lambda: build_uarm('sleeve')), ('uarm_bare', lambda: build_uarm('bare')), ('uarm_jacket', lambda: build_uarm('jacket')),
+            ('farm', build_farm), ('farm_jacket', lambda: build_farm('jacket')),
             ('thigh', build_thigh), ('shin', build_shin), ('brute', build_brute), ('boss_hump', build_boss_hump),
             ('g_right', build_gauntlet_right), ('g_left', build_gauntlet_left), ('g_forearm', build_gauntlet_forearm)]
     only = globals().get('NQ_ONLY')

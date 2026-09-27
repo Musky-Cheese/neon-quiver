@@ -8,18 +8,20 @@ const ZTYPES = {
   brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
   boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
 };
-// rotting skin: grey-green, bruised violet, waxy pale, necrotic brown, blue-grey
-const SKINS = [[0.42, 0.48, 0.36], [0.46, 0.38, 0.44], [0.62, 0.6, 0.52], [0.36, 0.3, 0.24], [0.4, 0.45, 0.48], [0.5, 0.5, 0.4]];
-// what they were wearing when it happened: [shirt, pants] by type
+// dead skin across every complexion: pallid, ashen, olive, brown, deep brown, sallow, livid, jaundiced
+const SKINS = [[0.36, 0.3, 0.25], [0.31, 0.29, 0.27], [0.25, 0.19, 0.14], [0.15, 0.095, 0.07], [0.085, 0.055, 0.042], [0.29, 0.28, 0.2], [0.27, 0.2, 0.24], [0.33, 0.27, 0.16]];
+// what they were wearing when it happened: [top, trousers]
+const JEANS = [0.12, 0.16, 0.26], BLACK = [0.05, 0.05, 0.06], KHAKI = [0.32, 0.28, 0.2];
 const OUTFITS = {
-  walker: [[[0.62, 0.62, 0.6], [0.1, 0.11, 0.16]], [[0.3, 0.36, 0.5], [0.12, 0.12, 0.13]], [[0.7, 0.55, 0.1], [0.62, 0.5, 0.1]], [[0.26, 0.09, 0.1], [0.16, 0.14, 0.12]], [[0.2, 0.3, 0.22], [0.2, 0.2, 0.22]], [[0.36, 0.28, 0.18], [0.1, 0.11, 0.16]]],
-  runner: [[[0.12, 0.12, 0.12], [0.08, 0.1, 0.18]], [[0.5, 0.1, 0.08], [0.1, 0.1, 0.1]], [[0.18, 0.22, 0.3], [0.14, 0.14, 0.15]], [[0.3, 0.3, 0.26], [0.06, 0.06, 0.07]]],
-  brute: [[[0.07, 0.08, 0.13], [0.06, 0.07, 0.1]], [[0.1, 0.1, 0.1], [0.08, 0.08, 0.08]]],
+  walker: [[[0.42, 0.42, 0.4], BLACK], [[0.18, 0.25, 0.38], JEANS], [[0.2, 0.2, 0.21], JEANS], [[0.28, 0.06, 0.07], KHAKI], [[0.17, 0.19, 0.12], BLACK], [[0.12, 0.3, 0.3], [0.12, 0.3, 0.3]],
+    [[0.05, 0.07, 0.14], [0.05, 0.06, 0.1]], [[0.38, 0.16, 0.04], [0.14, 0.14, 0.16]], [[0.2, 0.11, 0.06], JEANS], [[0.04, 0.04, 0.045], [0.18, 0.18, 0.2]], [[0.35, 0.07, 0.06], JEANS], [[0.4, 0.34, 0.24], BLACK]],
+  runner: [[BLACK, BLACK], [[0.45, 0.08, 0.06], [0.1, 0.1, 0.1]], [[0.14, 0.2, 0.3], [0.14, 0.14, 0.15]], [[0.3, 0.3, 0.28], BLACK], [[0.1, 0.25, 0.12], [0.08, 0.08, 0.09]], [[0.5, 0.5, 0.48], JEANS]],
+  brute: [[[0.05, 0.07, 0.14], [0.05, 0.06, 0.1]], [[0.06, 0.06, 0.07], [0.06, 0.06, 0.07]]],
   boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
 };
-const CLOTHES = [[0.14, 0.15, 0.2], [0.26, 0.09, 0.1], [0.1, 0.18, 0.2], [0.3, 0.27, 0.22], [0.12, 0.12, 0.12], [0.3, 0.2, 0.09], [0.36, 0.36, 0.38], [0.2, 0.24, 0.16]];
-const PANTS = [[0.1, 0.11, 0.16], [0.16, 0.14, 0.12], [0.08, 0.08, 0.09], [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
-const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06]];
+const CLOTHES = OUTFITS.walker.map(o => o[0]);
+const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
+const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
 function ensurePose(z) { if (z._ps !== STEPN.n) { if (ZRIG.ready) poseZombieRig(z, 0, GAME.time); else drawZombieFramesOnly(z); } }
@@ -33,7 +35,8 @@ function spawnZombie(type, x, z, wave) {
     type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.35, wave * 0.02)), scale: T.scale * rand(0.95, 1.06),
     phase: Math.random() * TAU, state: 'walk', atkT: 0, atkCd: 0.5, flinch: 0, flash: 0, burn: 0, dieT: 0, dead: false,
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
-    bare: Math.random() < 0.3, sleeve: Math.random() < 0.55, headVar: Math.random() < 0.5 ? 'a' : 'b',
+    bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
+    look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
     stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
@@ -42,8 +45,19 @@ function spawnZombie(type, x, z, wave) {
     dv: V0(), pitch: 0, pitchV: 0, roll: 0, rollV: 0, crumple: 0, crumpleMode: false, pin: null, neckBleed: 0, fallBack: false,
     head: V0(), a: V0(), b: V0(), core: V0(), hipL: V0(), knL: V0(), ftL: V0(), hipR: V0(), knR: V0(), ftR: V0(),
   };
-  if (type === 'runner') zz.bare = Math.random() < 0.5;
-  if (type === 'boss') { zz.y = 40; zz.state = 'drop'; zz.bare = true; zz.headVar = 'a'; }
+  // what each body looks like and how it moves: clothes, build, gait
+  const r = Math.random();
+  if (type === 'walker') {
+    zz.top = r < 0.34 ? 'shirt' : r < 0.58 ? 'jacket' : r < 0.72 ? 'bare' : r < 0.87 ? 'bloat' : 'lean';
+    const g = Math.random(); zz.gait = g < 0.45 ? 'walk' : g < 0.7 ? 'walk_b' : 'walk_c';
+    if (zz.gait === 'walk_b') zz.speed *= 0.8;
+  } else if (type === 'runner') {
+    zz.top = r < 0.4 ? 'lean' : r < 0.65 ? 'bare' : 'shirt'; zz.gait = Math.random() < 0.6 ? 'run' : 'run_b';
+    if (zz.headVar === 'c' && Math.random() < 0.5) zz.headVar = 'a';
+  } else if (type === 'brute') { zz.top = 'shirt'; zz.headVar = Math.random() < 0.5 ? 'a' : 'b'; }
+  zz.bare = zz.top === 'bare' || zz.top === 'lean';
+  if (zz.headVar === 'c') zz.hair = pick([HAIRS[0], HAIRS[1], HAIRS[3], HAIRS[4]]);   // long hair reads as hair, not a grey cap
+  if (type === 'boss') { zz.y = 40; zz.state = 'drop'; zz.bare = true; zz.top = 'bare'; zz.headVar = 'a'; }
   ZOMBIES.push(zz);
   return zz;
 }

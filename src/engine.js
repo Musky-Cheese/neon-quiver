@@ -401,28 +401,51 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
     base = mix(skin, tint, clm);
+#ifdef NQ_Z
+    bl = smoothstep(0.3, 0.95, bl);     // blood in stains and runs, not a wash over everything
+    base = mix(base, vec3(0.085,0.01,0.007), bl*0.85);
+#else
     base = mix(base, vec3(0.13,0.008,0.006), bl*0.92);
+#endif
     base *= ao;
     emis = iemit * vNqM.x * dynK;
     float armour = step(6.5, mat);
 #ifdef NQ_Z
     armour = step(6.5, vPart) * step(vPart, 8.5);
 #endif
-    rough = mix(mix(0.58, 0.2, bl), 0.32, armour); metal = armour*0.7; rimK = 1.0;
+    rough = mix(mix(mix(0.62, 0.88, clm), 0.25, bl), 0.55, armour); metal = armour * 0.08; rimK = 0.6;
 #ifdef NQ_Z
     {   // decay: mottled skin, dark veins, wet wounds; grimy clothes torn open to the skin beneath
       vec3 q = vNqL * 7. + uSeed; float skinM = (1. - clm) * (1. - armour);
       float mott = vn(q.xy * 1.3 + q.z * 0.7);
-      float vein = smoothstep(0.035, 0.0, abs(vn(q.xz * 2.1 + q.y * 0.6) - 0.5)) * skinM;
+      float vein = smoothstep(0.03, 0.0, abs(vn(q.xz * 2.1 + q.y * 0.6) - 0.5)) * skinM * smoothstep(0.4, 0.7, vn(q.xy * 0.7 + 3.3));
       float wound = smoothstep(0.74, 0.82, vn(q.yz * 0.8 + 7.3)) * (1. - armour);
-      float tear = smoothstep(0.66, 0.74, vn(q.xy * 1.6 + 3.1)) * clm * (1. - armour);
+      float tear = smoothstep(0.8, 0.86, vn(q.xy * 1.6 + 3.1)) * clm * (1. - armour);
       base = mix(base, base * vec3(0.78, 0.72, 0.82) * (0.65 + 0.6 * mott), skinM * 0.85);
-      base = mix(base, vec3(0.11, 0.04, 0.1) * ao, vein * 0.7);
+      base = mix(base, base * vec3(0.55, 0.45, 0.6), vein * 0.5);
       base = mix(base, skin * ao * 0.75, tear);
       base *= 1. - clm * (1. - tear) * 0.4 * vn(q.xz * 3. + 1.7);
       base = mix(base, vec3(0.16, 0.015, 0.012) * ao, wound * 0.9);
-      rough = mix(rough, 0.12, max(wound, bl));
-      bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.004 + vein * 0.002;
+      // old blood dries brown-black; fresh stays wet and red
+      float dry = smoothstep(0.25, 0.6, vn(q.xy * 2.3 + 5.1));
+      base = mix(base, vec3(0.07, 0.025, 0.018) * ao, bl * dry * 0.65);
+      // grime from the street: mud and filth climbing the legs, heaviest on shoes and cuffs
+      float mud = (1. - smoothstep(0.05, 0.8, vNqL.y)) * (0.45 + 0.55 * vn(q.xz * 0.9 + 2.7));
+      base = mix(base * (1. - 0.35 * mud), vec3(0.075, 0.06, 0.045) * ao, mud * 0.4 * (0.4 + 0.6 * clm));
+      // livor mortis: blood pooled low in the body darkens and purples the skin
+      base = mix(base, base * vec3(0.72, 0.6, 0.78), skinM * (1. - smoothstep(0.7, 1.3, vNqL.y)) * 0.35);
+      rough = mix(rough, 0.12, max(wound, bl * (1. - dry)));
+      float soak = clamp(wetK, 0., 1.);                                   // rain: skin takes a thin sheen, cloth goes dark and heavy
+      rough = mix(rough, rough * 0.72, soak * skinM);
+      base *= 1. - 0.2 * soak * clm * (1. - armour);
+      bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.004 + vein * 0.002 + (vn(q.xy * 6.) - 0.5) * 0.0015 * clm;   // weave
+      // eyes (full-emissive verts on the head): milky, clouded, wet, with only a faint infected glint
+      float eye = step(0.97, vNqM.x) * step(4.5, vPart) * step(vPart, 5.5);
+      base = mix(base, vec3(0.34, 0.33, 0.28) * mix(1., vn(q.xy * 9.) * 0.4 + 0.7, 0.5), eye);
+      rough = mix(rough, 0.08, eye); rimK = mix(rimK, 0.0, eye);
+      // teeth (tagged 0.9 in the sculpt, 0.27 after the vein softening): stained, cracked enamel, never glowing
+      float tooth = step(0.2, vNqM.x) * step(vNqM.x, 0.35) * step(4.5, vPart) * step(vPart, 6.5);
+      base = mix(base, vec3(0.3, 0.25, 0.15) * ao * (0.75 + 0.25 * vn(q.xy * 20.)), tooth); rough = mix(rough, 0.3, tooth); emis *= 1. - tooth;
     }
 #endif
   } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture
