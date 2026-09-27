@@ -528,6 +528,7 @@ function render3(time, W, H, fov, cam) {
   }
   rainMat.uniforms.uAlpha.value = T.rain; rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol);
   NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain;
+  NQU.uAirK.value = SETTINGS.quality === 0 ? 0 : 0.0078 * (0.6 + T.rain) * (T.airK !== undefined ? T.airK : 1);
   VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain) * (SETTINGS.quality === 0 ? 0.6 : 1);
   updateLights3(cam);
   // dynamic geometry

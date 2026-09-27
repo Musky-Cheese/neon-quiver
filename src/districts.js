@@ -50,7 +50,8 @@ function buildDistricts(C) {
     let a = a0;
     while (a < a1 - 0.01) {
       let w = r(11, 20); if (a1 - (a + w) < 7) w = a1 - a;
-      if (axis === 'x') building(a, a + w, b0, b1, r(hmin, hmax), face, opt); else building(b0, b1, a, a + w, r(hmin, hmax), face, opt);
+      const o = typeof opt === 'function' ? opt(w) : opt;
+      if (axis === 'x') building(a, a + w, b0, b1, r(hmin, hmax), face, o); else building(b0, b1, a, a + w, r(hmin, hmax), face, o);
       a += w;
     }
   }
@@ -124,9 +125,10 @@ function buildDistricts(C) {
   /* ---------------- NIGHT MARKET (east) ---------------- */
   setG('near');
   quad(74, 138, -32, 32, 0.014, [0.1, 0.082, 0.075], 2);
-  row('x', 74, 164, 32, 58, '-z', 26, 70);
-  row('x', 74, 164, -58, -32, '+z', 26, 70);
-  row('z', -32, 32, 138, 164, '-x', 40, 90);
+  let mk = 0; const mshop = (w) => w >= 12 ? { shop: MARKET_ORDER[mk++ % MARKET_ORDER.length] } : {};   // market frontages are all walk-in shops
+  row('x', 74, 164, 32, 58, '-z', 26, 70, mshop);
+  row('x', 74, 164, -58, -32, '+z', 26, 70, mshop);
+  row('z', -32, 32, 138, 164, '-x', 40, 90, mshop);
   setG('props');
   const awn = [[0.35, 0.05, 0.06], [0.05, 0.2, 0.22], [0.3, 0.2, 0.04], [0.2, 0.06, 0.25], [0.08, 0.2, 0.08]];
   function stall(x, z, facing) {   // facing: +1 counter toward +z, -1 toward -z
@@ -188,7 +190,7 @@ function buildDistricts(C) {
   /* ---------------- THE SUBURBS (south of the plaza) ---------------- */
   // dead suburbia between the towers and the gardens: a strip of low shops, then houses on two cross streets
   setG('near');
-  row('z', 89, 101, -24, -8, '+x', 7, 11);                                           // two-storey shops on one side, a gas station on the other
+  row('z', 89, 101, -24, -8, '+x', 7, 11, (w) => w >= 12 ? { shop: 'hardware' } : {});                                           // two-storey shops on one side, a gas station on the other
   setG('sub');
   const SG = C.getG();
   quad(-64, 64, 100, 163, 0.012, [0.06, 0.08, 0.045], 19);                          // overgrown lawns

@@ -120,7 +120,7 @@ const LAYER_VM = 1;
 const NQU = {
   uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
-  uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 },
+  uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
@@ -176,7 +176,7 @@ attribute vec2 nqm;
       .replace('#include <common>', `#include <common>
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
-uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor;
+uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 ${NOISE_GLSL}
 // rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
 float nqRipple(vec2 p, float t) {
@@ -475,6 +475,20 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
+#if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)
+    // glowing air: light scattered by the rain haze between the eye and this surface, integrated
+    // analytically along the view ray for every nearby point light (so walls and bodies occlude it)
+    if (uAirK > 0.0001) {
+      vec3 P = -vViewPosition; float t = length(P); vec3 v = P / max(t, 1e-4); vec3 air = vec3(0.);
+      for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
+        vec3 Lp = pointLights[i].position; float b = dot(v, Lp); float h = sqrt(max(dot(Lp, Lp) - b * b, 0.) + 0.06);
+        float I = (atan((t - b) / h) - atan(-b / h)) / h;
+        float rng = pointLights[i].distance; float w = rng > 0. ? clamp(1. - h / rng, 0., 1.) : 1.;
+        air += pointLights[i].color * I * w * w;
+      }
+      gl_FragColor.rgb += air * uAirK;
+    }
+#endif
     gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0,0.95,0.9)*1.5, flash); }`);
   };
   m.customProgramCacheKey = () => 'nq-' + kind;

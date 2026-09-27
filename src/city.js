@@ -99,6 +99,9 @@ function buildCity() {
     ['PAWN + CHIPS', 'panel'], ['KARAOKE', 'font'], ['VOLT', 'seg'], ['DATA CAFE', 'panel'], ['LUCKY 88', 'seg'], ['RAMEN', 'font'], ['MEMORY SHOP', 'panel'], ['SECTOR 7', 'seg'], ['CLONE CLINIC', 'font']];
   const vertWords = ['HOTEL', 'BAR', 'RAMEN', 'LIVE', 'OPEN', 'TATTOO', 'CHIPS', 'CLUB'];
   let sw = 0, vw = 0, bb = 0;
+  const RC = mulberry(555), rc = (a, b) => a + RC() * (b - a);   // street clutter has its own dice so the city layout stays put
+  const SMALL = [['NOODLES', '#ff5a3c', 'font'], ['PHARMACY', '#3cff9a', 'panel'], ['CASH 4 CHROME', '#ffb52e', 'seg'], ['HOSTEL', '#29e7ff', 'panel'], ['REPAIR', '#ff2e88', 'seg'], ['SUSHI', '#ff3040', 'font'], ['NAILS', '#b44dff', 'font'], ['DENTIST', '#9fe7ff', 'panel'], ['LAUNDRY', '#a6ff3a', 'seg'], ['NO VACANCY', '#ff3040', 'seg']].map(([t, c, st]) => [signTexture(t, c, st), hex(c)]);
+  const bagC = [[0.02, 0.02, 0.025], [0.03, 0.035, 0.04], [0.12, 0.1, 0.05]];
   let shopN = 0; const nextShop = () => SHOP_ORDER[shopN % SHOP_ORDER.length];
   // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
   function shopBody(x0, x1, z0, z1, h, face, col, type) {
@@ -190,6 +193,26 @@ function buildCity() {
       addSign(t, vp[0] + tx * 0.14, vy, vp[2] + tz * 0.14, bry, 2.1, vh, [1.8, 1.8, 1.8], 0, true);
       addSign(t, vp[0] - tx * 0.14, vy, vp[2] - tz * 0.14, bry + Math.PI, 2.1, vh, [1.8, 1.8, 1.8], 0, true);
     }
+    // facade + street detail: a drainpipe, cornice ledges, AC units under windows, small projecting signs, and rubbish at the kerb
+    { const dcol = [col[0] * 0.75, col[1] * 0.75, col[2] * 0.75];
+      const dp = P((RC() < 0.5 ? -1 : 1) * (span / 2 - 0.35), h / 2, 0.12); B(dp[0], h / 2, dp[2], 0.14, h, 0.14, [0.06, 0.06, 0.065], 0, 4);
+      for (let y = 7.4 + rc(0, 3); y < Math.min(h, 60) - 2; y += rc(9, 15)) { const q = P(0, y, 0.18); B(q[0], y, q[2], tx ? span : 0.36, 0.28, tz ? span : 0.36, dcol, 0, 16); }
+      for (let i = 0; i < Math.floor(span / 3.2); i++) if (RC() < 0.5) {
+        const y = 3.3 * Math.floor(rc(2, Math.min(h / 3.3 - 1, 9))) + 0.75, a = rc(-span / 2 + 1, span / 2 - 1), q = P(a, y, 0.34);
+        B(q[0], y, q[2], tx ? 0.85 : 0.6, 0.55, tz ? 0.85 : 0.6, [0.42, 0.42, 0.44], 0, 4);
+        const f = P(a, y, 0.65); B(f[0], y, f[2], tx ? 0.5 : 0.02, 0.4, tz ? 0.5 : 0.02, [0.08, 0.08, 0.09], 0, 4);
+        const k = P(a, y - 0.32, 0.4); B(k[0], y - 0.32, k[2], tx ? 0.9 : 0.5, 0.04, tz ? 0.9 : 0.5, [0.2, 0.2, 0.21], 0, 4);   // bracket
+      }
+      if (RC() < 0.7) { const [tex, sc2] = SMALL[Math.floor(RC() * SMALL.length)], a = rc(-span / 2 + 1.5, span / 2 - 1.5), y = rc(6, 9), q = P(a, y, 0.9), bry = ry + Math.PI / 2;
+        B(q[0], y, q[2], tx ? 0.12 : 1.5, 0.7, tz ? 0.12 : 1.5, [0.03, 0.03, 0.04]);
+        for (const o of [0.07, -0.07]) WORLD.signs.push({ tex, m: M4.trs(M4.create(), q[0] + tx * o, y, q[2] + tz * o, 0, bry + (o < 0 ? Math.PI : 0), 0, 1.4, 0.35, 1), col: [sc2[0] * 1.4, sc2[1] * 1.4, sc2[2] * 1.4], mode: 0, seed: RC() * 100, add: true }); }
+      const pg = g; g = gProps;
+      for (let i = 0; i < 3; i++) if (RC() < 0.45) { const a = rc(-span / 2 + 0.8, span / 2 - 0.8); if (opt.shop && Math.abs(a) < 2) continue;
+        for (let k = 0; k < 2 + Math.floor(RC() * 3); k++) { const q = P(a + rc(-0.6, 0.6), 0, rc(0.4, 1.1)), sz = rc(0.32, 0.5); g.blob(M4.trs(M, q[0], sz * 0.55, q[2], 0, rc(0, 6), 0, 1, 1, 1), sz, sz * 0.62, sz * 0.8, 0.22, Math.floor(RC() * 999), bagC[Math.floor(RC() * 3)], 0, 15, 9, 6); } }
+      if (RC() < 0.25) { const q = P(rc(-span / 2 + 1, span / 2 - 1), 0, 1.6); B(q[0], 0.4, q[2], 0.26, 0.8, 0.26, [0.55, 0.08, 0.05], 0, 11); B(q[0], 0.82, q[2], 0.2, 0.1, 0.2, [0.55, 0.08, 0.05], 0, 11); WORLD.circles.push({ x: q[0], z: q[2], r: 0.2, h: 0.85 }); }   // hydrant
+      if (RC() < 0.3) { const q = P(rc(-span / 2 + 1, span / 2 - 1), 0, 1.3); B(q[0], 0.55, q[2], tx ? 0.5 : 0.45, 1.1, tz ? 0.5 : 0.45, [0.12, 0.25, 0.5], 0, 8); B(q[0], 0.8, q[2] , tx ? 0.35 : 0.46, 0.2, tz ? 0.35 : 0.46, [0.7, 0.8, 0.85], 0.2, 10); WORLD.circles.push({ x: q[0], z: q[2], r: 0.3, h: 1.1 }); }   // newspaper box
+      g = pg;
+    }
     // holo billboard on some tall facades
     if (h > 45 && R() < 0.7) {
       const by = r(20, Math.min(h - 10, 34)), bw = Math.min(span * 0.8, 18); const bp = P(0, by, 0.4);
@@ -208,6 +231,21 @@ function buildCity() {
       }
     }
   }
+  { const pg = g; g = gProps; const Mc = M4.create();
+    const span = (ax, ay, az, bx, by, bz, sag, lit) => { let px = ax, py = ay, pz = az; for (let i = 1; i <= 10; i++) { const t = i / 10, x = lerp(ax, bx, t), z = lerp(az, bz, t), y = lerp(ay, by, t) - Math.sin(t * Math.PI) * sag; g.box(M4.align(Mc, px, py, pz, x, y, z, 0.03, 0.03), [0.03, 0.03, 0.035], 0, 0); if (lit && i % 2 === 0 && i < 10) { g.sphere(M4.trs(Mc, x, y - 0.12, z, 0, 0, 0, 0.12, 0.12, 0.12), lit, 3, 0, 6, 4); } px = x; py = y; pz = z; } };
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let d = 45; d < 72; d += rc(2.2, 4.5)) {
+      const c = dx ? [d * dx, 0] : [0, d * dz], y0 = rc(5.5, 12), y1 = y0 + rc(-1.5, 1.5), lit = RC() < 0.25 ? [[1, 0.8, 0.5], [1, 0.3, 0.6], [0.4, 0.9, 1]][Math.floor(RC() * 3)] : null;
+      if (dx) span(c[0] + rc(-1, 1), y0, -5.9, c[0] + rc(-1, 1), y1, 5.9, rc(0.4, 1.4), lit); else span(-5.9, y0, c[1] + rc(-1, 1), 5.9, y1, c[1] + rc(-1, 1), rc(0.4, 1.4), lit);
+    }
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const side of [-1, 1]) for (let d = 47 + (side > 0 ? 3 : 0); d < 72; d += 8) {   // wall lamps down the side streets
+      const lc = RC() < 0.7 ? [1.7, 1.15, 0.6] : [0.7, 1.3, 1.7], dead = RC() < 0.15;
+      const wx = dx ? d * dx : side * 5.95, wz = dx ? side * 5.95 : d * dz, ox = dx ? 0 : -side * 0.3, oz = dx ? -side * 0.3 : 0;
+      g.box(M4.trs(Mc, wx + ox * 0.5, 3.4, wz + oz * 0.5, 0, 0, 0, dx ? 0.35 : 0.3, 0.1, dx ? 0.3 : 0.35), [0.08, 0.08, 0.09], 0, 4);
+      g.box(M4.trs(Mc, wx + ox, 3.33, wz + oz, 0, 0, 0, 0.28, 0.06, 0.28), dead ? [0.2, 0.2, 0.2] : lc, dead ? 0 : 3, 0);
+      if (!dead) { WORLD.lights.push({ p: [wx + ox * 3, 3.1, wz + oz * 3], r: 9, c: lc, shop: true }); WORLD.halos.push({ p: [wx + ox * 1.2, 3.25, wz + oz * 1.2], s: 1.3, c: [lc[0] * 0.35, lc[1] * 0.35, lc[2] * 0.35] }); }
+      if (RC() < 0.4) for (let k = 0; k < 3; k++) { const bx = wx + ox * 2 + rc(-1, 1) * (dx ? 1 : 0), bz = wz + oz * 2 + rc(-1, 1) * (dx ? 0 : 1), sz = rc(0.3, 0.5); g.blob(M4.trs(Mc, bx, sz * 0.55, bz, 0, rc(0, 6), 0, 1, 1, 1), sz, sz * 0.62, sz * 0.8, 0.22, Math.floor(RC() * 999), bagC[Math.floor(RC() * 3)], 0, 15, 9, 6); }
+    }
+    g = pg; }
   // east / west: span z [-42.5,-6] & [6,42.5]
   for (const side of [1, -1]) {
     for (const half of [-1, 1]) {

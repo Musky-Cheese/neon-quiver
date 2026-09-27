@@ -412,10 +412,10 @@ const LAYER_VM = 1;
 const NQU = {
   uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
-  uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 },
+  uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
-  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) },
+  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
 };
 const NOISE_GLSL = `
 float h21(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
@@ -468,7 +468,7 @@ attribute vec2 nqm;
       .replace('#include <common>', `#include <common>
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
-uniform sampler2D uOcc; uniform vec4 uOccB;
+uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 ${NOISE_GLSL}
 // rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
 float nqRipple(vec2 p, float t) {
@@ -516,18 +516,23 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   vec3 N0 = normalize(vNqN);
   // baked occlusion: how much open sky this spot sees (alley floors, wall bases and corners go dark).
   // Step out of the surface first so a wall samples the street in front of it, then fade up the wall.
-  float nqOcc = 1.0;
+  float nqOcc = 1.0, nqIn = 0.0;
 #if !defined(NQ_Z) && !defined(NQ_VM)
   if (uOccB.z > 0.0) {
     vec2 ouv = (vNqW.xz + N0.xz * 0.4 - uOccB.xy) * uOccB.zw;
     float a = texture2D(uOcc, ouv).r;
     a = mix(a, 1.0, smoothstep(0.0, 14.0, vNqW.y) * a);
     nqOcc = mix(a, 1.0, step(0.5, N0.y) * step(1.2, vNqW.y));   // roofs and ledges look at the sky
+    // inside a walk-in room: dry, sheltered, evenly lit (the sky map knows nothing of ceilings)
+    nqIn = step(0.5, texture2D(uIndoor, (vNqW.xz + N0.xz * 0.3 - uOccB.xy) * uOccB.zw).r) * step(vNqW.y, 4.5);
+    nqOcc = mix(nqOcc, 0.82, nqIn);
   }
 #endif
+  float wetK = uWet * (1. - nqIn);
   vec2 fcW = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
   // rain streaks running down walls: darker, glossier stripes that fade toward the top
   float streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vn(vec2(fcW.x * 11.7, fcW.y * 0.3));
+  streak *= 1. - nqIn;
   if ((mat > 0.5 && mat < 1.5) || (mat > 8.5 && mat < 9.5)) {   // facades with windows (concrete panels or brick)
     if (abs(N0.y) < 0.5) {
       vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
@@ -579,7 +584,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       wall *= 1. - clamp(grime, 0., 1.4) * 0.5;
       base = mix(wall, vec3(0.015,0.02,0.04), win);
       bumpH -= win * 0.03;
-      rough = mix(mix(0.85, 0.45, streak * uWet), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
+      rough = mix(mix(0.85, 0.45, streak * wetK), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
     } else if (mat > 8.5) { base *= 0.8; }
   } else if (mat > 1.5 && mat < 2.5) {      // plaza tiles, wet
     vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
@@ -591,8 +596,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float stain = vn(vNqW.xz * 0.7) * 0.25 + vn(vNqW.xz * 3.7) * 0.12;
     base = mix(base*tileV*(1.-line*0.5)*(1. - stain), base*0.35, pud);
     bumpH = -line * 0.01 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
-    rough = mix(0.62, mix(0.62, 0.04, clamp(uWet, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
-    wetRefl = mix(0.22, 1.0, pud) * clamp(uWet, 0., 1.);   // the whole wet surface mirrors a little, puddles fully
+    rough = mix(0.62, mix(0.62, 0.04, clamp(wetK, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
+    wetRefl = mix(0.22, 1.0, pud) * clamp(wetK, 0., 1.);   // the whole wet surface mirrors a little, puddles fully
   } else if (mat > 2.5 && mat < 3.5) {      // asphalt
     float pud = max(smoothstep(0.5,0.7, vn(vNqW.xz*0.12)), smoothstep(0.8, 0.5, nqOcc) * 0.8);     // gutters stay wet
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
@@ -608,8 +613,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       pud *= 1. - grav * 0.7; bumpH += grav * fine * 0.006;
     }
     bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
-    rough = mix(0.85, mix(0.8, 0.05, clamp(uWet,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*uWet);
-    wetRefl = mix(0.2, 1.0, pud) * clamp(uWet, 0., 1.);
+    rough = mix(0.85, mix(0.8, 0.05, clamp(wetK,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
+    wetRefl = mix(0.2, 1.0, pud) * clamp(wetK, 0., 1.);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
     float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
     rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
@@ -621,12 +626,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
     bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
   } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
-    base *= 0.35; rough = 0.04 + streak * 0.14 * uWet; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
+    base *= 0.35; rough = 0.04 + streak * 0.14 * wetK; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
   } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
     float scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
     float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
     base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
-    rough = mix(0.24, 0.75, dirt) + streak * 0.05 * uWet; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
+    rough = mix(0.24, 0.75, dirt) + streak * 0.05 * wetK; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
   } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
     float rid = abs(vn(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
     float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
@@ -634,8 +639,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
   } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
     float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vn(vNqW.xz * 23.) * 0.5;
-    base *= (0.7 + 0.45 * gr) * mix(1., 0.72, uWet * step(0.5, N0.y));
-    bumpH = gr * 0.002; rough = mix(0.62, 0.35, uWet * step(0.5, N0.y)); rimK = 0.5;
+    base *= (0.7 + 0.45 * gr) * mix(1., 0.72, wetK * step(0.5, N0.y));
+    bumpH = gr * 0.002; rough = mix(0.62, 0.35, wetK * step(0.5, N0.y)); rimK = 0.5;
   } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
     // individual leaves / petals: a cellular pattern laid on the dominant plane of the canopy surface
     bool pinkF = base.r > base.g * 1.35;
@@ -662,20 +667,20 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vn(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
     float pit = smoothstep(0.78, 0.9, vn(vNqW.xz * 31. + vNqW.y * 29.));
     float top = step(0.5, N0.y);
-    base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, uWet * top);
-    bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, uWet * top * 0.8); rimK = 0.3;
+    base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, wetK * top);
+    bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, wetK * top * 0.8); rimK = 0.3;
   } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
     float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
     base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
     float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
     base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
     emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
-    bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(uWet, 0., 1.) * 0.6); rimK = 0.2;
+    bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(wetK, 0., 1.) * 0.6); rimK = 0.2;
   } else if (mat > 18.5 && mat < 19.5) {    // overgrown lawn: patchy weeds, bare mud, wet sheen
     float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vn(vNqW.xz * 27.);
     base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
     base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
-    bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(uWet, 0., 1.) * 0.5); rimK = 0.2;
+    bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
   } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
     float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
     vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
@@ -712,6 +717,17 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.004 + vein * 0.002;
     }
 #endif
+  } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture
+    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vn(vec2(fcW.x * 40., fcW.y * 2.));
+    base *= (0.9 + 0.14 * n1 - 0.05 * n2 - 0.03 * n3) * (1. - smoothstep(0.45, 0.0, vNqW.y) * 0.3 * (1. - step(0.5, abs(N0.y))));
+    rough = 0.85 - n2 * 0.08; rimK = 0.15; bumpH = n2 * 0.0006 + n3 * 0.0003;
+  } else if (mat > 20.5 && mat < 22.5) {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
+    vec2 q = vNqW.xz / (mat > 21.5 ? 0.33 : 0.6); vec2 gd = abs(fract(q) - 0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
+    float grout = smoothstep(0.482 - fw.x * 1.2, 0.494, max(gd.x, gd.y));
+    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vn(vNqW.xz * 13.);
+    if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
+    base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
+    rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
@@ -751,6 +767,20 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
+#if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)
+    // glowing air: light scattered by the rain haze between the eye and this surface, integrated
+    // analytically along the view ray for every nearby point light (so walls and bodies occlude it)
+    if (uAirK > 0.0001) {
+      vec3 P = -vViewPosition; float t = length(P); vec3 v = P / max(t, 1e-4); vec3 air = vec3(0.);
+      for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
+        vec3 Lp = pointLights[i].position; float b = dot(v, Lp); float h = sqrt(max(dot(Lp, Lp) - b * b, 0.) + 0.06);
+        float I = (atan((t - b) / h) - atan(-b / h)) / h;
+        float rng = pointLights[i].distance; float w = rng > 0. ? clamp(1. - h / rng, 0., 1.) : 1.;
+        air += pointLights[i].color * I * w * w;
+      }
+      gl_FragColor.rgb += air * uAirK;
+    }
+#endif
     gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0,0.95,0.9)*1.5, flash); }`);
   };
   m.customProgramCacheKey = () => 'nq-' + kind;
@@ -1521,7 +1551,8 @@ function propGasStation(g, x, z, solid) {
   B(0, 4.6, 0, 11, 0.6, 7, wht, 0, 15); B(0, 4.25, 0, 11.1, 0.12, 7.1, [0.1, 0.8, 0.5], 0.8, 0);
   for (const bx of [-4.5, 4.5]) for (const bz of [-2.8, 2.8]) { B(bx, 2.15, bz, 0.35, 4.3, 0.35, wht, 0, 4); solid(x + bx - 0.2, x + bx + 0.2, 0, 4.3, z + bz - 0.2, z + bz + 0.2); }
   for (const bx of [-2, 2]) { B(bx, 0.15, 0, 1.2, 0.3, 4, [0.25, 0.25, 0.25]); for (const bz of [-1, 1]) { B(bx, 0.95, bz, 0.6, 1.3, 0.5, dark, 0, 15); B(bx, 1.3, bz - 0.26, 0.4, 0.3, 0.02, [0.2, 1, 0.6], 0.6, 0); } solid(x + bx - 0.6, x + bx + 0.6, 0, 1.6, z - 2, z + 2); }
-  B(0, 1.6, 5.2, 7, 3.2, 3, [0.35, 0.33, 0.3]); B(0, 1.5, 3.68, 5, 1.6, 0.04, [1, 0.8, 0.5], 0.5, 0); solid(x - 3.5, x + 3.5, 0, 3.2, z + 3.7, z + 6.7);
+  makeRoom(g, g, x, z + 3.7, 0, 7, 3.2, 4.0, 'kiosk', 4242, solid);   // the kiosk is a walk-in shop now
+  B(0, 4.05, 5.3, 7.2, 0.14, 3.4, [0.3, 0.3, 0.3], 0, 4);
   B(-7, 4, -5, 0.3, 8, 0.3, dark, 0, 4); B(-7, 8.4, -5, 2.4, 1.4, 0.3, [0.1, 0.8, 0.5], 1.2, 0);
   WORLD.lights.push({ p: [x, 3.8, z], r: 12, c: [1.1, 1.4, 1.2], shop: true });
 }
@@ -1538,18 +1569,23 @@ function propFootBridge(g, x, z, solid) {
 
 /* ---------- walk-in shop interiors (local frame: a along the facade, d into the room) ---------- */
 function propShopInterior(L, type) {
-  const { Bl, Sl, W, D, RH, R, light } = L;
-  const T = { ramen: { wall: [0.3, 0.16, 0.1], floor: [0.14, 0.1, 0.08], glow: [1, 0.55, 0.25] },
-              clinic: { wall: [0.55, 0.6, 0.62], floor: [0.3, 0.33, 0.34], glow: [0.4, 1, 0.95] },
-              pawn: { wall: [0.2, 0.17, 0.2], floor: [0.12, 0.11, 0.1], glow: [1, 0.75, 0.3] } }[type];
-  Bl(0, D / 2, 0.03, W, D, 0.06, T.floor);                                                   // floor, walls, ceiling
-  Bl(0, D - 0.03, RH / 2, W, 0.06, RH, T.wall); for (const s of [-1, 1]) Bl(s * (W / 2 - 0.03), D / 2, RH / 2, 0.06, D, RH, T.wall);
-  Bl(0, D / 2, RH - 0.05, W, D, 0.1, [0.06, 0.06, 0.07]);
-  for (const dd of [2.2, 5.6]) Bl(0, dd, RH - 0.12, W * 0.6, 0.25, 0.04, T.glow, 2.2, 0);
-  // front: glass either side of an open doorway, a lintel above
-  for (const s of [-1, 1]) { Bl(s * (1.3 + W / 2) / 2, 0.06, 1.6, W / 2 - 1.3, 0.08, 3.2, [T.glow[0] * 0.25, T.glow[1] * 0.25, T.glow[2] * 0.25], 0.5, 10); Sl(s * 1.3, s * W / 2, 0, 0.12, 0, 3.2); }
-  Bl(0, 0.06, 3.8, W, 0.2, 1.2, [0.05, 0.05, 0.06], 0, 4);
-  light(0, D * 0.5, RH - 0.8, 10, [T.glow[0] * 1.5, T.glow[1] * 1.5, T.glow[2] * 1.5]);
+  const { Bl, BlP, Sl, W, D, RH, R, light } = L;
+  const T = SHOP_DEFS[type];
+  BlP(0, D / 2, 0.03, W, D, 0.06, T.floor, 0, T.fmat);                                       // floor, walls, ceiling (these cast shadows: no moonlight indoors)
+  BlP(0, D - 0.03, RH / 2, W, 0.06, RH, T.wall, 0, T.wmat); for (const s of [-1, 1]) BlP(s * (W / 2 - 0.03), D / 2, RH / 2, 0.06, D, RH, T.wall, 0, T.wmat);
+  BlP(0, D / 2, RH - 0.05, W, D, 0.1, T.ceil, 0, 20);
+  const legacy = type === 'ramen' || type === 'clinic' || type === 'pawn';
+  if (legacy) for (const dd of [2.2, 5.6]) Bl(0, dd, RH - 0.12, W * 0.6, 0.25, 0.04, T.glow, 2.2, 0);
+  // front: real glass either side of an open doorway (you can see in from the street), mullions, a lintel above
+  for (const s of [-1, 1]) {
+    L.glass(s * (1.4 + W / 2) / 2, 0.06, 1.65, W / 2 - 1.4, 0.03, 3.1, T.glow);
+    Bl(s * (W / 2 - 0.05), 0.06, 1.6, 0.1, 0.12, 3.2, [0.06, 0.06, 0.07], 0, 4); Bl(s * (1.4 + W / 2) / 2, 0.06, 0.08, W / 2 - 1.4, 0.14, 0.16, [0.06, 0.06, 0.07], 0, 4);
+    Sl(s * 1.3, s * W / 2, 0, 0.12, 0, 3.2);
+    if (R() < 0.75) { const a = s * (1.4 + W / 2) / 2 + (R() - 0.5), c = [[1, 0.2, 0.3], [0.3, 1, 0.5], [1, 0.8, 0.2]][Math.floor(R() * 3)]; Bl(a, 0.14, 2.2, 0.7, 0.02, 0.22, c, 3, 0); }   // neon OPEN in the window
+  }
+  Bl(0, 0.06, (3.2 + RH) / 2, W, 0.2, RH - 3.2, [0.05, 0.05, 0.06], 0, 4);
+  if (legacy) light(0, D * 0.5, RH - 0.8, 10, [T.glow[0] * 1.5, T.glow[1] * 1.5, T.glow[2] * 1.5]);
+  interiorKit(L, type);
   if (type === 'ramen') {
     Bl(0, D - 2.4, 0.55, W - 2, 0.7, 1.1, [0.25, 0.14, 0.07], 0, 13); Bl(0, D - 2.4, 1.13, W - 1.8, 0.9, 0.06, [0.4, 0.24, 0.12], 0, 13); Sl(-(W - 2) / 2, (W - 2) / 2, D - 2.85, D - 1.95, 0, 1.15);
     for (let a = -W / 2 + 1.6; a < W / 2 - 1.4; a += 1.3) { Bl(a, D - 3.4, 0.35, 0.08, 0.08, 0.7, [0.1, 0.1, 0.1], 0, 4); Bl(a, D - 3.4, 0.72, 0.42, 0.42, 0.06, [0.5, 0.08, 0.06], 0, 15); }
@@ -1566,7 +1602,7 @@ function propShopInterior(L, type) {
     Bl(0, D - 1.6, 1.0, 0.7, 0.7, 2.0, [0.5, 0.9, 0.9], 0.6, 10);                                                        // the clone tank
     Bl(0, D - 1.6, 0.1, 0.9, 0.9, 0.2, [0.2, 0.22, 0.25], 0, 4); Bl(0, D - 1.6, 2.05, 0.9, 0.9, 0.12, [0.2, 0.22, 0.25], 0, 4); Sl(-0.45, 0.45, D - 2.05, D - 1.15, 0, 2.1);
     for (const s of [-1, 1]) Bl(s * (W / 2 - 0.35), D - 1, 1.1, 0.5, 1.4, 2.2, [0.8, 0.8, 0.8], 0, 4);
-  } else {
+  } else if (type === 'pawn') {
     Bl(0, D - 2.6, 0.55, W - 3, 0.7, 1.1, [0.2, 0.5, 0.5], 0.25, 10); Sl(-(W - 3) / 2, (W - 3) / 2, D - 2.95, D - 2.25, 0, 1.1);   // glass counter
     for (const s of [-1, 1]) for (let y = 0.4; y < 3.2; y += 0.8) {                                                  // shelves crammed with junk
       Bl(s * (W / 2 - 0.4), D / 2, y, 0.6, D - 1.5, 0.05, [0.12, 0.1, 0.08], 0, 13);
@@ -1576,6 +1612,496 @@ function propShopInterior(L, type) {
     Bl(0, D - 0.2, 2.2, 2.5, 0.06, 1.2, [1, 0.6, 0.15], 1.6, 0);                                                         // neon sign behind the counter
   }
 }
+
+/* ============================================================
+   Walk-in shop interiors. Every ground-floor shop in the plaza ring is a real room:
+   one shell (floor, walls, ceiling, glass shopfront) plus a kit of furniture and goods,
+   laid out per shop type so what is inside matches the sign outside.
+   Local frame: a runs along the facade (door at a = 0), dd runs into the room (0 = shopfront, D = back wall).
+   ============================================================ */
+const SHOP_DEFS = {
+  ramen:    { sign: 'RAMEN', st: 'font', wall: [0.3, 0.16, 0.1], floor: [0.14, 0.1, 0.08], glow: [1, 0.55, 0.25], fmat: 13, wmat: 16, ceil: [0.06, 0.06, 0.07] },
+  clinic:   { sign: 'CLONE CLINIC', st: 'font', wall: [0.55, 0.6, 0.62], floor: [0.3, 0.33, 0.34], glow: [0.4, 1, 0.95], fmat: 21, wmat: 20, ceil: [0.55, 0.57, 0.58] },
+  pawn:     { sign: 'PAWN + CHIPS', st: 'panel', wall: [0.2, 0.17, 0.2], floor: [0.12, 0.11, 0.1], glow: [1, 0.75, 0.3], fmat: 16, wmat: 16, ceil: [0.06, 0.06, 0.07] },
+  conbini:  { sign: 'OPEN 25H', st: 'seg', wall: [0.6, 0.61, 0.58], floor: [0.46, 0.47, 0.46], glow: [0.85, 0.95, 1], fmat: 21, wmat: 20, ceil: [0.55, 0.56, 0.57] },
+  bar:      { sign: 'SYNTH BAR', st: 'font', wall: [0.09, 0.05, 0.07], floor: [0.13, 0.075, 0.05], glow: [1, 0.25, 0.65], fmat: 13, wmat: 13, ceil: [0.04, 0.03, 0.03] },
+  lucky:    { sign: 'LUCKY 88', st: 'seg', wall: [0.2, 0.035, 0.03], floor: [0.12, 0.05, 0.04], glow: [1, 0.4, 0.15], fmat: 15, wmat: 20, ceil: [0.08, 0.02, 0.02] },
+  cafe:     { sign: 'DATA CAFE', st: 'panel', wall: [0.34, 0.25, 0.18], floor: [0.22, 0.14, 0.08], glow: [1, 0.72, 0.42], fmat: 13, wmat: 20, ceil: [0.3, 0.25, 0.2] },
+  volt:     { sign: 'VOLT', st: 'seg', wall: [0.13, 0.14, 0.17], floor: [0.24, 0.25, 0.27], glow: [0.35, 0.85, 1], fmat: 21, wmat: 20, ceil: [0.45, 0.46, 0.5] },
+  memory:   { sign: 'MEMORY SHOP', st: 'panel', wall: [0.07, 0.07, 0.11], floor: [0.1, 0.1, 0.13], glow: [0.75, 0.4, 1], fmat: 15, wmat: 8, ceil: [0.05, 0.05, 0.07] },
+  hotel:    { sign: 'HOTEL ORBIT', st: 'panel', wall: [0.42, 0.35, 0.26], floor: [0.9, 0.86, 0.8], glow: [1, 0.8, 0.5], fmat: 10, wmat: 20, ceil: [0.62, 0.58, 0.52] },
+  karaoke:  { sign: 'KARAOKE', st: 'font', wall: [0.14, 0.05, 0.18], floor: [0.08, 0.05, 0.1], glow: [0.85, 0.3, 1], fmat: 15, wmat: 20, ceil: [0.05, 0.03, 0.06] },
+  cyberdoc: { sign: 'CYBERDOC', st: 'seg', wall: [0.44, 0.48, 0.5], floor: [0.27, 0.29, 0.3], glow: [0.5, 1, 0.75], fmat: 21, wmat: 20, ceil: [0.5, 0.53, 0.55] },
+  diner:    { sign: 'KAIJU NOODLE', st: 'font', wall: [0.5, 0.12, 0.1], floor: [0.4, 0.39, 0.36], glow: [1, 0.85, 0.6], fmat: 22, wmat: 20, ceil: [0.55, 0.55, 0.53] },
+  grocer:   { sign: 'FRESH MARKET', st: 'font', wall: [0.45, 0.43, 0.38], floor: [0.35, 0.34, 0.32], glow: [0.6, 1, 0.4], fmat: 21, wmat: 20, ceil: [0.4, 0.4, 0.38] },
+  herbal:   { sign: 'HERBALIST', st: 'font', wall: [0.28, 0.18, 0.1], floor: [0.16, 0.1, 0.06], glow: [1, 0.6, 0.2], fmat: 13, wmat: 13, ceil: [0.08, 0.05, 0.03] },
+  hardware: { sign: 'HARDWARE', st: 'panel', wall: [0.5, 0.5, 0.48], floor: [0.3, 0.3, 0.29], glow: [1, 0.85, 0.4], fmat: 16, wmat: 20, ceil: [0.4, 0.4, 0.4] },
+  kiosk:    { sign: '', st: 'panel', wall: [0.55, 0.55, 0.53], floor: [0.4, 0.4, 0.4], glow: [0.4, 1, 0.7], fmat: 21, wmat: 20, ceil: [0.5, 0.5, 0.5] },
+  tattoo:   { sign: 'INK + STEEL', st: 'font', wall: [0.09, 0.08, 0.08], floor: [0.13, 0.1, 0.09], glow: [1, 0.3, 0.2], fmat: 13, wmat: 13, ceil: [0.04, 0.04, 0.04] },
+};
+const SHOP_ORDER = ['ramen', 'conbini', 'bar', 'pawn', 'cafe', 'hotel', 'clinic', 'volt', 'karaoke', 'cyberdoc', 'diner', 'memory', 'tattoo', 'lucky'];
+const MARKET_ORDER = ['grocer', 'diner', 'herbal', 'bar', 'ramen', 'lucky', 'cafe', 'karaoke', 'conbini', 'tattoo', 'grocer', 'herbal'];
+
+/* a stand-alone walk-in room (for buildings outside the plaza ring): facade point fx,fz, th = rotation of the room frame */
+function makeRoom(g, gCast, fx, fz, th, W, D, RH, type, seed, solidFn) {
+  const ca = Math.cos(th), sa = Math.sin(th), ax = Math.abs(ca) > 0.5, Mm = M4.create();
+  const wp = (a, dd) => [fx + a * ca + dd * sa, fz - a * sa + dd * ca];
+  const bx = (G, a, dd, y, sA, sD, sy, c, e = 0, mat = 16) => { const [x, z] = wp(a, dd); G.box(M4.trs(Mm, x, y, z, 0, 0, 0, ax ? sA : sD, sy, ax ? sD : sA), c, e, mat); };
+  const L = { g, W, D, RH, R: mulberry(seed), wp,
+    Bl: (...q) => bx(g, ...q), BlP: (...q) => bx(gCast, ...q),
+    Sl: (a0, a1, d0, d1, y0, y1) => { const [xa, za] = wp(a0, d0), [xb, zb] = wp(a1, d1); solidFn(Math.min(xa, xb), Math.max(xa, xb), y0, y1, Math.min(za, zb), Math.max(za, zb)); },
+    M: (a, dd, y, ry = 0, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, 1, 1, 1); },
+    MS: (a, dd, y, ry, sx, sy, sz, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, sx, sy, sz); },
+    glass: (a, dd, y, sA, sD, sy, c) => { const [x, z] = wp(a, dd); WORLD.glass.push({ m: M4.trs(M4.create(), x, y, z, 0, th, 0, sA, sy, sD), c }); },
+    halo: (a, dd, y, s, c) => { const [x, z] = wp(a, dd); WORLD.halos.push({ p: [x, y, z], s, c }); },
+    light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } };
+  { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
+  propShopInterior(L, type);
+}
+const _im = M4.create();
+
+/* shared shell detail + dispatch; the legacy ramen / clinic / pawn rooms still draw their own furniture in props.js */
+function interiorKit(L, type) {
+  const { g, Bl, Sl, W, D, RH, R, light, halo, M, MS } = L, T = SHOP_DEFS[type];
+  const rr = (a, b) => a + R() * (b - a), pk = (a) => a[Math.floor(R() * a.length)];
+  const K = {};
+  K.box = (a, dd, y, sa, sd, sy, c, e = 0, mat = 15, ry = 0, rx = 0, rz = 0) => g.box(MS(a, dd, y, ry, sa, sy, sd, rx, rz), c, e, mat);
+  K.rb = (a, dd, y, sa, sd, sy, r, c, e = 0, mat = 15, ry = 0, rx = 0) => g.rbox(M(a, dd, y, ry, rx), sa, sy, sd, r, c, e, mat);
+  K.cyl = (a, dd, y, rad, h, c, e = 0, mat = 4, seg = 10, rx = 0, ry = 0, rz = 0) => g.cyl(MS(a, dd, y, ry, rad * 2, h, rad * 2, rx, rz), c, e, mat, seg);
+  K.lat = (a, dd, y, prof, c, e = 0, mat = 15, seg = 8) => g.lathe(M(a, dd, y, 0), prof, c, e, mat, seg);
+  K.sph = (a, dd, y, r, c, e = 0, mat = 4, seg = 8) => g.sphere(MS(a, dd, y, 0, r * 2, r * 2, r * 2), c, e, mat, seg, 5);
+  K.blob = (a, dd, y, rx, ry, rz, c, e = 0) => g.blob(M(a, dd, y, R() * 6), rx, ry, rz, 0.25, Math.floor(R() * 999), c, e, 14, 10, 7);
+  const PK = [[0.8, 0.1, 0.08], [0.1, 0.32, 0.8], [0.95, 0.72, 0.1], [0.1, 0.52, 0.25], [0.88, 0.88, 0.84], [0.5, 0.1, 0.52], [0.95, 0.42, 0.1], [0.16, 0.16, 0.18], [0.25, 0.72, 0.85], [0.95, 0.5, 0.62]];
+  K.pack = (a, dd, y, w, d, h, ry = 0) => { const c = pk(PK); K.box(a, dd, y + h / 2, w, d, h, c, 0, 15, ry); if (h > 0.12 && R() < 0.7) K.box(a, dd, y + h * 0.62, w * 1.02, d * 1.02, h * 0.22, pk(PK), 0, 15, ry); };
+  K.can = (a, dd, y, h = 0.12, c = pk(PK)) => K.cyl(a, dd, y + h / 2, h * 0.28, h, c, 0, 4, 7);
+  K.bottle = (a, dd, y, h, c, e = 0.25) => { const r = h * 0.13, n = h * 0.045; K.lat(a, dd, y, [[0, 0], [r, 0], [r, h * 0.6], [n * 1.15, h * 0.78], [n, h * 0.94], [n * 1.3, h * 0.95], [n * 1.3, h]], c, e, 10, 8); };
+  K.cup = (a, dd, y, h = 0.1, c = [0.85, 0.85, 0.82]) => K.lat(a, dd, y, [[0, 0], [h * 0.3, 0], [h * 0.42, h], [h * 0.38, h], [h * 0.26, h * 0.1]], c, 0, 15, 8);
+  K.chair = (a, dd, ry, c, legC = [0.08, 0.08, 0.09]) => {
+    const ca = Math.cos(ry), sa = Math.sin(ry), P = (x, z) => [a + x * ca + z * sa, dd - x * sa + z * ca];
+    for (const [x, z] of [[-0.19, -0.19], [0.19, -0.19], [-0.19, 0.19], [0.19, 0.19]]) { const [pa, pd] = P(x, z); K.box(pa, pd, 0.22, 0.035, 0.035, 0.44, legC, 0, 4); }
+    K.rb(a, dd, 0.46, 0.44, 0.44, 0.05, 0.02, c, 0, 15, ry); const [ba, bd] = P(0, 0.2); K.rb(ba, bd, 0.74, 0.42, 0.04, 0.5, 0.02, c, 0, 15, ry, -0.08);
+  };
+  K.stool = (a, dd, h, c) => { K.cyl(a, dd, 0.02, 0.18, 0.04, [0.1, 0.1, 0.11], 0, 4, 12); K.cyl(a, dd, h / 2, 0.025, h, [0.5, 0.5, 0.52], 0, 4, 6); K.lat(a, dd, h, [[0, 0], [0.19, 0], [0.2, 0.05], [0.17, 0.08], [0, 0.085]], c, 0, 15, 12); };
+  K.table = (a, dd, r, h, top, legC = [0.1, 0.1, 0.11]) => { K.cyl(a, dd, h - 0.02, r, 0.04, top, 0, 13, 16); K.cyl(a, dd, h / 2, 0.035, h, legC, 0, 4, 6); K.cyl(a, dd, 0.015, r * 0.55, 0.03, legC, 0, 4, 12); };
+  K.plant = (a, dd, s = 1) => { K.lat(a, dd, 0, [[0, 0], [0.16 * s, 0], [0.22 * s, 0.42 * s], [0.24 * s, 0.44 * s], [0.2 * s, 0.44 * s]], [0.16, 0.14, 0.13], 0, 16, 10); K.blob(a, dd, 0.6 * s + 0.25 * s, 0.34 * s, 0.5 * s, 0.34 * s, [0.12, 0.32, 0.1]); Sl(a - 0.25 * s, a + 0.25 * s, dd - 0.25 * s, dd + 0.25 * s, 0, 1.2 * s); };
+  K.screen = (a, dd, y, w, h, c, ry = 0, e = 1.6) => { K.box(a, dd, y, w + 0.06, 0.05, h + 0.06, [0.03, 0.03, 0.035], 0, 15, ry); K.box(a, dd - 0.03 * Math.cos(ry), y, w, 0.01, h, c, e, 0, ry); };
+  K.pendant = (a, dd, y, c) => { K.cyl(a, dd, (RH + y) / 2, 0.006, RH - y, [0.05, 0.05, 0.05], 0, 4, 4); K.lat(a, dd, y - 0.18, [[0.05, 0.19], [0.22, 0], [0.2, 0], [0.04, 0.17]], [0.08, 0.08, 0.09], 0, 4, 12); K.sph(a, dd, y - 0.12, 0.06, c, 4, 0, 6); halo(a, dd, y - 0.14, 0.9, [c[0] * 0.4, c[1] * 0.4, c[2] * 0.4]); };
+  K.tube = (a0, d0, y0, a1, d1, y1, r, c, e = 0) => { const p0 = L.wp(a0, d0), p1 = L.wp(a1, d1); g.tube([[p0[0], y0, p0[1]], [p1[0], y1, p1[1]]], [r, r], c, e, 4, 5, false); };
+  K.booth = (a, dd, len, side, c) => {   // bench seat + back against a wall on 'side' (+1 = back toward +dd)
+    K.rb(a, dd, 0.24, len, 0.55, 0.48, 0.05, [0.07, 0.06, 0.06], 0, 15); K.rb(a, dd, 0.5, len, 0.55, 0.12, 0.05, c, 0, 15);
+    K.rb(a, dd + side * 0.24, 0.85, len, 0.14, 0.75, 0.06, c, 0, 15); Sl(a - len / 2, a + len / 2, dd - 0.28, dd + 0.28, 0, 0.55);
+  };
+  K.shelf = (ca, cd, len, dep, h, levels, axis, fill, twoSided = false, frame = [0.12, 0.12, 0.13]) => {
+    const A = axis === 'a', sa = A ? len : dep, sd = A ? dep : len;
+    for (const s of [-1, 1]) K.box(ca + (A ? s * len / 2 : 0), cd + (A ? 0 : s * len / 2), h / 2, A ? 0.04 : dep, A ? dep : 0.04, h, frame, 0, 4);
+    if (twoSided) K.box(ca, cd, h / 2 + 0.05, A ? len : 0.03, A ? 0.03 : len, h - 0.1, frame, 0, 4);
+    for (let i = 0; i < levels; i++) {
+      const y = 0.1 + i * (h - 0.25) / Math.max(1, levels - 1) * (levels > 1 ? 1 : 0), clear = (h - 0.25) / Math.max(1, levels - 1) - 0.06;
+      K.box(ca, cd, y, sa, sd, 0.025, frame, 0, 4);
+      for (const side of twoSided ? [-1, 1] : [0]) {
+        const off = side * dep / 4, n = Math.floor(len / 0.2);
+        for (let k = 0; k < n; k++) { const t = -len / 2 + (k + 0.5) * len / n; fill(A ? ca + t : ca + off, A ? cd + off : cd + t, y + 0.013, Math.min(clear, 0.42), A ? 'a' : 'd', side, i); }
+      }
+    }
+    Sl(ca - sa / 2, ca + sa / 2, cd - sd / 2, cd + sd / 2, 0, h);
+  };
+  K.scatter = (n, c = null) => { for (let i = 0; i < n; i++) { const a = rr(-W / 2 + 0.6, W / 2 - 0.6), dd = rr(0.8, D - 1); K.box(a, dd, 0.004, rr(0.15, 0.3), rr(0.2, 0.3), 0.004, c || [0.7, 0.68, 0.6], 0, 15, rr(0, 6)); } };
+  K.fluor = (a, dd, len, axis = 'd', c = [0.9, 0.97, 1]) => { K.box(a, dd, RH - 0.14, axis === 'a' ? len : 0.22, axis === 'a' ? 0.22 : len, 0.05, [0.2, 0.2, 0.22], 0, 4); K.box(a, dd, RH - 0.17, axis === 'a' ? len - 0.1 : 0.12, axis === 'a' ? 0.12 : len - 0.1, 0.02, c, 3.2, 0); };
+
+  /* ---- shell detail common to every room: baseboards, ceiling grid, exit sign, posters, vents, door frame, dust ---- */
+  const trim = [T.wall[0] * 0.45, T.wall[1] * 0.45, T.wall[2] * 0.45];
+  for (const s of [-1, 1]) K.box(s * (W / 2 - 0.07), D / 2, 0.06, 0.03, D - 0.1, 0.12, trim, 0, 15);
+  K.box(0, D - 0.07, 0.06, W - 0.1, 0.03, 0.12, trim, 0, 15);
+  for (let dd = 1.2; dd < D; dd += 1.2) K.box(0, dd, RH - 0.11, W - 0.1, 0.03, 0.02, [0.1, 0.1, 0.11], 0, 4);
+  for (const s of [-1, 1]) K.box(s * 1.33, 0.08, 1.6, 0.1, 0.14, 3.2, [0.1, 0.1, 0.11], 0, 4);
+  K.box(0, 0.08, 3.25, 2.76, 0.14, 0.1, [0.1, 0.1, 0.11], 0, 4);
+  K.box(0, 0.3, 3.05, 0.34, 0.03, 0.14, [0.1, 0.9, 0.3], 2.4, 0);                          // exit sign over the door
+  K.box(-W / 2 + 1.2, D - 0.2, RH - 0.35, 0.7, 0.2, 0.3, [0.2, 0.2, 0.21], 0, 8);          // AC vent
+  K.box(0, 0.5, 0.004, 1.4, 0.8, 0.008, [0.08, 0.07, 0.06], 0, 15);                        // entry mat
+  if (R() < 0.8) K.box(-W / 2 + 0.035, rr(1.5, 2.5), 1.7, 0.012, 0.6, 0.85, pk(PK), 0.25, 15);   // faded poster
+  K.scatter(3 + Math.floor(R() * 4));
+
+  const F = INTERIORS[type]; if (F) F(L, T, K, rr, pk, PK);
+}
+
+const INTERIORS = {
+  /* ---- convenience store: fridges along the back, gondolas, a checkout by the door ---- */
+  conbini(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const nf = Math.floor((W - 0.8) / 1.25), fw = (W - 0.8) / nf;
+    for (let i = 0; i < nf; i++) {
+      const a = -W / 2 + 0.4 + fw * (i + 0.5);
+      K.box(a, D - 0.45, 1.15, fw, 0.8, 2.3, [0.15, 0.15, 0.16], 0, 4);
+      K.box(a, D - 0.83, 1.15, fw - 0.12, 0.02, 2.0, [0.75, 0.88, 1], 1.5, 0);           // lit back of the cooler
+      K.box(a, D - 0.1, 2.38, fw, 0.2, 0.14, T.glow, 1.8, 0);
+      for (let y = 0.3; y < 2.0; y += 0.42) {
+        K.box(a, D - 0.5, y - 0.02, fw - 0.1, 0.62, 0.015, [0.5, 0.52, 0.55], 0.2, 4);
+        for (let k = 0; k < 5; k++) { const pa = a - fw / 2 + 0.14 + k * (fw - 0.28) / 4, c = pk(PK); if (R() < 0.12) continue; R() < 0.5 ? K.bottle(pa, D - 0.25, y, 0.3, c, 0.3) : K.can(pa, D - 0.25, y, 0.13, c); }
+      }
+      K.box(a - fw / 2 + 0.02, D - 0.06, 1.15, 0.05, 0.05, 2.2, [0.6, 0.62, 0.65], 0, 4);
+    }
+    Sl(-W / 2, W / 2, D - 0.9, D, 0, 2.4);
+    const goods = (a, dd, y, clear, ax, side) => { if (R() < 0.1) return; const h = rr(0.12, Math.min(clear, 0.3)); if (R() < 0.3) { K.can(a, dd, y, 0.12); K.can(a + 0.07 * (ax === 'd'), dd + 0.07 * (ax === 'a'), y, 0.12); } else K.pack(a, dd, y, ax === 'a' ? 0.16 : 0.12, ax === 'a' ? 0.12 : 0.16, h); };
+    const glen = D - 5;
+    for (const s of [-1, 1]) K.shelf(s * 1.7, 3.0 + glen / 2, glen, 0.8, 1.55, 4, 'd', goods, true);
+    K.shelf(-W / 2 + 0.3, 1.9 + (D - 3.2) / 2, D - 3.2, 0.5, 2.0, 5, 'd', goods);
+    K.shelf(W / 2 - 0.3, 3.3 + (D - 4.6) / 2, D - 4.6, 0.5, 2.0, 5, 'd', goods);
+    // checkout: counter, register, hot-food case, cigarettes behind
+    const ca = W / 2 - 1.9;
+    K.rb(ca, 1.9, 0.5, 0.75, 1.9, 1.0, 0.04, [0.8, 0.8, 0.78], 0, 15); K.box(ca, 1.9, 1.02, 0.85, 2.0, 0.04, [0.2, 0.2, 0.22], 0, 10); Sl(ca - 0.4, ca + 0.4, 0.95, 2.85, 0, 1.05);
+    K.box(ca, 1.4, 1.14, 0.35, 0.3, 0.2, [0.12, 0.12, 0.13], 0, 15); K.screen(ca + 0.05, 1.45, 1.38, 0.28, 0.2, [0.3, 1, 0.6], -Math.PI / 2, 1.2);
+    K.box(ca, 2.4, 1.28, 0.6, 0.55, 0.5, [1, 0.7, 0.35], 0.9, 10);
+    for (let y = 1.2; y < 2.4; y += 0.28) for (let dd = 1.1; dd < 2.8; dd += 0.14) K.box(W / 2 - 0.2, dd, y, 0.12, 0.09, 0.14, pk(PK), 0.1, 15);
+    K.box(W / 2 - 0.2, 1.95, 1.75, 0.3, 1.9, 1.35, [0.1, 0.1, 0.11], 0, 4); Sl(W / 2 - 0.4, W / 2, 1, 2.9, 0, 2.5);
+    // magazine rack under the window
+    K.box(-W / 2 + 2, 0.6, 0.45, 2.6, 0.35, 0.9, [0.15, 0.15, 0.16], 0, 4); Sl(-W / 2 + 0.7, -W / 2 + 3.3, 0.4, 0.8, 0, 0.9);
+    for (let a = -W / 2 + 0.85; a < -W / 2 + 3.2; a += 0.24) K.box(a, 0.62, 0.95, 0.2, 0.02, 0.28, pk(PK), 0.15, 15, 0, -0.3);
+    for (const a of [-2.6, 0, 2.6]) K.fluor(a, D / 2, D - 1.2);
+    light(0, D * 0.35, RH - 0.5, 9, [1.5, 1.6, 1.7]); light(0, D * 0.8, RH - 0.5, 8, [1.2, 1.4, 1.6]);
+    for (let i = 0; i < 6; i++) K.pack(rr(-2, 2), rr(1.5, D - 2), 0, 0.16, 0.12, 0.2, rr(0, 6));   // knocked off the shelves
+    K.box(rr(-1, 1), rr(2, 4), 0.14, 0.45, 0.3, 0.28, [0.8, 0.1, 0.1], 0, 15, 0.4, 0, 1.4);            // dropped basket
+  },
+
+  /* ---- cocktail bar: long counter and back bar of bottles on the right, booths on the left ---- */
+  bar(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, ca = W / 2 - 2.2, d0 = 1.8, d1 = D - 0.7, len = d1 - d0, dm = (d0 + d1) / 2;
+    const wood = [0.2, 0.09, 0.04], top = [0.32, 0.16, 0.07];
+    K.rb(ca, dm, 0.52, 0.6, len, 1.04, 0.04, wood, 0, 13); K.rb(ca, dm, 1.07, 0.78, len + 0.1, 0.06, 0.02, top, 0, 13);
+    K.box(ca - 0.31, dm, 0.1, 0.02, len, 0.04, T.glow, 2.2, 0);                                  // under-glow
+    K.cyl(ca - 0.45, dm, 0.22, 0.02, len, [0.7, 0.6, 0.35], 0, 4, 6, Math.PI / 2);                // foot rail
+    Sl(ca - 0.4, ca + 0.4, d0, d1, 0, 1.1);
+    for (let dd = d0 + 0.5; dd < d1 - 0.3; dd += 0.95) K.stool(ca - 0.9, dd, 0.78, [0.5, 0.05, 0.12]);
+    for (let dd = d0 + 0.4; dd < d1 - 0.2; dd += rr(0.4, 0.9)) R() < 0.5 ? K.cup(ca + rr(-0.15, 0.15), dd, 1.1, 0.12, [0.7, 0.8, 0.85]) : K.bottle(ca + rr(-0.1, 0.2), dd, 1.1, 0.3, pk(PK), 0.3);
+    for (let i = 0; i < 3; i++) K.cyl(ca + 0.2, d0 + 0.8 + i * 0.25, 1.35, 0.025, 0.5, [0.75, 0.75, 0.78], 0, 4, 6);   // beer taps
+    // back bar: cabinet, mirror, glass shelves of backlit bottles
+    const ba = W / 2 - 0.25;
+    K.box(ba, dm, 0.5, 0.45, len, 1.0, wood, 0, 13); K.box(ba + 0.2, dm, 1.95, 0.02, len - 0.2, 1.5, [0.5, 0.52, 0.55], 0, 10);
+    for (const y of [1.3, 1.75, 2.2]) {
+      K.box(ba, dm, y, 0.3, len - 0.3, 0.02, [0.6, 0.7, 0.75], 0.4, 10); K.box(ba + 0.12, dm, y + 0.02, 0.02, len - 0.3, 0.02, T.glow, 2.4, 0);
+      for (let dd = d0 + 0.3; dd < d1 - 0.2; dd += rr(0.12, 0.18)) K.bottle(ba + rr(-0.06, 0.06), dd, y + 0.01, rr(0.26, 0.36), pk([[0.5, 0.25, 0.05], [0.1, 0.4, 0.15], [0.7, 0.7, 0.72], [0.35, 0.05, 0.05], [0.8, 0.6, 0.2], [0.1, 0.2, 0.5]]), 0.45);
+    }
+    Sl(ba - 0.25, W / 2, d0, d1, 0, 2.6);
+    // booths along the left wall
+    for (let dd = 2.2; dd < D - 1.2; dd += 2.3) {
+      const a = -W / 2 + 0.95, bc = [0.35, 0.04, 0.08];
+      K.booth(a, dd - 0.75, 1.5, -1, bc); K.booth(a, dd + 0.75, 1.5, 1, bc);
+      K.box(a, dd, 0.72, 1.2, 0.7, 0.05, [0.08, 0.06, 0.05], 0, 13); K.box(a, dd, 0.36, 0.1, 0.1, 0.72, [0.1, 0.1, 0.1], 0, 4); Sl(a - 0.6, a + 0.6, dd - 0.35, dd + 0.35, 0, 0.75);
+      K.cup(a + 0.2, dd, 0.745, 0.11, [0.7, 0.8, 0.85]); K.bottle(a - 0.2, dd + 0.1, 0.745, 0.28, [0.4, 0.2, 0.05]);
+      K.pendant(a, dd, 1.9, [1, 0.6, 0.3]);
+    }
+    K.box(-0.5, D - 0.06, 2.4, 2.6, 0.04, 0.6, T.glow, 2.6, 0);                                   // neon script on the back wall
+    K.rb(-1.2, D - 0.5, 0.85, 0.9, 0.6, 1.7, 0.12, [0.3, 0.05, 0.1], 0.2, 15); K.box(-1.2, D - 0.81, 1.2, 0.7, 0.02, 0.6, [1, 0.55, 0.2], 2, 0); Sl(-1.65, -0.75, D - 0.8, D, 0, 1.7);   // jukebox
+    for (let dd = d0 + 0.6; dd < d1; dd += 1.6) K.pendant(ca, dd, 2.1, [1, 0.7, 0.4]);
+    light(ca, dm, 2.4, 9, [2.2, 1.2, 0.65]); light(-W / 2 + 1.5, D / 2, 2.2, 8, [T.glow[0] * 1.3, T.glow[1] * 1.3, T.glow[2] * 1.3]);
+  },
+
+  /* ---- slot parlour: rows of machines back to back, a cashier cage, red lanterns ---- */
+  lucky(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const slot = (a, dd, fs) => {   // cabinet whose screen faces fs (+1 toward +a)
+      K.rb(a, dd, 0.75, 0.6, 0.62, 1.5, 0.05, [0.5, 0.06, 0.08], 0, 11);
+      K.box(a + fs * 0.31, dd, 1.05, 0.02, 0.5, 0.45, pk([[1, 0.8, 0.3], [0.3, 1, 0.7], [1, 0.3, 0.8]]), 1.8, 0);
+      K.box(a + fs * 0.31, dd, 1.62, 0.02, 0.55, 0.22, [1, 0.85, 0.3], 2.5, 0); K.box(a + fs * 0.36, dd, 0.72, 0.12, 0.56, 0.06, [0.15, 0.15, 0.16], 0, 4);
+      K.stool(a + fs * 0.8, dd, 0.62, [0.5, 0.05, 0.05]); };
+    for (let dd = 2.3; dd < D - 1.6; dd += 0.68) { slot(-0.32, dd, -1); slot(0.32, dd, 1); slot(-W / 2 + 0.35, dd, 1); }
+    Sl(-0.62, 0.62, 1.95, D - 1.55, 0, 1.6); Sl(-W / 2, -W / 2 + 0.65, 1.95, D - 1.55, 0, 1.6);
+    const ca = W / 2 - 1.2; K.box(ca, D - 1.4, 0.55, 1.6, 1.6, 1.1, [0.25, 0.2, 0.1], 0, 13);
+    for (let k = 0; k < 7; k++) K.box(ca - 0.8 + k * 0.26, D - 2.21, 1.9, 0.02, 0.02, 1.6, [0.7, 0.6, 0.3], 0, 4);   // cage bars
+    K.box(ca, D - 1.4, 2.72, 1.7, 1.7, 0.06, [0.3, 0.25, 0.12], 0, 4); Sl(ca - 0.85, ca + 0.85, D - 2.25, D - 0.5, 0, 2.7);
+    for (let a = -W / 2 + 1; a < W / 2; a += 1.7) { K.cyl(a, D / 2, RH - 0.9, 0.24, 0.42, [1, 0.15, 0.1], 1.6, 15, 10); halo(a, D / 2, RH - 0.9, 1.2, [0.5, 0.08, 0.05]); }
+    K.scatter(10, [0.8, 0.7, 0.3]);
+    light(0, D * 0.4, RH - 0.6, 9, [1.8, 0.6, 0.3]); light(0, D * 0.8, RH - 0.6, 8, [1.5, 0.8, 0.3]);
+  },
+
+  /* ---- café: espresso counter across the back, pastry case, small tables with laptops ---- */
+  cafe(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, cd = D - 1.8, c0 = -W / 2 + 2.2, c1 = W / 2 - 0.5, cm = (c0 + c1) / 2, cl = c1 - c0;
+    K.rb(cm, cd, 0.52, cl, 0.65, 1.04, 0.04, [0.25, 0.14, 0.07], 0, 13); K.box(cm, cd, 1.06, cl + 0.1, 0.75, 0.05, [0.72, 0.7, 0.66], 0, 16); Sl(c0, c1, cd - 0.38, cd + 0.38, 0, 1.1);
+    K.rb(cm + 1, cd + 0.05, 1.3, 0.8, 0.45, 0.45, 0.05, [0.75, 0.75, 0.78], 0, 4); K.box(cm + 1, cd - 0.18, 1.35, 0.5, 0.02, 0.12, [1, 0.5, 0.2], 1.5, 0);   // espresso machine
+    for (const o of [-0.2, 0.2]) K.cyl(cm + 1 + o, cd - 0.2, 1.15, 0.03, 0.08, [0.2, 0.2, 0.2], 0, 4, 6);
+    K.cyl(cm + 1.7, cd, 1.25, 0.08, 0.35, [0.12, 0.12, 0.13], 0, 4, 10); K.lat(cm + 1.7, cd, 1.42, [[0.02, 0], [0.1, 0.18]], [0.3, 0.3, 0.32], 0, 10, 10);
+    for (let k = 0; k < 4; k++) K.cup(cm + 0.1 + k * 0.08, cd + 0.1, 1.085 + k * 0.001, 0.09);
+    K.box(cm - 0.9, cd, 1.3, 1.3, 0.6, 0.45, [0.6, 0.7, 0.72], 0.25, 10); K.box(cm - 0.9, cd, 1.1, 1.25, 0.55, 0.03, [1, 0.85, 0.6], 1.2, 0);   // pastry case
+    for (let k = 0; k < 6; k++) K.sph(cm - 1.4 + k * 0.2, cd + rr(-0.12, 0.12), 1.16, 0.06, pk([[0.7, 0.45, 0.2], [0.5, 0.25, 0.1], [0.9, 0.8, 0.6]]), 0, 15, 6);
+    for (let k = 0; k < 3; k++) K.screen(cm - 1.2 + k * 1.3, D - 0.08, 2.6, 1.1, 0.7, [0.06, 0.05, 0.04], 0, 0.5);   // menu boards
+    for (let k = 0; k < 3; k++) for (let j = 0; j < 5; j++) K.box(cm - 1.2 + k * 1.3, D - 0.11, 2.85 - j * 0.12, 0.8 * rr(0.6, 1), 0.005, 0.03, [1, 0.9, 0.75], 1.2, 0);
+    for (let y = 1.2; y < 2.4; y += 0.45) { K.box(-W / 2 + 0.3, D - 1.3, y, 0.4, 1.8, 0.03, [0.3, 0.18, 0.08], 0, 13); for (let dd = D - 2.1; dd < D - 0.5; dd += 0.18) R() < 0.5 ? K.lat(-W / 2 + 0.3, dd, y + 0.015, [[0.05, 0], [0.05, 0.16], [0.03, 0.18], [0.035, 0.2]], pk([[0.6, 0.4, 0.2], [0.3, 0.2, 0.1], [0.5, 0.5, 0.5]]), 0, 10, 8) : K.pack(-W / 2 + 0.3, dd, y + 0.015, 0.13, 0.08, 0.2); }
+    Sl(-W / 2, -W / 2 + 0.55, D - 2.3, D - 0.3, 0, 2.4);
+    for (const [a, dd] of [[-2.3, 2.3], [2.3, 2.3], [-2.3, 4.3], [0.4, 3.4]]) {
+      K.table(a, dd, 0.38, 0.74, [0.4, 0.26, 0.14]); Sl(a - 0.38, a + 0.38, dd - 0.38, dd + 0.38, 0, 0.75);
+      K.chair(a - 0.62, dd, Math.PI / 2 * (R() < 0.3 ? 1.4 : 1), [0.1, 0.1, 0.11]); K.chair(a + 0.62, dd, -Math.PI / 2, [0.1, 0.1, 0.11]);
+      if (R() < 0.7) { K.box(a, dd, 0.765, 0.32, 0.22, 0.012, [0.15, 0.15, 0.16], 0, 4); K.box(a, dd + 0.11, 0.87, 0.32, 0.01, 0.22, [0.1, 0.1, 0.12], 0, 4, 0, -0.35); K.box(a, dd + 0.105, 0.87, 0.28, 0.004, 0.18, [0.4, 0.75, 1], 1.4, 0, 0, -0.35); }
+      K.cup(a + 0.2, dd - 0.1, 0.76, 0.09);
+    }
+    K.plant(-W / 2 + 0.5, 0.6, 1.2); K.plant(W / 2 - 0.5, 0.6, 1.1); K.plant(-W / 2 + 0.5, D - 2.6, 0.9);
+    for (const [a, dd] of [[-2.3, 2.3], [2.3, 2.3], [-2.3, 4.3], [0.4, 3.4], [cm, cd]]) K.pendant(a, dd, 2.0, [1, 0.72, 0.4]);
+    light(0, D * 0.35, 2.8, 8, [1.7, 1.1, 0.6]); light(cm, cd, 2.6, 7, [1.6, 1.05, 0.6]);
+  },
+
+  /* ---- electronics: a wall of screens, display tables of devices, pegboards of boxed gear ---- */
+  volt(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const hues = [[0.2, 0.7, 1], [1, 0.3, 0.6], [0.3, 1, 0.6], [1, 0.75, 0.25], [0.6, 0.4, 1], [0.9, 0.95, 1]];
+    const nx = Math.floor((W - 1) / 1.2);
+    for (let i = 0; i < nx; i++) for (let j = 0; j < 3; j++) K.screen(-W / 2 + 0.5 + (i + 0.5) * (W - 1) / nx, D - 0.1, 0.9 + j * 0.85, 1.05, 0.72, pk(hues), 0, rr(0.9, 1.9));
+    for (const s of [-1, 1]) {   // display tables
+      const a = s * 1.6, dd = D / 2 - 0.3;
+      K.rb(a, dd, 0.45, 1.1, 2.6, 0.9, 0.04, [0.85, 0.85, 0.86], 0, 15); K.box(a, dd, 0.91, 1.14, 2.64, 0.02, [0.05, 0.05, 0.06], 0, 10); Sl(a - 0.55, a + 0.55, dd - 1.3, dd + 1.3, 0, 0.92);
+      for (let k = 0; k < 6; k++) { const pd = dd - 1.05 + k * 0.42; K.box(a - 0.2, pd, 0.93, 0.08, 0.16, 0.01, [0.05, 0.05, 0.06], 0, 4); K.box(a - 0.2, pd, 0.938, 0.07, 0.14, 0.004, pk(hues), 1.5, 0);
+        K.box(a + 0.22, pd, 0.95, 0.24, 0.02, 0.17, [0.06, 0.06, 0.07], 0, 4, 0, -0.4); K.box(a + 0.22, pd - 0.012, 0.95, 0.21, 0.004, 0.14, pk(hues), 1.3, 0, 0, -0.4); }
+    }
+    for (const s of [-1, 1]) {   // pegboards of boxed gear and coiled cable
+      const a = s * (W / 2 - 0.05); K.box(a, D / 2 - 0.5, 1.6, 0.03, D - 3, 2.2, [0.55, 0.5, 0.42], 0, 13);
+      for (let y = 0.8; y < 2.6; y += 0.4) for (let dd = 1.6; dd < D - 2; dd += 0.3) if (R() < 0.8) K.pack(a - s * 0.07, dd, y - 0.15, 0.1, 0.22, rr(0.2, 0.3));
+      for (let k = 0; k < 3; k++) { const dd = 1.8 + k * 1.2; for (let t = 0; t < 3; t++) g_ring(K, a - s * 0.1, dd, 2.55 - t * 0.05); }
+      Sl(a - 0.25, a + 0.25, 1.5, D - 2, 0, 2.7);
+    }
+    const ca = W / 2 - 1.5; K.rb(ca, 1.6, 0.5, 1.4, 0.7, 1.0, 0.04, [0.1, 0.1, 0.12], 0, 15); K.box(ca, 1.27, 0.2, 1.3, 0.02, 0.08, T.glow, 2, 0); Sl(ca - 0.7, ca + 0.7, 1.25, 1.95, 0, 1.05);
+    K.screen(ca, 1.7, 1.25, 0.4, 0.28, [0.4, 0.9, 1], 0, 1.3);
+    for (const a of [-2.5, 0, 2.5]) K.fluor(a, D / 2, D - 1.4, 'd', [0.85, 0.95, 1]);
+    light(0, D * 0.4, RH - 0.5, 9, [1.2, 1.4, 1.8]); light(0, D - 1, 2, 7, [0.8, 1.1, 1.6]);
+  },
+
+  /* ---- memory shop: server racks with blinking LEDs, jars of glowing memory, a recliner rig ---- */
+  memory(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const nr = Math.floor((W - 1) / 0.75);
+    for (let i = 0; i < nr; i++) { const a = -W / 2 + 0.5 + (i + 0.5) * (W - 1) / nr;
+      K.box(a, D - 0.5, 1.1, 0.66, 0.8, 2.2, [0.05, 0.05, 0.06], 0, 4);
+      for (let y = 0.3; y < 2.1; y += 0.18) { K.box(a, D - 0.91, y, 0.58, 0.01, 0.12, [0.08, 0.08, 0.09], 0, 4); for (let k = 0; k < 3; k++) if (R() < 0.6) K.box(a - 0.2 + k * 0.06, D - 0.92, y, 0.02, 0.005, 0.02, pk([[0.3, 1, 0.4], [0.3, 0.7, 1], [1, 0.6, 0.2]]), 3, 0); } }
+    Sl(-W / 2, W / 2, D - 0.95, D, 0, 2.3);
+    for (const s of [-1, 1]) { const a = s * (W / 2 - 0.3);
+      for (const y of [0.9, 1.5, 2.1]) { K.box(a, D / 2 - 0.3, y, 0.45, D - 3.6, 0.03, [0.3, 0.3, 0.33], 0, 4);
+        for (let dd = 2; dd < D - 2; dd += 0.26) K.lat(a, dd, y + 0.015, [[0.07, 0], [0.07, 0.2], [0.05, 0.23], [0.05, 0.26]], pk([[0.75, 0.4, 1], [0.3, 0.9, 1], [1, 0.4, 0.7]]), R() < 0.8 ? 1.2 : 0.1, 10, 8); }
+      Sl(a - 0.25, a + 0.25, 1.8, D - 2, 0, 2.3); }
+    K.rb(0, D / 2 - 0.2, 0.55, 0.8, 1.9, 0.3, 0.1, [0.25, 0.25, 0.28], 0, 15, 0, 0.15); K.rb(0, D / 2 + 0.7, 0.9, 0.75, 0.4, 0.8, 0.1, [0.25, 0.25, 0.28], 0, 15, 0, -0.5);
+    K.cyl(0, D / 2 - 0.2, 0.2, 0.08, 0.4, [0.5, 0.5, 0.52], 0, 4, 8); K.lat(0, D / 2 + 0.85, 1.35, [[0.22, 0], [0.24, 0.1], [0.16, 0.2]], [0.5, 0.5, 0.55], 0.3, 4, 12);
+    K.tube(0, D / 2 + 0.9, 1.5, 0.4, D - 1, 2.6, 0.02, [0.1, 0.1, 0.1]); K.tube(0, D / 2 + 0.9, 1.5, -0.5, D - 1, 2.2, 0.02, [0.1, 0.1, 0.1]);
+    Sl(-0.45, 0.45, D / 2 - 1.2, D / 2 + 1, 0, 0.9);
+    K.screen(-1.4, D / 2 + 0.3, 1.5, 0.6, 0.4, [0.75, 0.4, 1], Math.PI / 2, 1.5);
+    const ca = W / 2 - 1.5; K.rb(ca, 1.5, 0.5, 1.2, 0.6, 1.0, 0.03, [0.08, 0.08, 0.1], 0, 15); K.box(ca, 1.19, 0.5, 1.1, 0.02, 0.6, T.glow, 1.2, 0); Sl(ca - 0.6, ca + 0.6, 1.2, 1.8, 0, 1.05);
+    light(0, D * 0.5, RH - 0.8, 8, [1.2, 0.8, 1.8]); light(0, D - 1.5, 2, 6, [0.6, 1, 1.4]);
+  },
+
+  /* ---- hotel lobby: reception and key wall, elevators, a lounge, a chandelier ---- */
+  hotel(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, rd = D - 2.2, ra = -1.2;
+    K.rb(ra, rd, 0.55, 3.2, 0.7, 1.1, 0.06, [0.25, 0.14, 0.07], 0, 13); K.box(ra, rd, 1.12, 3.3, 0.8, 0.04, [0.85, 0.82, 0.78], 0, 10); K.box(ra, rd - 0.36, 0.3, 3.1, 0.02, 0.05, T.glow, 2, 0); Sl(ra - 1.6, ra + 1.6, rd - 0.4, rd + 0.4, 0, 1.15);
+    K.screen(ra - 0.8, rd + 0.1, 1.35, 0.4, 0.26, [0.5, 0.8, 1], 0, 1.2); K.sph(ra + 0.6, rd - 0.1, 1.16, 0.05, [0.8, 0.65, 0.3], 0, 4, 8);
+    for (let i = 0; i < 8; i++) for (let j = 0; j < 4; j++) { K.box(ra - 1.4 + i * 0.4, D - 0.12, 1.4 + j * 0.34, 0.36, 0.1, 0.3, [0.2, 0.11, 0.05], 0, 13); if (R() < 0.5) K.box(ra - 1.4 + i * 0.4, D - 0.18, 1.35 + j * 0.34, 0.03, 0.01, 0.1, [0.8, 0.65, 0.3], 0, 4); }
+    K.box(ra, D - 0.08, 3.25, 2.2, 0.03, 0.5, T.glow, 1.8, 0);                                              // name in lights
+    const ea = W / 2 - 0.08;                                                                                 // elevators
+    for (const dd of [2.3, 4.6]) { K.box(ea, dd, 1.3, 0.1, 1.5, 2.6, [0.3, 0.28, 0.24], 0, 4); for (const o of [-0.34, 0.34]) K.box(ea - 0.06, dd + o, 1.2, 0.02, 0.66, 2.3, [0.7, 0.68, 0.62], 0, 4); K.box(ea - 0.06, dd, 2.65, 0.02, 0.4, 0.1, [1, 0.6, 0.2], 2.2, 0); K.box(ea - 0.06, dd + 0.9, 1.2, 0.02, 0.08, 0.14, [0.8, 0.8, 0.8], 0.8, 0); }
+    Sl(ea - 0.1, W / 2, 1.5, 5.4, 0, 2.7);
+    const la = -W / 2 + 2, ld = 2.8;                                                                         // lounge
+    K.box(la, ld, 0.005, 2.8, 2.4, 0.01, [0.35, 0.12, 0.1], 0, 15);
+    K.rb(la - 1.1, ld, 0.25, 0.8, 1.9, 0.5, 0.08, [0.2, 0.18, 0.15], 0, 15); K.rb(la - 1.4, ld, 0.6, 0.25, 1.9, 0.7, 0.08, [0.2, 0.18, 0.15], 0, 15); Sl(la - 1.55, la - 0.7, ld - 0.95, ld + 0.95, 0, 0.6);
+    for (const s of [-1, 1]) { K.rb(la + 0.8, ld + s * 0.8, 0.28, 0.75, 0.75, 0.55, 0.1, [0.5, 0.36, 0.2], 0, 15); K.rb(la + 1.1, ld + s * 0.8, 0.62, 0.2, 0.75, 0.6, 0.08, [0.5, 0.36, 0.2], 0, 15); Sl(la + 0.42, la + 1.2, ld + s * 0.8 - 0.4, ld + s * 0.8 + 0.4, 0, 0.6); }
+    K.rb(la - 0.1, ld, 0.2, 0.7, 1.1, 0.4, 0.03, [0.6, 0.58, 0.55], 0, 10); Sl(la - 0.45, la + 0.25, ld - 0.55, ld + 0.55, 0, 0.4);
+    K.box(la - 0.1, ld, 0.41, 0.3, 0.2, 0.03, pk(PK), 0, 15);
+    K.plant(-W / 2 + 0.5, 0.7, 1.5); K.plant(W / 2 - 0.6, 0.7, 1.5); K.plant(-W / 2 + 0.5, D - 0.6, 1.3);
+    K.cyl(la - 1.2, ld + 1.35, 0.8, 0.02, 1.6, [0.7, 0.6, 0.3], 0, 4, 6); K.lat(la - 1.2, ld + 1.35, 1.5, [[0.18, 0], [0.12, 0.3]], [1, 0.85, 0.6], 1.5, 15, 10);
+    for (let k = 0; k < 14; k++) { const t = k / 14 * Math.PI * 2; K.sph(0.3 + Math.cos(t) * 0.55, D / 2 + Math.sin(t) * 0.55, RH - 0.9 - (k % 2) * 0.15, 0.05, [1, 0.9, 0.7], 5, 0, 6); }
+    K.cyl(0.3, D / 2, RH - 0.45, 0.01, 0.9, [0.7, 0.6, 0.3], 0, 4, 4); halo(0.3, D / 2, RH - 0.95, 2.2, [0.5, 0.4, 0.25]);
+    // luggage cart left mid-escape
+    const ga = 0.8, gd = 1.6; K.box(ga, gd, 0.2, 0.6, 1.1, 0.05, [0.7, 0.6, 0.3], 0, 4); for (const s of [-1, 1]) K.tube(ga + s * 0.28, gd - 0.5, 0.2, ga + s * 0.28, gd - 0.5, 1.7, 0.02, [0.8, 0.65, 0.3]);
+    K.tube(ga - 0.28, gd - 0.5, 1.7, ga + 0.28, gd - 0.5, 1.7, 0.02, [0.8, 0.65, 0.3]); K.rb(ga, gd + 0.1, 0.5, 0.45, 0.7, 0.55, 0.06, [0.15, 0.2, 0.35], 0, 15); K.rb(ga, gd + 0.1, 0.9, 0.35, 0.55, 0.3, 0.05, [0.4, 0.15, 0.1], 0, 15);
+    Sl(ga - 0.3, ga + 0.3, gd - 0.55, gd + 0.55, 0, 1.1);
+    light(0.3, D / 2, RH - 1.1, 10, [1.8, 1.4, 0.9]); light(ra, rd, 2.2, 6, [1.2, 0.9, 0.5]);
+  },
+
+  /* ---- karaoke lounge: a big screen, a U of sofas, mics on the table, a mirror ball ---- */
+  karaoke(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    K.box(0, D - 0.08, 1.9, 3.6, 0.06, 2.0, [0.03, 0.03, 0.04], 0, 15);
+    const bands = [[0.9, 0.2, 0.7], [0.5, 0.2, 1], [0.2, 0.5, 1], [0.1, 0.9, 1]];
+    for (let j = 0; j < 4; j++) K.box(0, D - 0.12, 1.1 + j * 0.47, 3.4, 0.01, 0.46, bands[j], 1.4, 0);
+    K.box(0, D - 0.13, 1.4, 2.4, 0.01, 0.08, [1, 1, 1], 2.5, 0);                                               // lyrics bar
+    for (const s of [-1, 1]) { K.rb(s * 2.3, D - 0.4, 1, 0.5, 0.45, 2.0, 0.05, [0.06, 0.06, 0.07], 0, 15); K.cyl(s * 2.3, D - 0.64, 1.3, 0.14, 0.02, [0.2, 0.2, 0.22], 0, 4, 12, Math.PI / 2); Sl(s * 2.3 - 0.25, s * 2.3 + 0.25, D - 0.65, D, 0, 2); }
+    const sc = [0.4, 0.08, 0.35], sd0 = 2.4, sd1 = D - 1.4;
+    for (const s of [-1, 1]) { const a = s * (W / 2 - 0.55); K.rb(a, (sd0 + sd1) / 2, 0.25, 0.7, sd1 - sd0, 0.45, 0.08, [0.06, 0.05, 0.06], 0, 15); K.rb(a, (sd0 + sd1) / 2, 0.52, 0.72, sd1 - sd0, 0.14, 0.06, sc, 0, 15); K.rb(a + s * 0.3, (sd0 + sd1) / 2, 0.85, 0.16, sd1 - sd0, 0.75, 0.06, sc, 0, 15); Sl(a - 0.35, a + 0.35, sd0, sd1, 0, 0.6); }
+    const fw = W - 3.6;
+    K.rb(0, sd0 - 0.1, 0.25, fw, 0.7, 0.45, 0.08, [0.06, 0.05, 0.06], 0, 15); K.rb(0, sd0 - 0.1, 0.52, fw, 0.72, 0.14, 0.06, sc, 0, 15); K.rb(0, sd0 - 0.4, 0.72, fw, 0.16, 0.5, 0.06, sc, 0, 15); Sl(-fw / 2, fw / 2, sd0 - 0.5, sd0 + 0.25, 0, 0.6);
+    K.rb(0, (sd0 + sd1) / 2 + 0.2, 0.22, 2.2, 1.2, 0.44, 0.04, [0.1, 0.1, 0.12], 0, 10); K.box(0, (sd0 + sd1) / 2 + 0.2, 0.45, 2.1, 1.1, 0.01, T.glow, 0.6, 10); Sl(-1.1, 1.1, (sd0 + sd1) / 2 - 0.4, (sd0 + sd1) / 2 + 0.8, 0, 0.45);
+    for (let k = 0; k < 2; k++) { const a = -0.4 + k * 0.8, dd = (sd0 + sd1) / 2 + 0.1; K.cyl(a, dd, 0.5, 0.02, 0.18, [0.15, 0.15, 0.16], 0, 4, 6, Math.PI / 2); K.sph(a + 0.1, dd, 0.5, 0.035, [0.6, 0.6, 0.62], 0, 4, 6); }
+    for (let k = 0; k < 5; k++) R() < 0.6 ? K.bottle(rr(-0.9, 0.9), (sd0 + sd1) / 2 + rr(-0.1, 0.6), 0.455, 0.26, pk([[0.1, 0.4, 0.15], [0.5, 0.3, 0.05]])) : K.cup(rr(-0.9, 0.9), (sd0 + sd1) / 2 + rr(-0.1, 0.6), 0.455, 0.1, [0.7, 0.8, 0.85]);
+    K.sph(0, D / 2, RH - 0.7, 0.28, [0.8, 0.8, 0.85], 0.2, 4, 12); K.cyl(0, D / 2, RH - 0.2, 0.006, 0.4, [0.1, 0.1, 0.1], 0, 4, 4);
+    for (const [a, c] of [[-2.5, [1, 0.2, 0.8]], [0, [0.3, 0.4, 1]], [2.5, [0.2, 1, 0.9]]]) { K.cyl(a, 1.2, RH - 0.25, 0.1, 0.2, [0.1, 0.1, 0.1], 0, 4, 8); halo(a, 1.3, RH - 0.4, 1.4, [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5]); }
+    light(-2, D / 2, 2.6, 7, [1.6, 0.3, 1.3]); light(2, D / 2, 2.6, 7, [0.4, 0.6, 1.8]); light(0, D - 1, 1.6, 6, [0.9, 0.5, 1.6]);
+  },
+
+  /* ---- black-market surgery: a reclined chair under robot arms, prosthetics on the wall, vials ---- */
+  cyberdoc(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, cd = D / 2 + 0.3;
+    K.cyl(0, cd, 0.3, 0.15, 0.6, [0.5, 0.5, 0.52], 0, 4, 10); K.rb(0, cd - 0.4, 0.75, 0.7, 1.1, 0.14, 0.06, [0.15, 0.15, 0.16], 0, 15, 0, 0.12); K.rb(0, cd + 0.55, 1.05, 0.66, 0.8, 0.14, 0.06, [0.15, 0.15, 0.16], 0, 15, 0, -0.9);
+    K.rb(0, cd - 1.1, 0.5, 0.6, 0.5, 0.12, 0.05, [0.15, 0.15, 0.16], 0, 15, 0, 0.9); Sl(-0.45, 0.45, cd - 1.35, cd + 0.9, 0, 0.95);
+    for (const s of [-1, 1]) {   // ceiling-hung robot arms reaching down to the chair
+      const p0 = [s * 0.3, cd + 0.2, RH - 0.1], p1 = [s * 0.9, cd + 0.1, 2.6], p2 = [s * 0.55, cd - 0.3, 1.7], p3 = [s * 0.22, cd - 0.35, 1.25];
+      K.tube(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], 0.07, [0.7, 0.7, 0.72]); K.tube(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], 0.055, [0.7, 0.7, 0.72]); K.tube(p2[0], p2[1], p2[2], p3[0], p3[1], p3[2], 0.035, [0.3, 0.3, 0.32]);
+      for (const p of [p1, p2]) K.sph(p[0], p[1], p[2], 0.09, [0.15, 0.15, 0.16], 0, 4, 8);
+      K.sph(p3[0], p3[1], p3[2], 0.03, T.glow, 3, 0, 6);
+    }
+    K.cyl(0, cd + 0.2, RH - 0.05, 0.25, 0.1, [0.2, 0.2, 0.22], 0, 4, 12);
+    K.lat(0, cd - 0.2, 2.5, [[0.3, 0], [0.26, 0.1], [0.08, 0.16]], [0.7, 0.72, 0.75], 0, 4, 14); K.cyl(0, cd - 0.2, 2.5, 0.25, 0.01, [0.9, 1, 0.95], 3, 0, 14);   // surgical lamp
+    halo(0, cd - 0.2, 2.45, 1.2, [0.4, 0.5, 0.45]);
+    K.cyl(1.1, cd - 0.6, 0.5, 0.02, 1.0, [0.6, 0.6, 0.62], 0, 4, 6); K.box(1.1, cd - 0.6, 1.0, 0.55, 0.38, 0.02, [0.7, 0.7, 0.72], 0, 4);   // instrument tray
+    for (let k = 0; k < 6; k++) K.box(1.0 + (k % 3) * 0.1, cd - 0.7 + Math.floor(k / 3) * 0.2, 1.015, 0.012, 0.14, 0.01, [0.8, 0.82, 0.85], 0, 4, rr(-0.3, 0.3));
+    K.screen(-1.2, cd - 0.2, 1.7, 0.6, 0.4, [0.4, 1, 0.6], Math.PI / 2, 1.4); K.cyl(-1.2, cd - 0.2, 0.75, 0.025, 1.5, [0.5, 0.5, 0.52], 0, 4, 6);
+    const wa = -W / 2 + 0.2;                                                                                         // prosthetic arms hung on the left wall
+    K.box(wa, D / 2, 1.8, 0.05, D - 2.5, 0.08, [0.3, 0.3, 0.32], 0, 4);
+    for (let dd = 1.6; dd < D - 1.5; dd += 0.55) { const y = 1.75, c = pk([[0.75, 0.75, 0.78], [0.12, 0.12, 0.13], [0.6, 0.45, 0.35]]);
+      K.tube(wa + 0.12, dd, y, wa + 0.14, dd, y - 0.45, 0.05, c); K.tube(wa + 0.14, dd, y - 0.45, wa + 0.14, dd, y - 0.85, 0.04, c); K.sph(wa + 0.14, dd, y - 0.45, 0.055, [0.2, 0.2, 0.22], 0, 4, 6); K.box(wa + 0.14, dd, y - 0.93, 0.06, 0.1, 0.12, c, 0, 4); }
+    for (let dd = 1.6; dd < D - 1.5; dd += 0.7) { K.tube(wa + 0.15, dd, 0.5, wa + 0.2, dd + 0.1, 0.02, 0.07, [0.7, 0.7, 0.72]); }
+    Sl(wa - 0.2, wa + 0.35, 1.4, D - 1.4, 0, 2);
+    const va = W / 2 - 0.35;                                                                                         // cabinet of glowing vials
+    K.box(va, D / 2, 1.1, 0.6, 2.8, 2.2, [0.8, 0.82, 0.84], 0, 4); K.box(va - 0.31, D / 2, 1.1, 0.02, 2.7, 2.1, [0.5, 0.6, 0.62], 0.1, 10);
+    for (let y = 0.4; y < 2.1; y += 0.4) { K.box(va, D / 2, y - 0.02, 0.5, 2.6, 0.02, [0.7, 0.7, 0.72], 0, 4); for (let dd = D / 2 - 1.2; dd < D / 2 + 1.2; dd += 0.14) K.cyl(va - 0.1, dd, y + 0.08, 0.03, 0.16, pk([[0.3, 1, 0.5], [1, 0.3, 0.3], [0.4, 0.7, 1]]), R() < 0.8 ? 1.3 : 0, 10, 6); }
+    Sl(va - 0.3, W / 2, D / 2 - 1.4, D / 2 + 1.4, 0, 2.2);
+    K.box(0.4, cd - 1.6, 0.003, 0.9, 0.7, 0.004, [0.2, 0.01, 0.01], 0, 15, 0.5);                                   // old stain under the chair
+    for (const a of [-2.2, 2.2]) K.fluor(a, D / 2, D - 1.6, 'd', [0.85, 1, 0.92]);
+    light(0, cd - 0.2, 2.3, 7, [1.6, 1.8, 1.7]); light(0, 2, RH - 0.6, 8, [0.8, 1.5, 1.1]);
+  },
+
+  /* ---- noodle diner: a long counter with stools and a kitchen pass, booths down the side ---- */
+  diner(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, cd = D - 2.1, c0 = -W / 2 + 0.6, c1 = W / 2 - 2.8, cm = (c0 + c1) / 2, cl = c1 - c0;
+    K.rb(cm, cd, 0.52, cl, 0.6, 1.04, 0.04, [0.75, 0.1, 0.08], 0, 11); K.box(cm, cd, 1.06, cl + 0.1, 0.7, 0.05, [0.85, 0.85, 0.82], 0, 15); K.box(cm, cd - 0.31, 0.95, cl, 0.02, 0.06, [0.8, 0.8, 0.82], 0, 4); Sl(c0, c1, cd - 0.36, cd + 0.36, 0, 1.1);
+    for (let a = c0 + 0.4; a < c1 - 0.2; a += 0.75) K.stool(a, cd - 0.75, 0.75, [0.8, 0.12, 0.1]);
+    for (let a = c0 + 0.3; a < c1; a += rr(0.5, 0.9)) { K.lat(a, cd + rr(-0.15, 0.15), 1.085, [[0.04, 0], [0.12, 0.08], [0.11, 0.08]], [0.9, 0.9, 0.86], 0, 15, 10); if (R() < 0.5) K.box(a + 0.1, cd, 1.1, 0.01, 0.2, 0.01, [0.4, 0.25, 0.1], 0, 13, 0.3); }
+    K.box(cm, D - 0.9, 2.2, cl, 0.05, 0.9, [0.2, 0.2, 0.21], 0, 4); K.box(cm, D - 0.9, 1.2, cl, 0.05, 0.1, [0.6, 0.6, 0.62], 0, 4);   // kitchen pass
+    for (let a = c0 + 0.6; a < c1 - 0.4; a += 1.3) { K.cyl(a, D - 0.5, 1.4, 0.22, 0.4, [0.6, 0.6, 0.62], 0, 4, 12); K.box(a, D - 0.5, 1.0, 0.8, 0.7, 0.9, [0.4, 0.4, 0.42], 0, 4); }
+    Sl(c0, c1, D - 1, D, 0, 2.5);
+    for (let k = 0; k < Math.floor(cl / 1.1); k++) { K.box(c0 + 0.55 + k * 1.1, D - 0.95, 2.95, 1.0, 0.06, 0.5, [1, 0.92, 0.75], 1.4, 0); K.box(c0 + 0.55 + k * 1.1, D - 0.99, 2.95, 0.4, 0.005, 0.25, pk([[0.8, 0.4, 0.1], [0.9, 0.7, 0.3], [0.6, 0.2, 0.1]]), 0.6, 0); }
+    const ba = W / 2 - 0.9;                                                                                               // booths
+    for (let dd = 2; dd < D - 2.5; dd += 2.3) { K.booth(ba, dd - 0.75, 1.4, -1, [0.8, 0.12, 0.1]); K.booth(ba, dd + 0.75, 1.4, 1, [0.8, 0.12, 0.1]);
+      K.box(ba, dd, 0.74, 1.2, 0.7, 0.04, [0.85, 0.85, 0.82], 0, 15); K.box(ba, dd, 0.37, 0.08, 0.08, 0.74, [0.6, 0.6, 0.62], 0, 4); Sl(ba - 0.6, ba + 0.6, dd - 0.35, dd + 0.35, 0, 0.76);
+      K.box(ba + 0.4, dd, 0.8, 0.08, 0.12, 0.1, [0.75, 0.75, 0.78], 0, 4); K.cyl(ba + 0.25, dd + 0.15, 0.82, 0.025, 0.12, [0.7, 0.15, 0.1], 0, 15, 6); K.lat(ba - 0.2, dd, 0.76, [[0.04, 0], [0.12, 0.08]], [0.9, 0.9, 0.86], 0, 15, 10); }
+    K.blob(-W / 2 + 0.6, 1.2, 0.9, 0.3, 0.8, 0.3, [0.15, 0.4, 0.15], 0);                                                  // the kaiju mascot figure
+    for (const s of [-1, 1]) K.sph(-W / 2 + 0.6 + s * 0.1, 1.05, 1.5, 0.04, [1, 0.8, 0.1], 3, 0, 6);
+    Sl(-W / 2 + 0.3, -W / 2 + 0.9, 0.9, 1.5, 0, 1.7);
+    for (let a = c0 + 0.8; a < c1; a += 1.8) K.pendant(a, cd, 2.1, [1, 0.85, 0.6]);
+    for (const a of [-1.5, 1.5]) K.fluor(a, D / 2 - 1, D - 3, 'd', [1, 0.95, 0.85]);
+    light(0, D * 0.4, RH - 0.5, 9, [1.8, 1.5, 1.1]); light(cm, cd, 2.4, 7, [1.6, 1.2, 0.8]);
+  },
+
+  /* ---- fresh market: tilted produce crates, hanging bananas, a scale, a cold case ---- */
+  grocer(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const fruit = [[0.7, 0.08, 0.05], [0.9, 0.55, 0.05], [0.85, 0.8, 0.15], [0.25, 0.5, 0.1], [0.4, 0.1, 0.3], [0.5, 0.35, 0.15], [0.12, 0.2, 0.06]];
+    const crateRow = (a, d0, d1, face) => {   // stepped display of crates leaning toward the aisle
+      for (let dd = d0; dd < d1 - 0.3; dd += 0.62) for (let t = 0; t < 2; t++) {
+        const y = 0.45 + t * 0.42, ao = a - face * t * 0.32, c = pk(fruit);
+        K.box(ao, dd, y, 0.5, 0.58, 0.2, [0.45, 0.32, 0.18], 0, 13, 0, 0, face * 0.25);
+        for (let k = 0; k < 9; k++) K.sph(ao + rr(-0.18, 0.18), dd + rr(-0.22, 0.22), y + 0.12 + rr(0, 0.05), rr(0.035, 0.055), R() < 0.12 ? [0.15, 0.12, 0.05] : c, 0, 15, 6);
+      }
+      K.box(a, (d0 + d1) / 2, 0.22, 0.9, d1 - d0, 0.44, [0.3, 0.22, 0.12], 0, 13); Sl(a - 0.45, a + 0.45, d0, d1, 0, 1.1);
+    };
+    crateRow(-W / 2 + 0.6, 1.5, D - 1.2, 1); crateRow(W / 2 - 0.6, 3.0, D - 1.2, -1);
+    crateRow(-0.6, 2.6, D - 2.4, -1); crateRow(0.6, 2.6, D - 2.4, 1);
+    for (let k = 0; k < 3; k++) { const a = -1.5 + k * 1.5; K.cyl(a, D - 0.6, 2.7, 0.01, 0.8, [0.2, 0.2, 0.2], 0, 4, 4); for (let j = 0; j < 6; j++) K.cyl(a + rr(-0.08, 0.08), D - 0.6 + rr(-0.08, 0.08), 2.2 + rr(-0.1, 0.1), 0.025, 0.2, [0.85, 0.7, 0.1], 0, 15, 5, rr(-0.5, 0.5)); }
+    K.box(0, D - 0.45, 0.5, W - 1, 0.8, 1.0, [0.8, 0.82, 0.84], 0, 4); K.box(0, D - 0.45, 1.05, W - 1.1, 0.7, 0.05, [0.4, 0.6, 0.7], 0.6, 10); Sl(-(W - 1) / 2, (W - 1) / 2, D - 0.9, D, 0, 1.1);   // cold case
+    for (let a = -W / 2 + 0.8; a < W / 2 - 0.8; a += 0.3) K.pack(a, D - 0.45, 0.9, 0.22, 0.4, 0.12);
+    const ca = W / 2 - 1.3; K.rb(ca, 1.6, 0.5, 1.2, 0.6, 1.0, 0.03, [0.3, 0.2, 0.1], 0, 13); Sl(ca - 0.6, ca + 0.6, 1.3, 1.9, 0, 1.05);
+    K.box(ca - 0.2, 1.6, 1.08, 0.35, 0.3, 0.12, [0.8, 0.8, 0.8], 0, 4); K.lat(ca - 0.2, 1.6, 1.14, [[0.14, 0], [0.16, 0.03]], [0.75, 0.75, 0.78], 0, 4, 12);   // scale
+    for (let i = 0; i < 8; i++) K.sph(rr(-2, 2), rr(1.5, D - 1.5), 0.04, 0.045, [0.2, 0.12, 0.05], 0, 15, 6);   // rotten fruit on the floor
+    for (const a of [-2.2, 0, 2.2]) K.fluor(a, D / 2, D - 1.4, 'd', [0.95, 1, 0.9]);
+    light(0, D * 0.4, RH - 0.5, 9, [1.4, 1.6, 1.3]); light(0, D * 0.8, RH - 0.5, 8, [1.3, 1.4, 1.2]);
+  },
+
+  /* ---- herbalist: a wall of little drawers, jars of roots and powders, dried bundles overhead ---- */
+  herbal(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const wood = [0.25, 0.13, 0.06];
+    K.box(0, D - 0.3, 1.3, W - 0.6, 0.5, 2.6, wood, 0, 13); Sl(-(W - 0.6) / 2, (W - 0.6) / 2, D - 0.55, D, 0, 2.6);
+    for (let a = -W / 2 + 0.55; a < W / 2 - 0.5; a += 0.32) for (let y = 0.25; y < 2.5; y += 0.26) { K.box(a, D - 0.56, y, 0.28, 0.02, 0.22, [0.3, 0.17, 0.08], 0, 13); K.box(a, D - 0.58, y, 0.05, 0.02, 0.02, [0.7, 0.55, 0.2], 0, 4); if (R() < 0.3) K.box(a, D - 0.575, y + 0.07, 0.14, 0.005, 0.05, [0.85, 0.8, 0.65], 0, 15); }
+    for (const s of [-1, 1]) { const a = s * (W / 2 - 0.3);
+      for (const y of [0.9, 1.4, 1.9, 2.4]) { K.box(a, D / 2 - 0.6, y, 0.4, D - 3.4, 0.03, wood, 0, 13);
+        for (let dd = 1.6; dd < D - 1.9; dd += 0.2) { const h = rr(0.16, 0.26); K.lat(a, dd, y + 0.015, [[0.06, 0], [0.065, h * 0.85], [0.04, h * 0.9], [0.045, h]], [0.55, 0.6, 0.55], 0.05, 10, 8); K.cyl(a, dd, y + h * 0.35, 0.05, h * 0.6, pk([[0.45, 0.3, 0.1], [0.3, 0.35, 0.1], [0.6, 0.15, 0.05], [0.7, 0.6, 0.4]]), 0, 15, 6); } }
+      Sl(a - 0.22, a + 0.22, 1.3, D - 1.8, 0, 2.5); }
+    const cd = D - 2.2; K.rb(0, cd, 0.5, W - 3.4, 0.7, 1.0, 0.04, wood, 0, 13); K.box(0, cd, 1.02, W - 3.3, 0.8, 0.04, [0.2, 0.1, 0.05], 0, 13); Sl(-(W - 3.4) / 2, (W - 3.4) / 2, cd - 0.35, cd + 0.35, 0, 1.05);
+    K.box(-1, cd, 1.1, 0.4, 0.3, 0.1, [0.6, 0.5, 0.2], 0, 4); for (const o of [-0.15, 0.15]) K.lat(-1 + o, cd, 1.25, [[0.1, 0], [0.12, 0.03]], [0.7, 0.55, 0.2], 0, 4, 10);
+    for (let k = 0; k < 5; k++) K.lat(0.3 + k * 0.25, cd + rr(-0.1, 0.1), 1.04, [[0.07, 0], [0.08, 0.06], [0.05, 0.07]], [0.3, 0.2, 0.12], 0, 15, 8);
+    for (let a = -W / 2 + 1; a < W / 2 - 0.8; a += 0.6) for (let dd = 1.5; dd < D - 2.6; dd += 1.2) { K.cyl(a, dd, RH - 0.35, 0.005, 0.5, [0.2, 0.15, 0.1], 0, 4, 4); K.blob(a, dd, RH - 0.8, 0.1, 0.22, 0.1, pk([[0.3, 0.3, 0.1], [0.25, 0.2, 0.08], [0.35, 0.28, 0.12]])); }
+    K.lat(W / 2 - 1.1, 1.3, 0, [[0.3, 0], [0.35, 0.6], [0.3, 0.7], [0.12, 0.8]], [0.35, 0.25, 0.15], 0, 16, 12); K.sph(W / 2 - 1.1, 1.3, 0.85, 0.08, T.glow, 2, 0, 6); Sl(W / 2 - 1.45, W / 2 - 0.75, 0.95, 1.65, 0, 0.8);
+    for (const a of [-2, 0, 2]) { K.cyl(a, D / 2, RH - 0.9, 0.2, 0.35, [1, 0.35, 0.1], 1.4, 15, 10); halo(a, D / 2, RH - 0.9, 1.1, [0.45, 0.2, 0.05]); }
+    light(0, D * 0.45, RH - 1, 8, [1.9, 1.1, 0.5]); light(0, cd, 2.2, 6, [1.5, 0.9, 0.45]);
+  },
+
+  /* ---- hardware store: paint cans, pegboards of tools, a lumber rack, a ladder ---- */
+  hardware(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    const paint = (a, dd, y, clear, ax) => { if (R() < 0.12) return; if (R() < 0.6) K.cyl(a, dd, y + 0.1, 0.085, 0.2, pk([[0.8, 0.8, 0.78], [0.7, 0.1, 0.08], [0.1, 0.3, 0.7], [0.9, 0.7, 0.1], [0.15, 0.45, 0.2]]), 0, 4, 10); else K.pack(a, dd, y, ax === 'a' ? 0.18 : 0.14, ax === 'a' ? 0.14 : 0.18, rr(0.1, 0.25)); };
+    K.shelf(-W / 2 + 0.35, 1.8 + (D - 3) / 2, D - 3, 0.55, 2.3, 5, 'd', paint);
+    for (const s of [-1, 1]) K.shelf(s * 1.6, 2.6 + (D - 4.8) / 2, D - 4.8, 0.8, 1.6, 4, 'd', paint, true, [0.5, 0.35, 0.1]);
+    const pa = W / 2 - 0.05; K.box(pa, D / 2 - 0.2, 1.5, 0.03, D - 3.5, 2.0, [0.6, 0.5, 0.35], 0, 13);   // pegboard of tools
+    for (let dd = 1.7; dd < D - 2; dd += 0.28) for (let y = 0.8; y < 2.4; y += 0.4) { const kind = Math.floor(R() * 3);
+      if (kind === 0) { K.box(pa - 0.06, dd, y, 0.03, 0.03, 0.3, [0.6, 0.35, 0.1], 0, 13); K.box(pa - 0.06, dd, y + 0.16, 0.05, 0.12, 0.05, [0.4, 0.4, 0.42], 0, 4); }
+      else if (kind === 1) K.box(pa - 0.05, dd, y, 0.02, 0.05, 0.25, [0.7, 0.7, 0.72], 0, 4);
+      else K.pack(pa - 0.08, dd, y - 0.15, 0.06, 0.2, 0.28); }
+    Sl(pa - 0.25, W / 2, 1.6, D - 2, 0, 2.5);
+    for (let k = 0; k < 10; k++) K.box(rr(-0.5, 0.5), D - 0.35, 1.4 + k * 0.03, 3.2, 0.09, 0.04, [0.55, 0.42, 0.25], 0, 13, 0, 0, rr(-0.03, 0.03));   // lumber rack
+    for (const a of [-1.6, 1.6]) K.box(a, D - 0.3, 1.1, 0.06, 0.5, 2.2, [0.3, 0.3, 0.32], 0, 4); Sl(-1.8, 1.8, D - 0.6, D, 0, 2.2);
+    for (const s of [-1, 1]) K.box(W / 2 - 1.4 + s * 0.22, 1.9, 1.1, 0.05, 0.05, 2.3, [0.75, 0.6, 0.2], 0, 4, 0, 0.3); for (let y = 0.3; y < 2.1; y += 0.3) K.box(W / 2 - 1.4, 1.9 - (y - 1.1) * 0.3, y, 0.44, 0.04, 0.04, [0.75, 0.6, 0.2], 0, 4);   // ladder
+    const ca = 0; K.rb(ca, 1.3, 0.5, 2.2, 0.6, 1.0, 0.03, [0.2, 0.2, 0.22], 0, 15); Sl(ca - 1.1, ca + 1.1, 1.0, 1.6, 0, 1.05);
+    for (const a of [-2.2, 0, 2.2]) K.fluor(a, D / 2, D - 1.2, 'd');
+    light(0, D * 0.4, RH - 0.5, 9, [1.5, 1.45, 1.3]); light(0, D * 0.8, RH - 0.5, 8, [1.4, 1.35, 1.2]);
+  },
+
+  /* ---- gas-station kiosk: drinks coolers, a snack rack, a coffee counter ---- */
+  kiosk(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    for (let i = 0; i < 3; i++) { const a = -W / 2 + 1.1 + i * 1.2;
+      K.box(a, D - 0.4, 1.1, 1.15, 0.7, 2.2, [0.15, 0.15, 0.16], 0, 4); K.box(a, D - 0.74, 1.1, 1.02, 0.02, 1.95, [0.75, 0.88, 1], 1.5, 0);
+      for (let y = 0.3; y < 2; y += 0.42) for (let k = 0; k < 4; k++) R() < 0.5 ? K.bottle(a - 0.42 + k * 0.28, D - 0.55, y, 0.28, pk(PK), 0.3) : K.can(a - 0.42 + k * 0.28, D - 0.55, y, 0.13); }
+    Sl(-W / 2, -W / 2 + 3.8, D - 0.8, D, 0, 2.3);
+    K.shelf(-W / 2 + 0.3, 1.3, 1.6, 0.45, 1.5, 4, 'd', (a, dd, y) => { if (R() < 0.85) K.pack(a, dd, y, 0.12, 0.16, rr(0.12, 0.22)); });
+    const ca = W / 2 - 1.2; K.rb(ca, 1.5, 0.5, 1.6, 1.2, 1.0, 0.03, [0.7, 0.7, 0.68], 0, 15); Sl(ca - 0.8, ca + 0.8, 0.9, 2.1, 0, 1.05);
+    K.box(ca + 0.3, 1.5, 1.2, 0.35, 0.3, 0.35, [0.12, 0.12, 0.13], 0, 4); K.box(ca + 0.3, 1.34, 1.3, 0.2, 0.01, 0.08, [1, 0.4, 0.1], 1.4, 0);
+    K.screen(ca - 0.4, 1.7, 1.25, 0.26, 0.18, [0.3, 1, 0.6], 0, 1.2);
+    for (let k = 0; k < 4; k++) K.cup(ca + rr(-0.6, 0.6), 1.2 + rr(-0.3, 0.3), 1.0, 0.1);
+    K.fluor(0, D / 2, W - 1, 'a'); light(0, D / 2, RH - 0.4, 7, [1.4, 1.6, 1.5]);
+  },
+
+  /* ---- pawn (extras on top of the legacy room): guitars on the wall, a stack of TVs, watches in the case, a safe ---- */
+  pawn(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    for (let k = 0; k < 5; k++) { const a = -2 + k, c = pk([[0.6, 0.15, 0.05], [0.1, 0.1, 0.12], [0.8, 0.6, 0.3], [0.2, 0.3, 0.6]]);
+      K.rb(a, D - 0.12, 2.1, 0.36, 0.08, 0.46, 0.12, c, 0, 11); K.rb(a, D - 0.12, 2.38, 0.28, 0.08, 0.3, 0.1, c, 0, 11); K.box(a, D - 0.1, 2.85, 0.06, 0.03, 0.7, [0.25, 0.15, 0.08], 0, 13); K.box(a, D - 0.1, 3.25, 0.09, 0.04, 0.14, [0.1, 0.1, 0.1], 0, 13); }
+    for (let k = 0; k < 6; k++) { const a = -W / 2 + 1.9 + (k % 3) * 0.62, y = 0.3 + Math.floor(k / 3) * 0.5; K.rb(a, 0.9, y, 0.58, 0.5, 0.48, 0.05, [0.12, 0.11, 0.1], 0, 15); K.box(a, 0.64, y + 0.02, 0.44, 0.01, 0.34, pk([[0.3, 0.45, 0.8], [0.6, 0.6, 0.65], [0.1, 0.12, 0.2]]), R() < 0.6 ? 1.1 : 0.1, 0); }
+    Sl(-W / 2 + 1.55, -W / 2 + 3.55, 0.6, 1.2, 0, 1.1);
+    for (let a = -(W - 3) / 2 + 0.3; a < (W - 3) / 2 - 0.2; a += 0.22) K.cyl(a, D - 2.6 + rr(-0.2, 0.2), 1.12, 0.03, 0.01, pk([[0.9, 0.75, 0.3], [0.8, 0.8, 0.82]]), 0.4, 4, 8);
+    K.rb(W / 2 - 1.8, D - 0.6, 0.6, 0.9, 0.8, 1.2, 0.04, [0.2, 0.22, 0.2], 0, 4); K.cyl(W / 2 - 1.8, D - 1.02, 0.7, 0.12, 0.03, [0.7, 0.6, 0.3], 0, 4, 12, Math.PI / 2); Sl(W / 2 - 2.25, W / 2 - 1.35, D - 1, D - 0.2, 0, 1.2);
+    K.fluor(0, D / 2, D - 2, 'd', [1, 0.9, 0.7]);
+  },
+
+  /* ---- ramen (extras): menu boards, sake on a shelf, condiments, a beckoning cat ---- */
+  ramen(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L;
+    for (let k = 0; k < 4; k++) { K.box(-W / 2 + 1.5 + k * ((W - 3) / 3), D - 0.08, 3.0, 1.0, 0.03, 0.6, [0.95, 0.88, 0.7], 0.9, 0); for (let j = 0; j < 4; j++) K.box(-W / 2 + 1.5 + k * ((W - 3) / 3), D - 0.1, 3.18 - j * 0.12, 0.7, 0.005, 0.04, [0.2, 0.05, 0.03], 0, 0); }
+    K.box(-W / 2 + 0.2, D / 2, 2.2, 0.3, 2.5, 0.03, [0.3, 0.18, 0.08], 0, 13);
+    for (let dd = D / 2 - 1.1; dd < D / 2 + 1.2; dd += 0.18) K.bottle(-W / 2 + 0.2, dd, 2.215, 0.3, pk([[0.85, 0.85, 0.8], [0.2, 0.35, 0.15], [0.35, 0.2, 0.08]]), 0.2);
+    for (let a = -W / 2 + 1.7; a < W / 2 - 1.5; a += 1.3) { K.cyl(a + 0.3, D - 2.3, 1.22, 0.03, 0.1, [0.6, 0.1, 0.05], 0, 15, 6); K.cyl(a + 0.38, D - 2.3, 1.22, 0.03, 0.12, [0.1, 0.08, 0.05], 0, 15, 6); K.box(a + 0.5, D - 2.3, 1.24, 0.06, 0.06, 0.14, [0.45, 0.3, 0.15], 0, 13); }
+    K.sph(W / 2 - 1.2, D - 2.3, 1.3, 0.1, [0.95, 0.92, 0.85], 0.2, 15, 8); K.sph(W / 2 - 1.2, D - 2.32, 1.44, 0.07, [0.95, 0.92, 0.85], 0.2, 15, 8); K.box(W / 2 - 1.2, D - 2.38, 1.3, 0.05, 0.01, 0.05, [1, 0.8, 0.2], 1.5, 0);
+  },
+
+  /* ---- tattoo parlour: a chair and lamp, walls of flash art, a mirror and binders ---- */
+  tattoo(L, T, K, rr, pk, PK) {
+    const { W, D, RH, Sl, light, halo, R } = L, cd = D / 2 + 0.5;
+    K.rb(0.6, cd, 0.55, 0.7, 1.9, 0.18, 0.08, [0.08, 0.08, 0.09], 0, 15); K.rb(0.6, cd + 0.9, 0.85, 0.66, 0.2, 0.6, 0.08, [0.08, 0.08, 0.09], 0, 15, 0, -0.3); K.cyl(0.6, cd, 0.25, 0.12, 0.5, [0.6, 0.6, 0.62], 0, 4, 10); Sl(0.25, 0.95, cd - 0.95, cd + 1.05, 0, 0.7);
+    K.stool(-0.3, cd - 0.3, 0.55, [0.08, 0.08, 0.09]);
+    K.tube(-0.7, cd + 0.6, 0, -0.7, cd + 0.6, 1.8, 0.02, [0.5, 0.5, 0.52]); K.tube(-0.7, cd + 0.6, 1.8, 0.2, cd, 1.6, 0.018, [0.5, 0.5, 0.52]); K.lat(0.2, cd, 1.45, [[0.02, 0.15], [0.16, 0], [0.14, 0]], [0.1, 0.1, 0.1], 0, 4, 10); K.sph(0.2, cd, 1.5, 0.05, [1, 0.95, 0.85], 4, 0, 6);
+    K.box(-0.6, cd - 0.9, 0.45, 0.5, 0.4, 0.9, [0.6, 0.6, 0.62], 0, 4); for (let k = 0; k < 5; k++) K.cyl(-0.75 + k * 0.07, cd - 0.9, 0.93, 0.015, 0.06, pk([[0.1, 0.1, 0.1], [0.8, 0.1, 0.1], [0.1, 0.3, 0.8], [0.1, 0.6, 0.2]]), 0, 10, 6);
+    for (const s of [-1, 1]) { const a = s * (W / 2 - 0.03);   // flash art
+      for (let dd = 1.4; dd < D - 0.6; dd += 0.5) for (let y = 1.0; y < 2.9; y += 0.55) { K.box(a, dd, y, 0.02, 0.42, 0.48, [0.08, 0.06, 0.05], 0, 13); K.box(a - s * 0.012, dd, y, 0.005, 0.36, 0.42, pk([[0.9, 0.85, 0.75], [0.85, 0.3, 0.3], [0.3, 0.5, 0.8], [0.9, 0.7, 0.3]]), 0.35, 0); } }
+    K.box(-W / 2 + 1.5, D - 0.05, 1.6, 1.2, 0.02, 1.6, [0.6, 0.62, 0.65], 0, 10);
+    const ca = -W / 2 + 1.6; K.rb(ca, 1.8, 0.5, 1.6, 0.6, 1.0, 0.03, [0.12, 0.08, 0.06], 0, 13); Sl(ca - 0.8, ca + 0.8, 1.5, 2.1, 0, 1.05);
+    for (let k = 0; k < 4; k++) K.rb(ca - 0.5 + k * 0.3, 1.8, 1.05, 0.26, 0.34, 0.06, 0.01, pk(PK), 0, 15, rr(-0.3, 0.3));
+    K.box(0, D - 0.05, 2.9, 2.2, 0.03, 0.5, T.glow, 2.4, 0);
+    K.plant(W / 2 - 0.6, 0.6, 1.1);
+    light(0.4, cd, 2.2, 8, [2.1, 1.7, 1.4]); light(0, 2, 2.8, 8, [T.glow[0] * 1.8, T.glow[1] * 1.8, T.glow[2] * 1.8]); for (const a of [-2, 2]) K.pendant(a, D / 2 - 1, 2.3, [1, 0.8, 0.6]);
+  },
+};
+function g_ring(K, a, dd, y) { K.cyl(a, dd, y, 0.14, 0.03, [0.08, 0.08, 0.09], 0, 15, 10); }
 
 /* ============================================================
    Looks: switchable art directions for the whole city
@@ -2014,6 +2540,8 @@ const WORLD = {
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
+  glass: [],       // {m, c} see-through shopfront panes (r3.js draws them blended)
+  indoor: [],      // {x0,x1,z0,z1,y1} rooms: no rain, no wet surfaces, no sky light inside
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -2100,20 +2628,32 @@ function buildCity() {
     ['PAWN + CHIPS', 'panel'], ['KARAOKE', 'font'], ['VOLT', 'seg'], ['DATA CAFE', 'panel'], ['LUCKY 88', 'seg'], ['RAMEN', 'font'], ['MEMORY SHOP', 'panel'], ['SECTOR 7', 'seg'], ['CLONE CLINIC', 'font']];
   const vertWords = ['HOTEL', 'BAR', 'RAMEN', 'LIVE', 'OPEN', 'TATTOO', 'CHIPS', 'CLUB'];
   let sw = 0, vw = 0, bb = 0;
-  const SHOPS = ['ramen', 'pawn', 'clinic'];
+  const RC = mulberry(555), rc = (a, b) => a + RC() * (b - a);   // street clutter has its own dice so the city layout stays put
+  const SMALL = [['NOODLES', '#ff5a3c', 'font'], ['PHARMACY', '#3cff9a', 'panel'], ['CASH 4 CHROME', '#ffb52e', 'seg'], ['HOSTEL', '#29e7ff', 'panel'], ['REPAIR', '#ff2e88', 'seg'], ['SUSHI', '#ff3040', 'font'], ['NAILS', '#b44dff', 'font'], ['DENTIST', '#9fe7ff', 'panel'], ['LAUNDRY', '#a6ff3a', 'seg'], ['NO VACANCY', '#ff3040', 'seg']].map(([t, c, st]) => [signTexture(t, c, st), hex(c)]);
+  const bagC = [[0.02, 0.02, 0.025], [0.03, 0.035, 0.04], [0.12, 0.1, 0.05]];
+  let shopN = 0; const nextShop = () => SHOP_ORDER[shopN % SHOP_ORDER.length];
   // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
   function shopBody(x0, x1, z0, z1, h, face, col, type) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = face[1] === 'z' ? x1 - x0 : z1 - z0, DF = face[1] === 'z' ? z1 - z0 : x1 - x0;
     const tx = face[1] === 'z' ? 1 : 0, tz = 1 - tx, nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const fx = nx ? (nx < 0 ? x0 : x1) : cx, fz = nz ? (nz < 0 ? z0 : z1) : cz;
     const W = Math.min(span - 3, 11), D = 8, RH = 4.4;
-    const wp = (a, dd) => [fx + tx * a - nx * dd, fz + tz * a - nz * dd];
+    const th = Math.atan2(-nx, -nz), ca = Math.cos(th), sa = Math.sin(th);   // a rotation (never a mirror) from room space to world
+    const wp = (a, dd) => [fx + a * ca + dd * sa, fz - a * sa + dd * ca];
     const Bl = (a, dd, y, sa, sd, sy, c, e = 0, mat = 16) => { const [x, z] = wp(a, dd); B(x, y, z, tx ? sa : sd, sy, tz ? sa : sd, c, e, mat); };
+    const BlP = (...args) => { const pg = g; g = gProps; Bl(...args); g = pg; };
     const Sl = (a0, a1, d0, d1, y0, y1) => { const [xa, za] = wp(a0, d0), [xb, zb] = wp(a1, d1); solid(Math.min(xa, xb), Math.max(xa, xb), y0, y1, Math.min(za, zb), Math.max(za, zb)); };
+    const Mm = M4.create();
+    const Mr = (a, dd, y, ry = 0, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, 1, 1, 1); };
+    const MS = (a, dd, y, ry, sx, sy, sz, rx = 0, rz = 0) => { const [x, z] = wp(a, dd); return M4.trs(Mm, x, y, z, rx, th + ry, rz, sx, sy, sz); };
+    const glass = (a, dd, y, sa, sd, sy, c) => { const [x, z] = wp(a, dd); WORLD.glass.push({ m: M4.trs(M4.create(), x, y, z, 0, th, 0, sa, sy, sd), c }); };
+    const halo = (a, dd, y, s, c) => { const [x, z] = wp(a, dd); WORLD.halos.push({ p: [x, y, z], s, c }); };
+    { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
     Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, 1); Sl(-span / 2, span / 2, 0, DF, RH, h);
     Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, 1); Sl(-span / 2, span / 2, D, DF, 0, RH);
     for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, 1); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
-    propShopInterior({ Bl, Sl, W, D, RH, R, light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
+    propShopInterior({ g, Bl, BlP, Sl, W, D, RH, R: mulberry(1000 + shopN++ * 97), M: Mr, MS, wp, glass, halo,
+      light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
   }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
@@ -2167,7 +2707,7 @@ function buildCity() {
     const pe = P(0, 3.5, 1.8); B(pe[0], 3.5, pe[2], tx ? span * 0.85 : 0.1, 0.12, tz ? span * 0.85 : 0.1, sc, 2.5);
     WORLD.lights.push({ p: P(0, 2.5, 3), r: 12, c: [sc[0] * 1.6, sc[1] * 1.6, sc[2] * 1.6], shop: true });
     // horizontal sign above storefront
-    const [txt, st] = opt.shop ? [{ ramen: 'RAMEN', clinic: 'CLONE CLINIC', pawn: 'PAWN + CHIPS' }[opt.shop], 'font'] : signWords[sw++ % signWords.length];
+    const [txt, st] = opt.shop ? [SHOP_DEFS[opt.shop].sign, SHOP_DEFS[opt.shop].st] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
     addSign(signTexture(txt, '#' + [nc, sc, NEON.amber][sw % 3].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
     // vertical blade sign
@@ -2182,6 +2722,26 @@ function buildCity() {
       addSign(t, vp[0] + tx * 0.14, vy, vp[2] + tz * 0.14, bry, 2.1, vh, [1.8, 1.8, 1.8], 0, true);
       addSign(t, vp[0] - tx * 0.14, vy, vp[2] - tz * 0.14, bry + Math.PI, 2.1, vh, [1.8, 1.8, 1.8], 0, true);
     }
+    // facade + street detail: a drainpipe, cornice ledges, AC units under windows, small projecting signs, and rubbish at the kerb
+    { const dcol = [col[0] * 0.75, col[1] * 0.75, col[2] * 0.75];
+      const dp = P((RC() < 0.5 ? -1 : 1) * (span / 2 - 0.35), h / 2, 0.12); B(dp[0], h / 2, dp[2], 0.14, h, 0.14, [0.06, 0.06, 0.065], 0, 4);
+      for (let y = 7.4 + rc(0, 3); y < Math.min(h, 60) - 2; y += rc(9, 15)) { const q = P(0, y, 0.18); B(q[0], y, q[2], tx ? span : 0.36, 0.28, tz ? span : 0.36, dcol, 0, 16); }
+      for (let i = 0; i < Math.floor(span / 3.2); i++) if (RC() < 0.5) {
+        const y = 3.3 * Math.floor(rc(2, Math.min(h / 3.3 - 1, 9))) + 0.75, a = rc(-span / 2 + 1, span / 2 - 1), q = P(a, y, 0.34);
+        B(q[0], y, q[2], tx ? 0.85 : 0.6, 0.55, tz ? 0.85 : 0.6, [0.42, 0.42, 0.44], 0, 4);
+        const f = P(a, y, 0.65); B(f[0], y, f[2], tx ? 0.5 : 0.02, 0.4, tz ? 0.5 : 0.02, [0.08, 0.08, 0.09], 0, 4);
+        const k = P(a, y - 0.32, 0.4); B(k[0], y - 0.32, k[2], tx ? 0.9 : 0.5, 0.04, tz ? 0.9 : 0.5, [0.2, 0.2, 0.21], 0, 4);   // bracket
+      }
+      if (RC() < 0.7) { const [tex, sc2] = SMALL[Math.floor(RC() * SMALL.length)], a = rc(-span / 2 + 1.5, span / 2 - 1.5), y = rc(6, 9), q = P(a, y, 0.9), bry = ry + Math.PI / 2;
+        B(q[0], y, q[2], tx ? 0.12 : 1.5, 0.7, tz ? 0.12 : 1.5, [0.03, 0.03, 0.04]);
+        for (const o of [0.07, -0.07]) WORLD.signs.push({ tex, m: M4.trs(M4.create(), q[0] + tx * o, y, q[2] + tz * o, 0, bry + (o < 0 ? Math.PI : 0), 0, 1.4, 0.35, 1), col: [sc2[0] * 1.4, sc2[1] * 1.4, sc2[2] * 1.4], mode: 0, seed: RC() * 100, add: true }); }
+      const pg = g; g = gProps;
+      for (let i = 0; i < 3; i++) if (RC() < 0.45) { const a = rc(-span / 2 + 0.8, span / 2 - 0.8); if (opt.shop && Math.abs(a) < 2) continue;
+        for (let k = 0; k < 2 + Math.floor(RC() * 3); k++) { const q = P(a + rc(-0.6, 0.6), 0, rc(0.4, 1.1)), sz = rc(0.32, 0.5); g.blob(M4.trs(M, q[0], sz * 0.55, q[2], 0, rc(0, 6), 0, 1, 1, 1), sz, sz * 0.62, sz * 0.8, 0.22, Math.floor(RC() * 999), bagC[Math.floor(RC() * 3)], 0, 15, 9, 6); } }
+      if (RC() < 0.25) { const q = P(rc(-span / 2 + 1, span / 2 - 1), 0, 1.6); B(q[0], 0.4, q[2], 0.26, 0.8, 0.26, [0.55, 0.08, 0.05], 0, 11); B(q[0], 0.82, q[2], 0.2, 0.1, 0.2, [0.55, 0.08, 0.05], 0, 11); WORLD.circles.push({ x: q[0], z: q[2], r: 0.2, h: 0.85 }); }   // hydrant
+      if (RC() < 0.3) { const q = P(rc(-span / 2 + 1, span / 2 - 1), 0, 1.3); B(q[0], 0.55, q[2], tx ? 0.5 : 0.45, 1.1, tz ? 0.5 : 0.45, [0.12, 0.25, 0.5], 0, 8); B(q[0], 0.8, q[2] , tx ? 0.35 : 0.46, 0.2, tz ? 0.35 : 0.46, [0.7, 0.8, 0.85], 0.2, 10); WORLD.circles.push({ x: q[0], z: q[2], r: 0.3, h: 1.1 }); }   // newspaper box
+      g = pg;
+    }
     // holo billboard on some tall facades
     if (h > 45 && R() < 0.7) {
       const by = r(20, Math.min(h - 10, 34)), bw = Math.min(span * 0.8, 18); const bp = P(0, by, 0.4);
@@ -2195,11 +2755,26 @@ function buildCity() {
         const wdt = Math.min(r(12, 22), 64 - a); if (wdt < 6) break;
         const x0 = half > 0 ? a : -a - wdt, x1 = half > 0 ? a + wdt : -a;
         const depth = RING - PLAZA - 2.5, z0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, z1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
-        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z', side > 0 && wdt >= 12 && Math.abs(x0 + x1) < 60 && SHOPS.length ? { shop: SHOPS.shift() } : {});
+        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-z' : '+z', wdt >= 12 ? { shop: nextShop() } : {});
         a += wdt + 0.01;
       }
     }
   }
+  { const pg = g; g = gProps; const Mc = M4.create();
+    const span = (ax, ay, az, bx, by, bz, sag, lit) => { let px = ax, py = ay, pz = az; for (let i = 1; i <= 10; i++) { const t = i / 10, x = lerp(ax, bx, t), z = lerp(az, bz, t), y = lerp(ay, by, t) - Math.sin(t * Math.PI) * sag; g.box(M4.align(Mc, px, py, pz, x, y, z, 0.03, 0.03), [0.03, 0.03, 0.035], 0, 0); if (lit && i % 2 === 0 && i < 10) { g.sphere(M4.trs(Mc, x, y - 0.12, z, 0, 0, 0, 0.12, 0.12, 0.12), lit, 3, 0, 6, 4); } px = x; py = y; pz = z; } };
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (let d = 45; d < 72; d += rc(2.2, 4.5)) {
+      const c = dx ? [d * dx, 0] : [0, d * dz], y0 = rc(5.5, 12), y1 = y0 + rc(-1.5, 1.5), lit = RC() < 0.25 ? [[1, 0.8, 0.5], [1, 0.3, 0.6], [0.4, 0.9, 1]][Math.floor(RC() * 3)] : null;
+      if (dx) span(c[0] + rc(-1, 1), y0, -5.9, c[0] + rc(-1, 1), y1, 5.9, rc(0.4, 1.4), lit); else span(-5.9, y0, c[1] + rc(-1, 1), 5.9, y1, c[1] + rc(-1, 1), rc(0.4, 1.4), lit);
+    }
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const side of [-1, 1]) for (let d = 47 + (side > 0 ? 3 : 0); d < 72; d += 8) {   // wall lamps down the side streets
+      const lc = RC() < 0.7 ? [1.7, 1.15, 0.6] : [0.7, 1.3, 1.7], dead = RC() < 0.15;
+      const wx = dx ? d * dx : side * 5.95, wz = dx ? side * 5.95 : d * dz, ox = dx ? 0 : -side * 0.3, oz = dx ? -side * 0.3 : 0;
+      g.box(M4.trs(Mc, wx + ox * 0.5, 3.4, wz + oz * 0.5, 0, 0, 0, dx ? 0.35 : 0.3, 0.1, dx ? 0.3 : 0.35), [0.08, 0.08, 0.09], 0, 4);
+      g.box(M4.trs(Mc, wx + ox, 3.33, wz + oz, 0, 0, 0, 0.28, 0.06, 0.28), dead ? [0.2, 0.2, 0.2] : lc, dead ? 0 : 3, 0);
+      if (!dead) { WORLD.lights.push({ p: [wx + ox * 3, 3.1, wz + oz * 3], r: 9, c: lc, shop: true }); WORLD.halos.push({ p: [wx + ox * 1.2, 3.25, wz + oz * 1.2], s: 1.3, c: [lc[0] * 0.35, lc[1] * 0.35, lc[2] * 0.35] }); }
+      if (RC() < 0.4) for (let k = 0; k < 3; k++) { const bx = wx + ox * 2 + rc(-1, 1) * (dx ? 1 : 0), bz = wz + oz * 2 + rc(-1, 1) * (dx ? 0 : 1), sz = rc(0.3, 0.5); g.blob(M4.trs(Mc, bx, sz * 0.55, bz, 0, rc(0, 6), 0, 1, 1, 1), sz, sz * 0.62, sz * 0.8, 0.22, Math.floor(RC() * 999), bagC[Math.floor(RC() * 3)], 0, 15, 9, 6); }
+    }
+    g = pg; }
   // east / west: span z [-42.5,-6] & [6,42.5]
   for (const side of [1, -1]) {
     for (const half of [-1, 1]) {
@@ -2207,7 +2782,7 @@ function buildCity() {
         const wdt = Math.min(r(12, 20), PLAZA + 2.5 - a); if (wdt < 5) break;
         const z0 = half > 0 ? a : -a - wdt, z1 = half > 0 ? a + wdt : -a;
         const depth = RING - PLAZA - 2.5, x0 = side > 0 ? PLAZA + 2.5 : -(PLAZA + 2.5) - depth, x1 = side > 0 ? PLAZA + 2.5 + depth : -(PLAZA + 2.5);
-        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-x' : '+x');
+        building(x0, x1, z0, z1, r(28, 95), side > 0 ? '-x' : '+x', wdt >= 12 ? { shop: nextShop() } : {});
         a += wdt + 0.01;
       }
     }
@@ -2376,7 +2951,8 @@ function buildDistricts(C) {
     let a = a0;
     while (a < a1 - 0.01) {
       let w = r(11, 20); if (a1 - (a + w) < 7) w = a1 - a;
-      if (axis === 'x') building(a, a + w, b0, b1, r(hmin, hmax), face, opt); else building(b0, b1, a, a + w, r(hmin, hmax), face, opt);
+      const o = typeof opt === 'function' ? opt(w) : opt;
+      if (axis === 'x') building(a, a + w, b0, b1, r(hmin, hmax), face, o); else building(b0, b1, a, a + w, r(hmin, hmax), face, o);
       a += w;
     }
   }
@@ -2450,9 +3026,10 @@ function buildDistricts(C) {
   /* ---------------- NIGHT MARKET (east) ---------------- */
   setG('near');
   quad(74, 138, -32, 32, 0.014, [0.1, 0.082, 0.075], 2);
-  row('x', 74, 164, 32, 58, '-z', 26, 70);
-  row('x', 74, 164, -58, -32, '+z', 26, 70);
-  row('z', -32, 32, 138, 164, '-x', 40, 90);
+  let mk = 0; const mshop = (w) => w >= 12 ? { shop: MARKET_ORDER[mk++ % MARKET_ORDER.length] } : {};   // market frontages are all walk-in shops
+  row('x', 74, 164, 32, 58, '-z', 26, 70, mshop);
+  row('x', 74, 164, -58, -32, '+z', 26, 70, mshop);
+  row('z', -32, 32, 138, 164, '-x', 40, 90, mshop);
   setG('props');
   const awn = [[0.35, 0.05, 0.06], [0.05, 0.2, 0.22], [0.3, 0.2, 0.04], [0.2, 0.06, 0.25], [0.08, 0.2, 0.08]];
   function stall(x, z, facing) {   // facing: +1 counter toward +z, -1 toward -z
@@ -2514,7 +3091,7 @@ function buildDistricts(C) {
   /* ---------------- THE SUBURBS (south of the plaza) ---------------- */
   // dead suburbia between the towers and the gardens: a strip of low shops, then houses on two cross streets
   setG('near');
-  row('z', 89, 101, -24, -8, '+x', 7, 11);                                           // two-storey shops on one side, a gas station on the other
+  row('z', 89, 101, -24, -8, '+x', 7, 11, (w) => w >= 12 ? { shop: 'hardware' } : {});                                           // two-storey shops on one side, a gas station on the other
   setG('sub');
   const SG = C.getG();
   quad(-64, 64, 100, 163, 0.012, [0.06, 0.08, 0.045], 19);                          // overgrown lawns
@@ -3871,9 +4448,9 @@ const rainGeo = (function () {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
 const rainMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() } }, transparent: true, depthWrite: false,
+  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB }, transparent: true, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime; varying float vA, vK;
+  vertexShader: `attribute vec2 aP2; uniform float uTime; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vA, vK;
 void main(){ float S = 50.;
   float x = mod(position.x - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
   float z = mod(position.y - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
@@ -3884,6 +4461,7 @@ void main(){ float S = 50.;
   float dens = clamp(0.2 + 0.7 * spell + 0.45 * (patchD - 0.5), 0.12, 1.);
   float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
   vK = step(rnd, dens) * (0.45 + 0.8 * fract(rnd * 13.7));
+  if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);   // dry under a ceiling
   float wind = 0.08 + 0.32 * spell + 0.12 * sin(uTime * 1.3 + position.y * 0.21), len = 0.9 * (0.55 + 0.9 * fract(rnd * 5.3));
   vec3 p = vec3(x + aP2.y * wind * len * 2., y + aP2.y * len, z + aP2.y * 0.05); vA = aP2.y;
   gl_Position = projectionMatrix*viewMatrix*vec4(p,1.); }`,
@@ -3958,8 +4536,34 @@ function buildWorld3() {
   const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
   const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
   const sub = new THREE.Mesh(WORLD.meshSub, MAT.static); sub.castShadow = true; sub.receiveShadow = true; sub.matrixAutoUpdate = false; scene.add(sub);
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion();
+  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   R3.built = true;
+}
+
+/* ---------------- shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down ---------------- */
+function buildGlass() {
+  if (!WORLD.glass.length) return;
+  const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
+    transparent: true, depthWrite: false, vertexColors: true,
+    vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+${NOISE_GLSL}
+void main(){
+  vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
+  float fr = 0.04 + 0.96 * pow(1. - ndv, 5.);
+  vec2 fc = abs(N.x) > 0.5 ? vW.zy : vW.xy;
+  float beads = smoothstep(0.8, 0.95, vn(fc * vec2(26., 14.))) * (0.3 + uRain * 0.6);
+  float runs = smoothstep(0.6, 0.95, vn(vec2(fc.x * 11., fc.y * 0.6 + uTime * 0.25))) * uRain;
+  float grime = smoothstep(1.1, 0.0, vW.y) * 0.5 + smoothstep(0.55, 0.8, vn(fc * 1.3)) * 0.25;
+  vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
+  vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
+  float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-d * uFogDen)) * 0.8, 0., 1.));
+  gl_FragColor = vec4(col, a);
+}` });
+  const m = new THREE.Mesh(gg.build(), mat); m.matrixAutoUpdate = false; m.renderOrder = 3; scene.add(m);
 }
 
 /* ---------------- baked occlusion: sky visibility of every half-metre of street ----------------
@@ -4013,6 +4617,14 @@ function buildOcclusion() {
   const tex = new THREE.DataTexture(px, W, H, THREE.RedFormat, THREE.UnsignedByteType);
   tex.magFilter = THREE.LinearFilter; tex.minFilter = THREE.LinearFilter; tex.needsUpdate = true;
   NQU.uOcc.value = tex; NQU.uOccB.value.set(X0, Z0, 1 / (W * C), 1 / (H * C));
+  const inn = new Uint8Array(W * H);
+  for (const q of WORLD.indoor) {
+    const i0 = Math.max(0, Math.ceil((q.x0 - X0) / C - 0.5)), i1 = Math.min(W - 1, Math.floor((q.x1 - X0) / C - 0.5));
+    const j0 = Math.max(0, Math.ceil((q.z0 - Z0) / C - 0.5)), j1 = Math.min(H - 1, Math.floor((q.z1 - Z0) / C - 0.5));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) inn[j * W + i] = 255;
+  }
+  const tin = new THREE.DataTexture(inn, W, H, THREE.RedFormat, THREE.UnsignedByteType); tin.magFilter = tin.minFilter = THREE.NearestFilter; tin.needsUpdate = true;
+  NQU.uIndoor.value = tin;
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
@@ -4222,6 +4834,7 @@ function render3(time, W, H, fov, cam) {
   }
   rainMat.uniforms.uAlpha.value = T.rain; rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol);
   NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain;
+  NQU.uAirK.value = SETTINGS.quality === 0 ? 0 : 0.0078 * (0.6 + T.rain) * (T.airK !== undefined ? T.airK : 1);
   VOL_U.uLamp.value.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); VOL_U.uVolK.value = (0.35 + T.rain) * (SETTINGS.quality === 0 ? 0.6 : 1);
   updateLights3(cam);
   // dynamic geometry
