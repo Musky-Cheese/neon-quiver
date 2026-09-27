@@ -2946,7 +2946,8 @@ function drawCityDynamic(time) {
 /* ============================================================
    Districts: the Rail Yard (north), the Night Market (east), the
    Warrens (west) and the Sakura Gardens (south, through the torii)
-   hang off Sector 7 plaza. The Docks lie past the far end of the market.
+   hang off Sector 7 plaza. The Docks lie past the far end of the market,
+   and the Freight Line runs from the Rail Yard round to the Docks.
    ============================================================ */
 const DISTRICTS = [
   { id: 'hub', name: 'SECTOR 7 PLAZA', x0: -40, x1: 40, z0: -40, z1: 40, env: [0, 5, 10] },
@@ -2956,6 +2957,7 @@ const DISTRICTS = [
   { id: 'garden', name: 'SAKURA GARDENS', x0: -32, x1: 32, z0: 164, z1: 228, env: [0, 5, 190] },
   { id: 'suburbs', name: 'THE SUBURBS', x0: -60, x1: 60, z0: 74, z1: 162, env: [0, 5, 125] },
   { id: 'docks', name: 'THE DOCKS', x0: 164, x1: 228, z0: -48, z1: 40, env: [196, 5, -4] },
+  { id: 'freight', name: 'FREIGHT LINE', x0: 32, x1: 206, z0: -108, z1: -48, env: [118, 5, -100] },
 ];
 function districtAt(x, z) {
   for (const d of DISTRICTS) if (x > d.x0 - 2 && x < d.x1 + 2 && z > d.z0 - 2 && z < d.z1 + 2) return d;
@@ -3039,7 +3041,8 @@ function buildDistricts(C) {
   setG('near');
   quad(-32, 32, -138, -74, 0.012, [0.07, 0.068, 0.064], 3);
   row('z', -164, -74, -58, -32, '+x', 14, 30, { industrial: true, mat: 8, col: [0.16, 0.15, 0.14] });
-  row('z', -164, -74, 32, 58, '-x', 14, 30, { industrial: true, mat: 8, col: [0.14, 0.15, 0.16] });
+  row('z', -164, -108, 32, 58, '-x', 14, 30, { industrial: true, mat: 8, col: [0.14, 0.15, 0.16] });   // split by the Freight Line cut
+  row('z', -92, -74, 32, 58, '-x', 14, 30, { industrial: true, mat: 8, col: [0.14, 0.15, 0.16] });
   row('x', -32, 32, -164, -138, '+z', 18, 34, { industrial: true, mat: 8, col: [0.15, 0.14, 0.14] });
   setG('props');
   for (const tz of [-100, -116]) {   // tracks
@@ -3121,7 +3124,8 @@ function buildDistricts(C) {
   for (const rx of [211.2, 224.6]) quad(rx - 0.15, rx + 0.15, -48, 40, 0.03, [0.2, 0.19, 0.18], 4);   // crane rails
   quad(226.8, 228.4, -48, 40, 0.04, [0.45, 0.35, 0.05], 16);                        // painted quay edge
   const dind = (c) => ({ industrial: true, mat: 8, col: c });
-  row('x', 164, 244, -74, -48, '+z', 13, 24, () => dind([0.13 + R() * 0.04, 0.13, 0.12]));
+  row('x', 164, 190, -74, -48, '+z', 13, 24, () => dind([0.13 + R() * 0.04, 0.13, 0.12]));   // split by the Freight Line coming in from the north
+  row('x', 206, 244, -74, -48, '+z', 13, 24, () => dind([0.13 + R() * 0.04, 0.13, 0.12]));
   row('x', 164, 244, 40, 66, '-z', 13, 24, () => dind([0.12, 0.13, 0.14 + R() * 0.03]));
   // harbour: black oily water to the horizon, a quay wall, and the ship
   setG('far');
@@ -3162,7 +3166,7 @@ function buildDistricts(C) {
   }
   // the container yard: stacks in blocks, lanes between them, gaps to slip through
   for (const [bz, alongX] of [[-12.6, true], [-15.2, true], [-24.6, true], [-27.2, true], [-37.4, true], [-40, true], [12.6, true], [15.2, true], [24.6, true], [27.2, true], [34.8, true]])
-    for (const bx of [171.5, 178, 191.5, 198]) { if (R() < 0.22) continue; const r0 = R(); container(bx, bz, alongX, r0 < 0.3 ? 1 : r0 < 0.72 ? 2 : 3); }
+    for (const bx of [171.5, 178, 191.5, 198]) { if (R() < 0.22 || (bx > 190 && bz < -36)) continue; const r0 = R(); container(bx, bz, alongX, r0 < 0.3 ? 1 : r0 < 0.72 ? 2 : 3); }
   for (const [bx, bz] of [[206, -20], [206, 22], [168.5, -30], [168.5, 30]]) container(bx, bz, false, 1 + Math.floor(R() * 2));
   // reefer rack and odds and ends on the apron
   for (let i = 0; i < 4; i++) { B(218, 1.3 + i * 2.62, -44.2, 6.1, 2.6, 2.44, [0.7, 0.7, 0.68], 0, 8); B(215.2, 1.3 + i * 2.62, -43, 0.08, 0.3, 0.3, i % 2 ? NEON.lime : NEON.red, 2.5); }
@@ -3180,10 +3184,60 @@ function buildDistricts(C) {
   B(164.5, 9.4, 0, 0.45, 2.5, 9.6, [0.04, 0.04, 0.045], 0, 4);                         // sign board between the two faces
   addSign(signTexture('PORT SEVEN', '#ffb52e', 'seg'), 164.15, 9.4, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(signTexture('THE DOCKS', '#29e7ff', 'font'), 164.85, 9.4, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(signTexture('CUSTOMS HOLD', '#ff5a3c', 'panel'), 196, 12, -47.9, 0, 12, 3, [1.3, 1.3, 1.3], 0, false);
+  addSign(signTexture('CUSTOMS HOLD', '#ff5a3c', 'panel'), 177, 12, -47.9, 0, 12, 3, [1.3, 1.3, 1.3], 0, false);
   // the harbour itself is off-limits ground
   WORLD.navBlocks.push({ x0: 227.4, x1: 260, z0: -80, z1: 80 });
   WORLD.supplies.push({ kind: 'terminal', x: 166.4, z: -13, ry: Math.PI / 2 + 0.4, d: 'docks' }, { kind: 'cache', x: 222, z: 38, d: 'docks' }, { kind: 'cache', x: 194.5, z: -46, d: 'docks' });
+
+
+  /* ---------------- FREIGHT LINE (Rail Yard east to the Docks) ---------------- */
+  // the yard's free track runs on out through the east wall, along a walled rail cut, and curves south into the port
+  setG('near');
+  quad(32, 206, -108, -92, 0.012, [0.065, 0.062, 0.058], 3);
+  quad(190, 206, -92, -48, 0.012, [0.065, 0.062, 0.058], 3);
+  row('x', 58, 216, -134, -108, '+z', 12, 22, () => dind([0.12 + R() * 0.04, 0.12, 0.115]));
+  row('x', 58, 190, -92, -66, '-z', 12, 22, () => dind([0.12, 0.12 + R() * 0.03, 0.13]));
+  row('z', -108, -74, 206, 232, '-x', 12, 22, () => dind([0.13, 0.12, 0.12]));
+  setG('props');
+  function track(pts) {   // sleepers + two rails along a polyline
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, az] = pts[i - 1], [bx, bz] = pts[i], dx = bx - ax, dz = bz - az, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L, ang = Math.atan2(dx, dz);
+      for (let d = 0; d < L; d += 0.9) rot(ax + ux * d, 0.07, az + uz * d, 2.7, 0.12, 0.26, [0.09, 0.07, 0.06], 0, 0, 0, ang, 0);
+      for (const o of [-0.72, 0.72]) C.getG().box(M4.align(M, ax - uz * o, 0.2, az + ux * o, bx - uz * o, 0.2, bz + ux * o, 0.1, 0.14), [0.25, 0.24, 0.24], 0, 4);
+    }
+  }
+  const arc = []; for (let i = 0; i <= 8; i++) { const a = -Math.PI / 2 + i / 8 * Math.PI / 2; arc.push([190 + Math.cos(a) * 8, -92 + Math.sin(a) * 8]); }
+  track([[32, -100], [190, -100]]); track(arc); track([[198, -92], [198, -52]]);
+  // buffer stop where the line ends at the docks
+  B(198, 0.6, -51, 3.2, 1.2, 0.6, [0.3, 0.22, 0.04], 0, 8); B(198, 1.3, -50.7, 3, 0.2, 0.1, NEON.red, 2); solid(196.4, 199.6, 0, 1.2, -51.3, -50.7);
+  // parked freight on the line (cover, with room to pass either side), and one car that came off the rails
+  const fc = [[0.22, 0.09, 0.05], [0.07, 0.09, 0.11], [0.19, 0.17, 0.07], [0.12, 0.05, 0.05]];
+  for (const cx of [72, 124, 160]) {
+    const c = fc[Math.floor(R() * fc.length)];
+    B(cx, 2.35, -100, 12, 3.4, 3.0, c, 0, 8); B(cx, 4.12, -100, 11.6, 0.14, 2.8, [0.07, 0.07, 0.08], 0, 4);
+    for (const bx of [-4, 4]) B(cx + bx, 0.55, -100, 2.4, 0.6, 2.4, [0.05, 0.05, 0.05], 0, 4);
+    B(cx, 2.4, -98.46, 3.2, 2.6, 0.06, [0.05, 0.05, 0.05], 0, 8);   // door gap
+    solid(cx - 6, cx + 6, 0, 4.1, -101.5, -98.5);
+  }
+  rot(98, 1.9, -103.5, 12, 3.4, 3.0, [0.2, 0.08, 0.04], 0, 8, -0.32, 0.18, 0);   // derailed and tipped against the wall
+  solid(92, 104, 0, 3.6, -106.2, -101.2);
+  crates(104, -95.5); crates(146, -105.5); barrier(88, -95, 0); barrier(178, -104, 1); barrier(195, -70, 0);
+  burnBarrel(110, -95); burnBarrel(185, -95); dumpster(60, -106.2, 0);
+  for (const [x, z] of [[110, -95], [185, -95], [140, -106]]) WORLD.steam.push([x, 0.1, z]);
+  // signal masts along the line: red aspect, the line is closed
+  for (const x of [50, 96, 142, 182]) { B(x, 3, -107, 0.25, 6, 0.25, [0.1, 0.1, 0.11], 0, 4); B(x, 5.8, -106.8, 0.6, 1.2, 0.35, [0.05, 0.05, 0.05]); B(x, 6.1, -106.6, 0.22, 0.22, 0.05, NEON.red, 4); WORLD.circles.push({ x, z: -107, r: 0.2, h: 6 }); }
+  B(203, 3, -80, 0.25, 6, 0.25, [0.1, 0.1, 0.11], 0, 4); B(202.8, 6.1, -80, 0.05, 0.22, 0.22, NEON.red, 4);
+  flood(84, -106); flood(134, -94); flood(192, -106); flood(204, -66);
+  // gantry sign over the yard end of the cut
+  for (const gz of [-107.4, -92.6]) { B(33, 4.5, gz, 0.5, 9, 0.5, [0.3, 0.2, 0.03], 0, 4); WORLD.circles.push({ x: 33, z: gz, r: 0.35, h: 9 }); }
+  B(33, 9, -100, 0.6, 0.6, 15.6, [0.3, 0.2, 0.03], 0, 4); B(33, 10.3, -100, 0.4, 2.3, 9.4, [0.04, 0.04, 0.045], 0, 4);
+  addSign(signTexture('PORT SEVEN', '#ffb52e', 'seg'), 32.75, 10.3, -100, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), 33.25, 10.3, -100, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  for (const gx of [190.6, 205.4]) { B(gx, 4.5, -48.6, 0.5, 9, 0.5, [0.3, 0.2, 0.03], 0, 4); WORLD.circles.push({ x: gx, z: -48.6, r: 0.35, h: 9 }); }   // where the line meets the port
+  B(198, 9, -48.6, 15.4, 0.6, 0.6, [0.3, 0.2, 0.03], 0, 4); B(198, 10.3, -48.6, 9.4, 2.3, 0.4, [0.04, 0.04, 0.045], 0, 4);
+  addSign(signTexture('FREIGHT LINE', '#29e7ff', 'font'), 198, 10.3, -48.35, 0, 9, 2.25, [1.3, 1.3, 1.3], 0, true);
+  addSign(signTexture('PORT SEVEN', '#ffb52e', 'seg'), 198, 10.3, -48.85, Math.PI, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  WORLD.supplies.push({ kind: 'cache', x: 120, z: -106.2, d: 'freight' });
 
   /* ---------------- THE WARRENS (west) ---------------- */
   setG('near');
