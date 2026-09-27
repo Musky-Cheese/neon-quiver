@@ -707,7 +707,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time); drawHook();
+  drawProjectiles(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }

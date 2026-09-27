@@ -107,6 +107,19 @@ function updateSupplies(dt) {
   const t = nearestSupply('terminal', PLAYER.x, PLAYER.z);
   GAME.nearTerminal = GAME.intermission && t && t.d < 2.6 ? t.s : null;
 }
+// burn barrels: a bright core and flickering tongues of flame above the rim (particles do the rest)
+function drawFires(time) {
+  for (const f of WORLD.fires) {
+    if (Math.abs(f.x - PLAYER.x) > 45 || Math.abs(f.z - PLAYER.z) > 45) continue;
+    const s0 = f.x * 1.7 + f.z * 3.1, lean = (WX.wind + WX.gust) * 0.25;
+    for (let i = 0; i < 5; i++) {
+      const ph = time * (7 + i * 1.3) + s0 + i * 2.1, fl = 0.55 + 0.45 * Math.sin(ph) * Math.sin(ph * 0.53 + 1.7);
+      const a = i / 5 * TAU + time * 0.6, off = i === 0 ? 0 : 0.13, h = (i === 0 ? 0.62 : 0.4) * (0.6 + 0.6 * fl), w = (i === 0 ? 0.2 : 0.11) * (0.8 + 0.3 * fl);
+      const k = 0.6 + 0.6 * fl, col = i === 0 ? [1, 0.75, 0.35] : [1, 0.42, 0.08];
+      drawItem(MESH.cone, M4.trs(poolM(), f.x + Math.cos(a) * off + lean * h * 0.5, f.y - 0.02 + h * 0.5, f.z + Math.sin(a) * off, Math.sin(ph * 0.7) * 0.18, a, Math.sin(ph * 0.9) * 0.18 - lean, w, h, w), col, i === 0 ? [5 * k, 3.4 * k, 1.1 * k] : [4.2 * k, 1.5 * k, 0.25 * k]);
+    }
+  }
+}
 function drawSupplies(time) {
   for (const s of WORLD.supplies) {
     if (Math.abs(s.x - PLAYER.x) > 90 || Math.abs(s.z - PLAYER.z) > 90) continue;
@@ -126,14 +139,24 @@ function drawSupplies(time) {
 function updateAmbient(dt) {
   const px = PLAYER.x, pz = PLAYER.z;
   AUD.harbour(GAME.state === 'title' ? 0 : clamp((px - 150) / 30, 0, 1) * clamp((60 - Math.abs(pz + 4)) / 20, 0, 1), dt);   // water, horns, cranes near the Docks
-  for (const s of WORLD.steam) {
-    if (Math.abs(s[0] - px) > 45 || Math.abs(s[2] - pz) > 45) continue;
-    if (Math.random() < dt * 14) emit(s[0] + rand(-0.2, 0.2), s[1], s[2] + rand(-0.2, 0.2), rand(-0.2, 0.2), rand(0.8, 1.6), rand(-0.2, 0.2), rand(1.4, 2.4), [0.1, 0.1, 0.11], -rand(0.4, 0.8), -0.3, 0.6, 0.9, 0.5);
+  // steam vents breathe: a steady plume that swells in pulses, billows as it rises, leans with the wind,
+  // takes the colour of the night air, and hangs thicker in the cold
+  const wx = (WX.wind + WX.gust) * 1.4, cold = 1 + 0.8 * WX.snow, fc = THEME.fog;
+  const stc = [fc[0] * 1.15 + 0.055, fc[1] * 1.15 + 0.055, fc[2] * 1.15 + 0.065];
+  for (let i = 0; i < WORLD.steam.length; i++) {
+    const s = WORLD.steam[i];
+    if (Math.abs(s[0] - px) > 50 || Math.abs(s[2] - pz) > 50) continue;
+    const pulse = 0.55 + 0.9 * Math.max(0, Math.sin(GAME.time * 0.8 + i * 2.3)) ** 2;
+    if (Math.random() < dt * 30 * pulse * cold) emit(s[0] + rand(-0.25, 0.25), s[1] + 0.05, s[2] + rand(-0.25, 0.25), rand(-0.3, 0.3) + wx * 0.3, rand(1.3, 2.4) * (0.7 + 0.4 * pulse), rand(-0.3, 0.3), rand(2.2, 3.6), stc, -rand(0.3, 0.55), -0.35, 0.55, 0.75 * cold, 0.2);
+    if (Math.random() < dt * 5 * cold) emit(s[0] + rand(-1.2, 1.2), 0.12, s[2] + rand(-1.2, 1.2), rand(-0.3, 0.3) + wx * 0.5, rand(0.05, 0.25), rand(-0.3, 0.3), rand(3, 5), stc, -rand(0.7, 1.1), -0.02, 0.4, 0.35, 0.1);   // low mist pooling round the grate
   }
+  // burn barrels: licking flame, a bright core, embers that ride the heat, the odd crackle of sparks, and smoke that leans with the wind
   for (const f of WORLD.fires) {
     if (Math.abs(f.x - px) > 50 || Math.abs(f.z - pz) > 50) continue;
-    if (Math.random() < dt * 30) emit(f.x + rand(-0.2, 0.2), f.y, f.z + rand(-0.2, 0.2), rand(-0.15, 0.15), rand(1.2, 2.2), rand(-0.15, 0.15), rand(0.3, 0.6), [2.6, 1 + Math.random() * 0.5, 0.15], rand(0.2, 0.4), -1, 1, -0.3);
-    if (Math.random() < dt * 4) emit(f.x, f.y + 0.6, f.z, rand(-0.2, 0.2), rand(1, 1.6), rand(-0.2, 0.2), 1.6, [0.05, 0.045, 0.045], -0.4, -0.2, 0.5, 0.8, 0.4);
+    if (Math.random() < dt * 48) { const hot = Math.random(); emit(f.x + rand(-0.2, 0.2), f.y - 0.05, f.z + rand(-0.2, 0.2), rand(-0.18, 0.18) + wx * 0.15, rand(1.4, 2.6), rand(-0.18, 0.18), rand(0.28, 0.55), hot < 0.3 ? [3, 2.1, 0.7] : [2.8, 0.95 + hot * 0.6, 0.12], rand(0.22, 0.42), -1.2, 1.2, -0.35); }
+    if (Math.random() < dt * 9) emit(f.x + rand(-0.15, 0.15), f.y + 0.1, f.z + rand(-0.15, 0.15), rand(-0.6, 0.6) + wx * 0.4, rand(2, 4.2), rand(-0.6, 0.6), rand(1.2, 2.4), [3.2, 1.3, 0.25], rand(0.025, 0.045), -0.6, 0.35, 0);   // embers
+    if (Math.random() < dt * 0.6) for (let k = 0; k < 8; k++) emit(f.x, f.y + 0.1, f.z, rand(-1.8, 1.8), rand(2.5, 5), rand(-1.8, 1.8), rand(0.5, 1.1), [3.5, 2, 0.6], rand(0.02, 0.035), 6, 0.2, 0);   // crackle
+    if (Math.random() < dt * 6) emit(f.x + rand(-0.1, 0.1), f.y + 0.7, f.z + rand(-0.1, 0.1), rand(-0.2, 0.2) + wx * 0.6, rand(1, 1.7), rand(-0.2, 0.2), rand(2.6, 4.4), [0.045, 0.04, 0.04], -rand(0.35, 0.5), -0.25, 0.45, 0.95, 0.5);
   }
   // cherry blossom petals drifting down from nearby canopies
   for (const t of WORLD.petals) {

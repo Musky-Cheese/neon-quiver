@@ -225,7 +225,7 @@ function updateLights3(cam) {
   for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
   for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const fl = 0.8 + 0.2 * Math.sin(NQU.uTime.value * 17 + f.x) * Math.sin(NQU.uTime.value * 7.3 + f.z); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
+  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
   for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
   if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
   for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });

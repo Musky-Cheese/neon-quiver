@@ -1403,14 +1403,26 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
     if (depth === 1) tips.push(q);
   }
   grow([x, base, z], [r(-0.12, 0.12), 1, r(-0.12, 0.12)], 1.7 * s, 0.26 * s, 2);
-  // blossom: a big soft cluster at every tip plus smaller puffs around it, glowing faintly pink
-  let cx = 0, cy = 0, cz = 0;
-  for (const t of tips) {
-    cx += t[0]; cy += t[1]; cz += t[2];
-    g.blob(pT(PM.a, t[0], t[1] + 0.2, t[2], r(0, TAU)), r(0.75, 1.0) * s, r(0.5, 0.62) * s, r(0.75, 1.0) * s, 0.4, r(0, 99), blossom, 1.8, 14, 10, 7, 1);
-    for (let i = 0; i < 3; i++) { const a = r(0, TAU), d = r(0.5, 0.95) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
-  }
+  // blossom: not one solid cloud per branch but a loose spray of small clusters riding out along each tip,
+  // drooping at the ends, with gaps you can see sky and twigs through. Shaded darker toward the heart of the
+  // canopy and paler on top, a few near-white and a few deep pink, glowing faintly as if lit through.
+  let cx = 0, cy = 0, cz = 0; for (const t of tips) { cx += t[0]; cy += t[1]; cz += t[2]; }
   cx /= tips.length; cy /= tips.length; cz /= tips.length;
+  let top = -1e9, bot = 1e9; for (const t of tips) { top = Math.max(top, t[1]); bot = Math.min(bot, t[1]); }
+  for (const t of tips) {
+    let ox = t[0] - x, oy = 0.35, oz = t[2] - z; const oL = Math.hypot(ox, oy, oz) || 1; ox /= oL; oy /= oL; oz /= oL;   // outward from the trunk, a little upward
+    for (let i = 0; i < 16; i++) {
+      const u = R(), reach = (0.15 + 0.85 * u) * 1.05 * s, a = r(0, TAU), rr = r(0.15, 0.55) * s * (0.5 + 0.6 * u);
+      const px = t[0] + ox * reach + Math.cos(a) * rr, pz = t[2] + oz * reach + Math.sin(a) * rr;
+      const py = t[1] + oy * reach + r(-0.18, 0.32) * s - u * u * 0.45 * s;                     // the far ends droop under their own weight
+      const inner = Math.min(1, Math.hypot(px - cx, pz - cz) / (1.9 * s)), hk = (py - bot) / Math.max(0.5, top - bot + 0.8);
+      const sh = 0.62 + 0.28 * inner + 0.2 * hk, tint = R();
+      const c = tint < 0.14 ? [1.0 * sh, 0.8 * sh, 0.88 * sh] : tint > 0.9 ? [0.84 * sh, 0.34 * sh, 0.5 * sh] : [blossom[0] * sh, blossom[1] * sh, blossom[2] * sh];
+      const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u);
+      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * r(1, 1.3), sz * r(0.62, 0.8), sz * r(1, 1.3), 0.5, r(0, 99), c, 1.1 + 0.9 * inner, 14, 7, 5, 1);
+      if (i % 5 === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
+    }
+  }
   WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
   WORLD.petals.push([cx, cy, cz, 2.6 * s]);
   WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
@@ -3632,6 +3644,19 @@ function updateSupplies(dt) {
   const t = nearestSupply('terminal', PLAYER.x, PLAYER.z);
   GAME.nearTerminal = GAME.intermission && t && t.d < 2.6 ? t.s : null;
 }
+// burn barrels: a bright core and flickering tongues of flame above the rim (particles do the rest)
+function drawFires(time) {
+  for (const f of WORLD.fires) {
+    if (Math.abs(f.x - PLAYER.x) > 45 || Math.abs(f.z - PLAYER.z) > 45) continue;
+    const s0 = f.x * 1.7 + f.z * 3.1, lean = (WX.wind + WX.gust) * 0.25;
+    for (let i = 0; i < 5; i++) {
+      const ph = time * (7 + i * 1.3) + s0 + i * 2.1, fl = 0.55 + 0.45 * Math.sin(ph) * Math.sin(ph * 0.53 + 1.7);
+      const a = i / 5 * TAU + time * 0.6, off = i === 0 ? 0 : 0.13, h = (i === 0 ? 0.62 : 0.4) * (0.6 + 0.6 * fl), w = (i === 0 ? 0.2 : 0.11) * (0.8 + 0.3 * fl);
+      const k = 0.6 + 0.6 * fl, col = i === 0 ? [1, 0.75, 0.35] : [1, 0.42, 0.08];
+      drawItem(MESH.cone, M4.trs(poolM(), f.x + Math.cos(a) * off + lean * h * 0.5, f.y - 0.02 + h * 0.5, f.z + Math.sin(a) * off, Math.sin(ph * 0.7) * 0.18, a, Math.sin(ph * 0.9) * 0.18 - lean, w, h, w), col, i === 0 ? [5 * k, 3.4 * k, 1.1 * k] : [4.2 * k, 1.5 * k, 0.25 * k]);
+    }
+  }
+}
 function drawSupplies(time) {
   for (const s of WORLD.supplies) {
     if (Math.abs(s.x - PLAYER.x) > 90 || Math.abs(s.z - PLAYER.z) > 90) continue;
@@ -3651,14 +3676,24 @@ function drawSupplies(time) {
 function updateAmbient(dt) {
   const px = PLAYER.x, pz = PLAYER.z;
   AUD.harbour(GAME.state === 'title' ? 0 : clamp((px - 150) / 30, 0, 1) * clamp((60 - Math.abs(pz + 4)) / 20, 0, 1), dt);   // water, horns, cranes near the Docks
-  for (const s of WORLD.steam) {
-    if (Math.abs(s[0] - px) > 45 || Math.abs(s[2] - pz) > 45) continue;
-    if (Math.random() < dt * 14) emit(s[0] + rand(-0.2, 0.2), s[1], s[2] + rand(-0.2, 0.2), rand(-0.2, 0.2), rand(0.8, 1.6), rand(-0.2, 0.2), rand(1.4, 2.4), [0.1, 0.1, 0.11], -rand(0.4, 0.8), -0.3, 0.6, 0.9, 0.5);
+  // steam vents breathe: a steady plume that swells in pulses, billows as it rises, leans with the wind,
+  // takes the colour of the night air, and hangs thicker in the cold
+  const wx = (WX.wind + WX.gust) * 1.4, cold = 1 + 0.8 * WX.snow, fc = THEME.fog;
+  const stc = [fc[0] * 1.15 + 0.055, fc[1] * 1.15 + 0.055, fc[2] * 1.15 + 0.065];
+  for (let i = 0; i < WORLD.steam.length; i++) {
+    const s = WORLD.steam[i];
+    if (Math.abs(s[0] - px) > 50 || Math.abs(s[2] - pz) > 50) continue;
+    const pulse = 0.55 + 0.9 * Math.max(0, Math.sin(GAME.time * 0.8 + i * 2.3)) ** 2;
+    if (Math.random() < dt * 30 * pulse * cold) emit(s[0] + rand(-0.25, 0.25), s[1] + 0.05, s[2] + rand(-0.25, 0.25), rand(-0.3, 0.3) + wx * 0.3, rand(1.3, 2.4) * (0.7 + 0.4 * pulse), rand(-0.3, 0.3), rand(2.2, 3.6), stc, -rand(0.3, 0.55), -0.35, 0.55, 0.75 * cold, 0.2);
+    if (Math.random() < dt * 5 * cold) emit(s[0] + rand(-1.2, 1.2), 0.12, s[2] + rand(-1.2, 1.2), rand(-0.3, 0.3) + wx * 0.5, rand(0.05, 0.25), rand(-0.3, 0.3), rand(3, 5), stc, -rand(0.7, 1.1), -0.02, 0.4, 0.35, 0.1);   // low mist pooling round the grate
   }
+  // burn barrels: licking flame, a bright core, embers that ride the heat, the odd crackle of sparks, and smoke that leans with the wind
   for (const f of WORLD.fires) {
     if (Math.abs(f.x - px) > 50 || Math.abs(f.z - pz) > 50) continue;
-    if (Math.random() < dt * 30) emit(f.x + rand(-0.2, 0.2), f.y, f.z + rand(-0.2, 0.2), rand(-0.15, 0.15), rand(1.2, 2.2), rand(-0.15, 0.15), rand(0.3, 0.6), [2.6, 1 + Math.random() * 0.5, 0.15], rand(0.2, 0.4), -1, 1, -0.3);
-    if (Math.random() < dt * 4) emit(f.x, f.y + 0.6, f.z, rand(-0.2, 0.2), rand(1, 1.6), rand(-0.2, 0.2), 1.6, [0.05, 0.045, 0.045], -0.4, -0.2, 0.5, 0.8, 0.4);
+    if (Math.random() < dt * 48) { const hot = Math.random(); emit(f.x + rand(-0.2, 0.2), f.y - 0.05, f.z + rand(-0.2, 0.2), rand(-0.18, 0.18) + wx * 0.15, rand(1.4, 2.6), rand(-0.18, 0.18), rand(0.28, 0.55), hot < 0.3 ? [3, 2.1, 0.7] : [2.8, 0.95 + hot * 0.6, 0.12], rand(0.22, 0.42), -1.2, 1.2, -0.35); }
+    if (Math.random() < dt * 9) emit(f.x + rand(-0.15, 0.15), f.y + 0.1, f.z + rand(-0.15, 0.15), rand(-0.6, 0.6) + wx * 0.4, rand(2, 4.2), rand(-0.6, 0.6), rand(1.2, 2.4), [3.2, 1.3, 0.25], rand(0.025, 0.045), -0.6, 0.35, 0);   // embers
+    if (Math.random() < dt * 0.6) for (let k = 0; k < 8; k++) emit(f.x, f.y + 0.1, f.z, rand(-1.8, 1.8), rand(2.5, 5), rand(-1.8, 1.8), rand(0.5, 1.1), [3.5, 2, 0.6], rand(0.02, 0.035), 6, 0.2, 0);   // crackle
+    if (Math.random() < dt * 6) emit(f.x + rand(-0.1, 0.1), f.y + 0.7, f.z + rand(-0.1, 0.1), rand(-0.2, 0.2) + wx * 0.6, rand(1, 1.7), rand(-0.2, 0.2), rand(2.6, 4.4), [0.045, 0.04, 0.04], -rand(0.35, 0.5), -0.25, 0.45, 0.95, 0.5);
   }
   // cherry blossom petals drifting down from nearby canopies
   for (const t of WORLD.petals) {
@@ -5256,7 +5291,7 @@ function updateLights3(cam) {
   for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
   for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const fl = 0.8 + 0.2 * Math.sin(NQU.uTime.value * 17 + f.x) * Math.sin(NQU.uTime.value * 7.3 + f.z); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
+  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
   for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
   if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
   for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
@@ -6391,7 +6426,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawPickups(time); drawSupplies(time); drawObjectives(time); drawHook();
+  drawProjectiles(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }

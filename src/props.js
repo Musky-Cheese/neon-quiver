@@ -258,14 +258,26 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
     if (depth === 1) tips.push(q);
   }
   grow([x, base, z], [r(-0.12, 0.12), 1, r(-0.12, 0.12)], 1.7 * s, 0.26 * s, 2);
-  // blossom: a big soft cluster at every tip plus smaller puffs around it, glowing faintly pink
-  let cx = 0, cy = 0, cz = 0;
-  for (const t of tips) {
-    cx += t[0]; cy += t[1]; cz += t[2];
-    g.blob(pT(PM.a, t[0], t[1] + 0.2, t[2], r(0, TAU)), r(0.75, 1.0) * s, r(0.5, 0.62) * s, r(0.75, 1.0) * s, 0.4, r(0, 99), blossom, 1.8, 14, 10, 7, 1);
-    for (let i = 0; i < 3; i++) { const a = r(0, TAU), d = r(0.5, 0.95) * s; g.blob(pT(PM.a, t[0] + Math.cos(a) * d, t[1] + r(-0.3, 0.2), t[2] + Math.sin(a) * d, r(0, TAU)), r(0.35, 0.5) * s, r(0.28, 0.4) * s, r(0.35, 0.5) * s, 0.45, r(0, 99), blossom, 1.8, 14, 9, 6, 1); }
-  }
+  // blossom: not one solid cloud per branch but a loose spray of small clusters riding out along each tip,
+  // drooping at the ends, with gaps you can see sky and twigs through. Shaded darker toward the heart of the
+  // canopy and paler on top, a few near-white and a few deep pink, glowing faintly as if lit through.
+  let cx = 0, cy = 0, cz = 0; for (const t of tips) { cx += t[0]; cy += t[1]; cz += t[2]; }
   cx /= tips.length; cy /= tips.length; cz /= tips.length;
+  let top = -1e9, bot = 1e9; for (const t of tips) { top = Math.max(top, t[1]); bot = Math.min(bot, t[1]); }
+  for (const t of tips) {
+    let ox = t[0] - x, oy = 0.35, oz = t[2] - z; const oL = Math.hypot(ox, oy, oz) || 1; ox /= oL; oy /= oL; oz /= oL;   // outward from the trunk, a little upward
+    for (let i = 0; i < 16; i++) {
+      const u = R(), reach = (0.15 + 0.85 * u) * 1.05 * s, a = r(0, TAU), rr = r(0.15, 0.55) * s * (0.5 + 0.6 * u);
+      const px = t[0] + ox * reach + Math.cos(a) * rr, pz = t[2] + oz * reach + Math.sin(a) * rr;
+      const py = t[1] + oy * reach + r(-0.18, 0.32) * s - u * u * 0.45 * s;                     // the far ends droop under their own weight
+      const inner = Math.min(1, Math.hypot(px - cx, pz - cz) / (1.9 * s)), hk = (py - bot) / Math.max(0.5, top - bot + 0.8);
+      const sh = 0.62 + 0.28 * inner + 0.2 * hk, tint = R();
+      const c = tint < 0.14 ? [1.0 * sh, 0.8 * sh, 0.88 * sh] : tint > 0.9 ? [0.84 * sh, 0.34 * sh, 0.5 * sh] : [blossom[0] * sh, blossom[1] * sh, blossom[2] * sh];
+      const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u);
+      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * r(1, 1.3), sz * r(0.62, 0.8), sz * r(1, 1.3), 0.5, r(0, 99), c, 1.1 + 0.9 * inner, 14, 7, 5, 1);
+      if (i % 5 === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
+    }
+  }
   WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
   WORLD.petals.push([cx, cy, cz, 2.6 * s]);
   WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
