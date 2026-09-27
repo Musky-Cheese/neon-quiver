@@ -249,7 +249,9 @@ function drawZombieRig(z, time) {
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
-  const skin = P.skin, cloth = P.cloth, pants = P.pants;
+  const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
+  const icy = (c) => ice ? [c[0] + (0.42 - c[0]) * ice, c[1] + (0.62 - c[1]) * ice, c[2] + (0.8 - c[2]) * ice] : c;
+  const skin = icy(P.skin), cloth = icy(P.cloth), pants = icy(P.pants);
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
   setV(u.uPT.value[1], cloth); setV(u.uPE.value[1], vein);
@@ -273,6 +275,12 @@ function drawZombieRig(z, time) {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
+  }
+  // ---------- tether: stakes into the ground and glowing lines to the zombies it chained ----------
+  if (z.pin > 0 && !z.dead) {
+    const TC = ARROWS[5].color, TG = ARROWS[5].glow, k = Math.min(1, z.pin);
+    for (const s of [-1, 1]) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1] * 0.7, z.core[2], z.x + s * 0.9, 0.02, z.z + 0.6 * s, 0.02, 0.02), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
+    if (z.tetherTo) for (const o of z.tetherTo) if (!o.dead) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1], z.core[2], o.core[0], o.core[1], o.core[2], 0.025, 0.025), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
   }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {

@@ -40,7 +40,7 @@ function spawnZombie(type, x, z, wave) {
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
-    stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
+    chill: 0, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
     R: { h: 0, hv: 0, t: 0, tv: 0, y: 0, yv: 0, l: 0, lv: 0 }, stumble: 0, legDmg: 0, crawl: false, crawlT: 0,
@@ -203,6 +203,8 @@ function updateZombies(dt, time) {
     const z = ZOMBIES[i];
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
     updateReact(z, dt);
+    z.chill = Math.max(0, z.chill - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
     if (z.burn > 0) {
       z.burn -= dt;
       if (!z.dead) damageZombie(z, 14 * PLAYER.dmgMult * dt * (z.type === 'boss' ? 2 : 1), 'body', null, null, 1);
@@ -234,12 +236,13 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
     let mx = Math.sin(z.yaw) * spd, mz = Math.cos(z.yaw) * spd;
     if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
+    if (z.pin > 0) { z.vx = 0; z.vz = 0; }
     z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
     for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
     pushOutCircle(z, 0.32 * z.scale);
@@ -262,11 +265,34 @@ function updateZombies(dt, time) {
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
-      z.atkT += dt / z.T.atk;
+      z.atkT += dt / z.T.atk * (z.chill > 0 ? 0.45 : 1);
       if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
+}
+// Cryo Burst: everything within 5 m slows to a crawl (attacks too) for a few seconds
+function frostBurst(x, y, z) {
+  for (const o of ZOMBIES) {
+    if (o.dead || o.state === 'drop') continue;
+    const d = Math.hypot(o.x - x, o.z - z); if (d > 5) continue;
+    o.chill = Math.max(o.chill, o.type === 'boss' ? 2.5 : 6); o.burn = 0;
+    damageZombie(o, 18 * PLAYER.dmgMult * (1 - d / 8), 'body', null, null, 4);
+  }
+  for (let k = 0; k < 70; k++) { const a = Math.random() * TAU, v = rand(2, 9); emit(x, y, z, Math.cos(a) * v, rand(0.5, 4), Math.sin(a) * v, rand(0.5, 1), [1.2, 2.4, 3.6], rand(0.05, 0.14), 2, 2, 0.1); }
+  burst(x, Math.max(0.3, y), z, 30, [0.7, 0.9, 1.1], 5, 0.6, 0.12, 4, 1.4, 3);
+  flashLight(x, 1.2, z, [1.4, 2.8, 4], 14, 0.5);
+  for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 5) f.t = 0;   // puts out fires too
+  AUD.frost(PLAYER.panOf(x, z)); shakeNear({ x, z }, 0.2);
+}
+// Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
+function tetherFrom(z, hx, hy, hz) {
+  z.pin = Math.max(z.pin, z.type === 'boss' ? 1.2 : 4.5);
+  const near = ZOMBIES.filter(o => o !== z && !o.dead && o.type !== 'boss' && o.state !== 'drop' && Math.hypot(o.x - z.x, o.z - z.z) < 6)
+    .sort((a, b) => Math.hypot(a.x - z.x, a.z - z.z) - Math.hypot(b.x - z.x, b.z - z.z)).slice(0, 2);
+  for (const o of near) { o.pin = Math.max(o.pin, 3.5); damageZombie(o, 12 * PLAYER.dmgMult, 'body', null, null, 5); }
+  z.tetherTo = near;
+  flashLight(hx, hy, hz, [2, 4, 0.6], 9, 0.3); AUD.tether();
 }
 // elites: a tougher, faster, harder-hitting version of any regular type, marked by white-hot eyes
 function makeElite(z) {

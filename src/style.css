@@ -50,11 +50,11 @@ button, select, input { font-family: var(--f); }
 #remain.count { color: var(--cyan); opacity: 1; }
 #remain.soon { color: var(--red); animation: pulse 0.5s infinite; font-size: 14px; }
 @keyframes pulse { 50% { opacity: 0.45; } }
-#quiver { display: grid; gap: 4px; }
-.slot { --c: #fff; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 10px; width: 230px; padding: 5px 10px 5px 8px; background: rgba(8, 6, 16, 0.55); border: 1px solid rgba(255, 255, 255, 0.08); position: relative; opacity: 0.72; transition: opacity 0.12s, transform 0.12s; clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px); }
+#quiver { display: grid; gap: 3px; }
+.slot { --c: #fff; display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 10px; width: 230px; padding: 3px 10px 3px 8px; background: rgba(8, 6, 16, 0.55); border: 1px solid rgba(255, 255, 255, 0.08); position: relative; opacity: 0.72; transition: opacity 0.12s, transform 0.12s; clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px); }
 .slot .k { font-size: 11px; color: var(--dim); font-weight: 700; }
-.slot .nm { font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
-.slot .ct { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--c); }
+.slot .nm { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+.slot .ct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--c); }
 .slot .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); box-shadow: 0 0 8px var(--c); }
 .slot.sel { opacity: 1; transform: translateX(-8px); border-color: var(--c); background: rgba(8, 6, 16, 0.8); box-shadow: inset 0 0 18px -8px var(--c); }
 .slot.empty { opacity: 0.3; }

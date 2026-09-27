@@ -6,7 +6,11 @@ const ARROWS = [
   { key: 'fire', name: 'Incendiary', color: hex('#ffb52e'), glow: [4, 1.8, 0.4], dmg: 0.9, speed: 0.95 },
   { key: 'boom', name: 'Plasma Charge', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },
   { key: 'rail', name: 'Rail Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },
+  { key: 'frost', name: 'Cryo Burst', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows everything in a 5 m burst
+  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },             // pins the target and chains two neighbours
+  { key: 'scatter', name: 'Scatter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.42, speed: 0.9 },        // six-shard spread for close quarters
 ];
+const AT = { FROST: 4, TETHER: 5, SCATTER: 6 };
 const BOW = {
   draw: 0, state: 'ready', t: 0, relFrom: 0, type: 0, nextType: -1, carryOld: false, hold: 0,
   swayT: 0, lagX: 0, lagY: 0, walkPhase: 0, walkAmt: 0, sprintAmt: 0, kick: 0, tipWorld: [0, 0, 0], handWorld: [0, 0, 0],

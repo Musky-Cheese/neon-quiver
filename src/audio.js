@@ -65,6 +65,9 @@ const AUD = {
     if (type === 1) this.burst('bandpass', 400, 200, 1, 0.5, 0.12);
     if (type === 2) this.tone('square', 900, 300, 0.25, 0.05);
     if (type === 3) { this.tone('sawtooth', 2400, 600, 0.2, 0.06); this.tone('sine', 1200, 3000, 0.15, 0.05); }
+    if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
+    if (type === 5) { this.tone('square', 300, 1400, 0.12, 0.05); }
+    if (type === 6) { this.burst('lowpass', 1400, 300, 1, 0.3, 0.3); this.tone('square', 120, 50, 0.15, 0.1); }
   },
   nock() { if (!this.ctx) return; const t = this.now(); this.burst('bandpass', 2500, 2500, 6, 0.05, 0.12); this.tone('square', 1800, 1700, 0.03, 0.03, this.sfx, t + 0.02); },
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
@@ -105,6 +108,8 @@ const AUD = {
     });
   },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
+  frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
+  tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
   cleared() { if (!this.ctx) return; const t = this.now(); [392, 523, 659, 784].forEach((f, i) => this.tone('square', f, f, 0.25, 0.05, this.sfx, t + i * 0.09)); },
   gameOver() { if (!this.ctx) return; const t = this.now(); [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.98, 0.5, 0.08, this.sfx, t + i * 0.28)); },
   heartbeat() { if (!this.ctx) return; const t = this.now(); this.tone('sine', 60, 40, 0.12, 0.35, this.sfx, t); this.tone('sine', 55, 38, 0.12, 0.25, this.sfx, t + 0.18); },

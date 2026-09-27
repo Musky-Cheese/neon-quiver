@@ -24,7 +24,7 @@ const REGEN = { delay: 6, rate: 2.5, cap: 0.5 };
 const INTERMISSION = 25;   // seconds between waves (visible countdown; N starts the next wave early)
 const PLAYER = {
   x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0, roll: 0, grounded: true,
-  hp: 100, maxHp: 100, speedMult: 1, drawTime: 0.62, reloadTime: 0.62, dmgMult: 1, ammo: [Infinity, 4, 2, 4],
+  hp: 100, maxHp: 100, speedMult: 1, drawTime: 0.62, reloadTime: 0.62, dmgMult: 1, ammo: [Infinity, 4, 2, 4, 2, 2, 3],
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
   up: { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 },
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
@@ -50,7 +50,7 @@ const gameEl = document.getElementById('game');
 addEventListener('keydown', (e) => {
   const k = e.code; INPUT.keys[k] = true;
   if (GAME.state === 'playing') {
-    if (k === 'Digit1') selectArrow(0); if (k === 'Digit2') selectArrow(1); if (k === 'Digit3') selectArrow(2); if (k === 'Digit4') selectArrow(3);
+    const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
     if (k === 'KeyQ') selectArrow(GAME.lastType);
     if (k === 'KeyP' || k === 'Escape') GAME.pause();
     if (k === 'Space') e.preventDefault();
@@ -71,7 +71,7 @@ gameEl.addEventListener('mousedown', (e) => {
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) { INPUT.mouseDown = false; if (GAME.state === 'playing') { const p = bowRelease(); if (p) fireArrow(p); } } });
 gameEl.addEventListener('contextmenu', (e) => e.preventDefault());
-addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; for (let i = 0; i < 4; i++) { t = (t + dir + 4) % 4; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
+addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; const NA = ARROWS.length; for (let i = 0; i < NA; i++) { t = (t + dir + NA) % NA; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
 function requestLock(quiet) {
   try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { INPUT.freeLook = true; }); } catch (e) { INPUT.freeLook = true; }
   if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 1500);
@@ -82,7 +82,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
-  if (t < 0 || t > 3) return;
+  if (t < 0 || t >= ARROWS.length) return;
   if (t !== 0 && PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
   const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (cur === t) return;
   GAME.lastType = cur; bowSwap(t);
@@ -105,10 +105,15 @@ function fireArrow(power) {
   // tiny spread when not fully drawn
   const spr = (1 - power) * 0.012 + (BOW.hold > 2.2 ? 0.004 : 0);
   const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr;
-  PROJ.push({
-    x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
-    vx: dx * spd, vy: dy * spd, vz: dz * spd, type, power, pierce: type === 3 ? 5 : 0, hits: [], age: 0, stuck: false, stuckT: 0, dir: [dx, dy, dz], stuckZ: null,
-  });
+  const n = type === AT.SCATTER ? 6 : 1, cone = type === AT.SCATTER ? 0.1 : 0;
+  for (let s = 0; s < n; s++) {
+    const jx = dx + (Math.random() - 0.5) * cone * 2, jy = dy + (Math.random() - 0.5) * cone * 1.4, jz = dz + (Math.random() - 0.5) * cone * 2, jl = Math.hypot(jx, jy, jz);
+    PROJ.push({
+      x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
+      vx: jx / jl * spd, vy: jy / jl * spd, vz: jz / jl * spd, type, power, pierce: type === 3 ? 5 : 0, hits: [], age: 0, stuck: false, stuckT: 0, dir: [jx / jl, jy / jl, jz / jl], stuckZ: null,
+      life: type === AT.SCATTER ? 0.24 : 6,   // scatter shards burn out after ~20 m
+    });
+  }
   AUD.release(power, type); shake(0.04 + power * 0.05);
   GAME.shots++;
   if (type !== 0 && PLAYER.ammo[type] <= 0) { GAME.lastType = 0; BOW.nextType = 0; }
@@ -119,7 +124,7 @@ function updateProjectiles(dt) {
   for (let i = PROJ.length - 1; i >= 0; i--) {
     const a = PROJ[i];
     if (a.stuck) { a.stuckT += dt; if (a.stuckT > 14 || (a.stuckZ && a.stuckZ.dead && a.stuckZ.dieT > 4)) PROJ.splice(i, 1); continue; }
-    a.age += dt; if (a.age > 6) { PROJ.splice(i, 1); continue; }
+    a.age += dt; if (a.age > (a.life || 6)) { PROJ.splice(i, 1); continue; }
     _seg0[0] = a.x; _seg0[1] = a.y; _seg0[2] = a.z;
     a.vy -= GRAV * dt * (a.type === 3 ? 0.35 : 1);
     const nx = a.x + a.vx * dt, ny = a.y + a.vy * dt, nz = a.z + a.vz * dt;
@@ -172,7 +177,7 @@ function updateProjectiles(dt) {
       else GAME.hitMarker(false);
       GAME.hits++;
       // stick arrow into zombie (not rail)
-      if (a.type !== 3 && a.type !== 2 && z.stuck.length < 8 && hitPart !== 'legs') { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
+      if (a.type !== 3 && a.type !== 2 && a.type !== AT.SCATTER && a.type !== AT.FROST && z.stuck.length < 8 && hitPart !== 'legs') { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
       const killed = damageZombie(z, dmg, hitPart, [hx, hy, hz], dir, a.type, a.power);
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
@@ -180,6 +185,8 @@ function updateProjectiles(dt) {
       AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
       if (killed) { GAME.hitMarker(true, true); }
       if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
+      if (a.type === AT.FROST) { frostBurst(hx, hy, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.TETHER) { tetherFrom(z, hx, hy, hz); }
       if (a.type === 2) { explode(hx, hy, hz); PROJ.splice(i, 1); continue; }
       if (a.type === 3 && a.pierce > 0) { a.pierce--; a.x = hx + a.dir[0] * 0.05; a.y = hy + a.dir[1] * 0.05; a.z = hz + a.dir[2] * 0.05; continue; }
       PROJ.splice(i, 1); continue; // arrow now drawn as stuck on zombie
@@ -188,6 +195,8 @@ function updateProjectiles(dt) {
       a.stuck = true; a.stuckT = 0;
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
       if (a.type === 2) { explode(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.FROST) { frostBurst(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
       if (a.type === 1) { FIRES.push({ x: hx, z: hz, t: 4.5 }); AUD.fireIgnite(); }
       AUD.thunk();
       if (PROJ.filter(p => p.stuck).length > 45) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
@@ -255,7 +264,7 @@ const PICKUPS = [];
 function dropPickup(x, z, forceType) {
   const r = Math.random();
   let kind = forceType || (r < 0.55 ? 'ammo' : 'health');
-  const at = kind === 'ammo' ? pick([1, 1, 2, 3, 3]) : 0;
+  const at = kind === 'ammo' ? pick([1, 1, 2, 3, 3, 4, 5, 6, 6]) : 0;
   PICKUPS.push({ x, z, kind, at, t: 0 });
 }
 function updatePickups(dt) {
@@ -264,7 +273,7 @@ function updatePickups(dt) {
     if (p.t > 25) { PICKUPS.splice(i, 1); continue; }
     if (GAME.state === 'playing' && Math.hypot(p.x - PLAYER.x, p.z - PLAYER.z) < 1.7) {
       if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; const h = Math.round(Math.max(25, PLAYER.maxHp * 0.25)); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + h); AUD.heal(); GAME.toast(`+${h} HEALTH`, '#6dff9a'); }
-      else { const n = p.at === 2 ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
+      else { const n = p.at === 2 || p.at === AT.FROST || p.at === AT.TETHER ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
       burst(p.x, 1, p.z, 30, p.kind === 'health' ? [0.4, 2.4, 0.9] : ARROWS[p.at].glow, 4, 0.5, 0.08, 0, 2);
       PICKUPS.splice(i, 1);
     }
@@ -302,7 +311,7 @@ const GAME = {
     for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
     ZOMBIES.length = 0; PROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4];
+    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
@@ -412,6 +421,9 @@ const SHOP = [
   { id: 'a1', name: 'Incendiary ×4', desc: 'Sets the infected on fire', cost: () => 55, level: () => 0, ammo: 1, buy() { PLAYER.ammo[1] += 4; } },
   { id: 'a2', name: 'Plasma Charge ×2', desc: 'Explodes on impact', cost: () => 80, level: () => 0, ammo: 2, buy() { PLAYER.ammo[2] += 2; } },
   { id: 'a3', name: 'Rail Piercer ×4', desc: 'Flat and fast, pierces 5', cost: () => 65, level: () => 0, ammo: 3, buy() { PLAYER.ammo[3] += 4; } },
+  { id: 'a4', name: 'Cryo Burst ×3', desc: 'Freezes a crowd to a crawl', cost: () => 70, level: () => 0, ammo: 4, buy() { PLAYER.ammo[4] += 3; } },
+  { id: 'a5', name: 'Tether ×3', desc: 'Pins its target and two more', cost: () => 60, level: () => 0, ammo: 5, buy() { PLAYER.ammo[5] += 3; } },
+  { id: 'a6', name: 'Scatter ×4', desc: 'Six shards, point blank', cost: () => 50, level: () => 0, ammo: 6, buy() { PLAYER.ammo[6] += 4; } },
 ];
 function renderShop() {
   const el = document.getElementById('shopGrid');
@@ -710,6 +722,7 @@ async function boot() {
 window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
+  fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
