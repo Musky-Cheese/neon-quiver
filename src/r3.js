@@ -214,7 +214,10 @@ function updateLights3(cam) {
   for (let i = 0; i < SPOTS.length; i++) {
     const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
     if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
-    else if (SETTINGS.quality >= 3 || (i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;   // Ultra refreshes every lamp shadow every frame
+    // Ultra keeps shadows fresh (3 of every 4 lamps refresh each frame) without forcing every shadow map to redraw
+    // in the same frame every frame — that all-at-once cost was compounding with heavy single-frame spikes (e.g. a
+    // multi-kill AOE hit) into visible stalls. Lower tiers keep their coarser alternating refresh.
+    else if (SETTINGS.quality >= 3 ? (i + R3.tick) % 4 !== 0 : (i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;

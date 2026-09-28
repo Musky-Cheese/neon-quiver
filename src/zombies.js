@@ -157,9 +157,9 @@ function killZombie(z, part, dir, arrowType, hitPos, power = 1, explosive = fals
   // pinned to a wall: a strong arrow that exits into geometry close behind the target
   if (!explosive && arrowType !== 2 && power > 0.75 && dir && hitPos && !z.crawl && (z.type === 'walker' || z.type === 'runner')) {
     const t = rayWorld(hitPos[0], hitPos[1], hitPos[2], dir[0], 0, dir[2], 1.7);
-    if (t !== null) { z.pin = { x: z.x + dir[0] * (t - 0.28), z: z.z + dir[2] * (t - 0.28), t: 0, yaw: Math.atan2(-dir[0], -dir[2]) }; }
+    if (t !== null) { z.wallPin = { x: z.x + dir[0] * (t - 0.28), z: z.z + dir[2] * (t - 0.28), t: 0, yaw: Math.atan2(-dir[0], -dir[2]) }; }
   }
-  if (!z.pin) {
+  if (!z.wallPin) {
     const d = dir || [-fx, 0, -fz];
     z.dv = [d[0] * force * (z.type === 'brute' ? 0.5 : 1), explosive ? rand(3, 5) : 0.2, d[2] * force * (z.type === 'brute' ? 0.5 : 1)];
     if (z.type === 'boss') z.dv = [0, 0, 0];
@@ -182,8 +182,8 @@ function updateReact(z, dt) {
 function updateDying(z, dt) {
   z.dieT += dt;
   if (z.neckBleed > 0) { z.neckBleed -= dt; if (Math.random() < dt * 30) { const p = emit(z.head[0], z.head[1] - 0.1, z.head[2], rand(-0.6, 0.6), rand(1, 2.4), rand(-0.6, 0.6), 0.8, [0.3, 0.02, 0.02], -rand(0.03, 0.06), 9.8, 0.4); p.blood = true; } }
-  if (z.pin) {
-    const P = z.pin; P.t += dt;
+  if (z.wallPin) {
+    const P = z.wallPin; P.t += dt;
     const k = Math.min(1, dt * 18); z.x = lerp(z.x, P.x, k); z.z = lerp(z.z, P.z, k);
     let dy = ((P.yaw - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += dy * Math.min(1, dt * 10);
     if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.5;
@@ -570,8 +570,8 @@ function zPose(z, time) {
   let rootRx = 0, rootRz = 0;
   if (dying) {
     const limp = Math.min(1, z.dieT / 0.45);
-    if (z.pin) {
-      const sl = smooth(clamp((z.pin.t - 2.3) / 1.1, 0, 1));
+    if (z.wallPin) {
+      const sl = smooth(clamp((z.wallPin.t - 2.3) / 1.1, 0, 1));
       lean = lerp(lean, -0.12, limp); headRx = lerp(headRx, 0.75, limp); shL = lerp(shL, -0.15, limp); shR = lerp(shR, -0.25, limp); spread = 0.28; elL = elR = -0.3;
       hipY = 0.95 - 0.55 * sl; hipLa = -1.35 * sl; hipRa = -1.25 * sl; knLa = 1.5 * sl + 0.1; knRa = 1.4 * sl + 0.1;
     } else if (z.crawl) {
