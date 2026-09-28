@@ -487,6 +487,13 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       // teeth (tagged 0.9 in the sculpt, 0.27 after the vein softening): stained, cracked enamel, never glowing
       float tooth = step(0.2, vNqM.x) * step(vNqM.x, 0.35) * step(4.5, vPart) * step(vPart, 6.5);
       base = mix(base, vec3(0.3, 0.25, 0.15) * ao * (0.75 + 0.25 * vn(q.xy * 20.)), tooth); rough = mix(rough, 0.3, tooth); emis *= 1. - tooth;
+      // open wounds (carved craters/notches, authored in the blood mask) get the same treatment as the
+      // eyes: a faint infected glow so the carved geometry actually reads in this dark, backlit lighting
+      // instead of vanishing into the near-black silhouette. Concentrated on real wound centers (bl is
+      // already smoothstepped away from incidental blood specks), not a wash over every stain.
+      float woundGlow = bl * bl * (1. - tooth);
+      emis += vec3(0.5, 0.07, 0.045) * woundGlow * (0.55 + 0.25 * vn(q.xy * 5. + q.z));
+      rimK = mix(rimK, 1.35, bl);                                              // wet, torn edges catch rim light harder
     }
 #endif
   } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture

@@ -146,6 +146,40 @@ def carve(me, name, cutter_meshes):
     for cob in cut_obs: bpy.data.objects.remove(cob, do_unlink=True)
     return result
 
+def fuse(me, name, addon_meshes):
+    """Boolean-union addon_meshes onto me: geometry that actually pokes out past the original
+    silhouette (a jagged bone shard, a protruding rib), which is what reads in a dark, backlit
+    scene where a recessed crater alone is invisible."""
+    ob = mesh_obj(name + '_fuse', me)
+    add_obs = []
+    for i, ame in enumerate(addon_meshes):
+        aob = mesh_obj(name + '_add%d' % i, ame); add_obs.append(aob)
+        mod = ob.modifiers.new('add%d' % i, 'BOOLEAN'); mod.operation = 'UNION'
+        try: mod.solver = 'EXACT'
+        except Exception: pass
+        mod.object = aob
+    result = evaluated_mesh(ob)
+    for aob in add_obs: bpy.data.objects.remove(aob, do_unlink=True)
+    return result
+
+def rib_bone(anchor, aim, length, r0=0.009, r1=0.003, curve=0.0, seed=0, segs=4):
+    """A thin curved bone/rib shard from anchor, extending `length` along the normalized `aim`
+    direction, tapering from r0 to r1, with a slight sideways `curve`. Used to fuse a protruding
+    broken-bone shape onto a wound instead of relying on a texture or a recessed dent."""
+    aim = V(aim).normalized()
+    side = aim.orthogonal().normalized()
+    verts, radii = [], []
+    for i in range(segs):
+        t = i / (segs - 1)
+        p = V(anchor) + aim * (length * t) + side * (curve * t * t)
+        verts.append((p.x, p.y, p.z))
+        radii.append(r0 + (r1 - r0) * t)
+    edges = [(i, i + 1) for i in range(segs - 1)]
+    ob = skin_obj('rib', verts, edges, radii, 2, 0.0018, 3)
+    me = evaluated_mesh(ob)
+    displace(me, lambda p, n: 0.0012 * fbm(p, 90, 2, seed))
+    return me
+
 # ---------- masks + export ----------
 def export(name, me, maskfn, ao_dist=0.06, ao_strength=0.75, rays=12, emissive_parts=None):
     """maskfn(p, n) -> (cloth, blood, emissive, bright). emissive_parts: list of (mesh, emissive_value) appended unlit."""
@@ -285,6 +319,15 @@ def build_head(variant):
             o += 0.004 * hair
         if variant == 'd':
             o -= 0.045 * gauss((p - V((0.058, 0.098, 0.072))).length, 0.028)               # torn cheek (deeper, carved for real below)
+        if variant in ('a', 'd'):
+            # jagged bone/flesh shards right at the crater's rim, poking OUT past the head's base
+            # silhouette. A recessed crater alone is invisible in this game's dark, backlit lighting
+            # (mostly rim light + silhouette) — only geometry that breaks the outer profile reads.
+            c, rad, sd = (V((0.05, 0.253, 0.0)), 0.04, 77) if variant == 'a' else (V((0.06, 0.096, 0.078)), 0.032, 78)
+            d = (p - c).length
+            ring = smooth01(1 - abs(d - rad) / 0.014)
+            spike = max(0.0, fbm(p, 140, 3, sd))
+            o += 0.03 * ring * spike
         return o
     displace(me, sculpt)
     if variant == 'a':   # scalp wound: actually remove a jagged chunk of skull, not just a dent
@@ -339,6 +382,13 @@ def build_jaw():
     displace(me, lambda p, n: 0.003 * fbm(p, 50, 2))
     # missing jaw chunk: bite a real, jagged notch out of the mandible (not just a bloody tint)
     me = carve(me, 'jaw', [noisy_blob(JAW_CHUNK, JAW_CHUNK_R, seed=31, irregularity=0.55, subdiv=2)])
+    # a couple of broken bone shards jutting out of the notch: in this game's dark backlit lighting a
+    # recessed hole alone is invisible, so give the break something that actually pokes past the jaw's
+    # outer edge and catches rim light
+    me = fuse(me, 'jaw', [
+        rib_bone((0.05, -0.01, 0.075), (1.0, 0.35, 0.2), 0.032, r0=0.007, r1=0.002, curve=0.01, seed=33),
+        rib_bone((0.052, -0.028, 0.06), (0.8, -0.2, 0.4), 0.026, r0=0.006, r1=0.0015, curve=-0.008, seed=34),
+    ])
     me = decimate('jaw', me, 800)
     teeth_pos = [((i - 3) * 0.011, -0.012, 0.085 - abs((i - 3) * 0.011) * 0.35) for i in range(7)]
     teeth = [box_mesh(tp, (0.009, 0.011, 0.008), 0.0015, 1) for tp in teeth_pos
@@ -434,6 +484,14 @@ def build_torso(variant):
         return o
     displace(me, sculpt)
     me = carve(me, 'torso', [noisy_blob(BITE, 0.042, seed=41, irregularity=0.5, subdiv=2)])   # real open wound, not a shader dent
+    # broken ribs actually jutting out of the bite wound, past the torso's outer silhouette — a
+    # recessed crater alone is invisible in this game's dark, backlit lighting, so give the wound
+    # something that pokes into rim light
+    me = fuse(me, 'torso', [
+        rib_bone(BITE + V((0.0, 0.02, 0.03)), (0.25, 0.35, 1.0), 0.05, r0=0.009, r1=0.0025, curve=0.015, seed=43),
+        rib_bone(BITE + V((-0.02, -0.015, 0.025)), (-0.3, -0.1, 1.0), 0.042, r0=0.008, r1=0.002, curve=-0.01, seed=44),
+        rib_bone(BITE + V((0.018, -0.01, 0.028)), (0.5, -0.25, 0.9), 0.038, r0=0.0075, r1=0.002, curve=0.008, seed=45),
+    ])
     me = decimate('torso', me, 5200)
     def mask(p, n):
         cloth = cover(p)
