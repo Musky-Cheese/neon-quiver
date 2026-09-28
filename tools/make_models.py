@@ -116,6 +116,36 @@ def decimate(name, me, target_tris):
     d = ob.modifiers.new('dec', 'DECIMATE'); d.decimate_type = 'COLLAPSE'; d.ratio = max(0.02, target_tris / tris)
     return evaluated_mesh(ob)
 
+def noisy_blob(center, radius, seed=0.0, irregularity=0.16, subdiv=3, freq=18):
+    """A jittered sphere used as a boolean cutter: an actual missing chunk of flesh,
+    not a smooth sphere, so the carved rim reads as torn rather than surgical.
+    Kept gentle (low amplitude relative to radius, low-ish frequency, and displaced
+    inward-only) so the cutter stays manifold and doesn't self-intersect and wreck
+    the boolean into spikes/slivers."""
+    bm = bmesh.new()
+    try: bmesh.ops.create_icosphere(bm, subdivisions=subdiv, radius=radius)
+    except TypeError: bmesh.ops.create_icosphere(bm, subdivisions=subdiv, diameter=radius)
+    me = bpy.data.meshes.new('blob'); bm.to_mesh(me); bm.free()
+    # bias the noise to mostly-positive (0..1-ish) so the cutter only ever grows outward from
+    # its base sphere a little; never pulls a vertex past its neighbours into a self-intersection
+    displace(me, lambda p, n: radius * irregularity * (0.5 + 0.5 * fbm(p, freq, 2, seed)))
+    deform(me, lambda p: p + V(center))
+    return me
+
+def carve(me, name, cutter_meshes):
+    """Boolean-subtract cutter_meshes from me: a real hole/missing chunk, not a shader trick."""
+    ob = mesh_obj(name + '_carve', me)
+    cut_obs = []
+    for i, cme in enumerate(cutter_meshes):
+        cob = mesh_obj(name + '_cut%d' % i, cme); cut_obs.append(cob)
+        mod = ob.modifiers.new('cut%d' % i, 'BOOLEAN'); mod.operation = 'DIFFERENCE'
+        try: mod.solver = 'EXACT'
+        except Exception: pass
+        mod.object = cob
+    result = evaluated_mesh(ob)
+    for cob in cut_obs: bpy.data.objects.remove(cob, do_unlink=True)
+    return result
+
 # ---------- masks + export ----------
 def export(name, me, maskfn, ao_dist=0.06, ao_strength=0.75, rays=12, emissive_parts=None):
     """maskfn(p, n) -> (cloth, blood, emissive, bright). emissive_parts: list of (mesh, emissive_value) appended unlit."""
@@ -249,14 +279,18 @@ def build_head(variant):
         o -= 0.016 * gauss(p.y - 0.085, 0.006) * gauss(abs(p.x), 0.032) * front          # mouth slit (lips pulled back)
         o += 0.0035 * fbm(p, 55, 3) + 0.0015 * fbm(p, 140, 2, 3)                          # skin grit, pores
         if variant == 'a':
-            o -= 0.014 * gauss((p - V((0.05, 0.25, 0.0))).length, 0.03)                  # caved scalp wound
+            o -= 0.03 * gauss((p - V((0.05, 0.25, 0.0))).length, 0.038)                  # caved scalp wound (deeper crater, carved for real below)
         if variant == 'b':
             hair = smooth01((p.y - 0.19) / 0.02) * smooth01((0.07 - p.z) / 0.04) * smooth01((fbm(p, 30, 2, 5) + 0.15) * 3)
             o += 0.004 * hair
         if variant == 'd':
-            o -= 0.022 * gauss((p - V((0.058, 0.098, 0.072))).length, 0.02)               # torn cheek
+            o -= 0.045 * gauss((p - V((0.058, 0.098, 0.072))).length, 0.028)               # torn cheek (deeper, carved for real below)
         return o
     displace(me, sculpt)
+    if variant == 'a':   # scalp wound: actually remove a jagged chunk of skull, not just a dent
+        me = carve(me, 'head', [noisy_blob((0.05, 0.253, 0.0), 0.04, seed=21, irregularity=0.5, subdiv=2)])
+    if variant == 'd':   # torn cheek: an actual gap through to the jaw, ragged edges
+        me = carve(me, 'head', [noisy_blob((0.06, 0.096, 0.078), 0.032, seed=22, irregularity=0.55, subdiv=2)])
     if variant == 'c':   # long matted hair: separate volume, remeshed together with the head
         hm = []
         for ch in LONG_HAIR:
@@ -295,16 +329,25 @@ def build_head(variant):
         return cloth, blood * (1 - cloth * 0.6), em * (1 - cloth), bright
     export('head_' + variant, me, mask, ao_dist=0.05, emissive_parts=[(join_meshes('eyes', eyes), 1.0), (join_meshes('teeth', teeth), 0.9)])
 
+JAW_CHUNK = V((0.043, -0.016, 0.072))
+JAW_CHUNK_R = 0.032
 def build_jaw():
     verts = [(0, 0.0, 0.0), (0, -0.03, 0.05), (0, -0.045, 0.09)]
     ob = skin_obj('jaw', verts, [(0, 1), (1, 2)], [(0.055), (0.05), (0.035)], 2, 0.004)
     me = evaluated_mesh(ob)
     deform(me, lambda p: V((p.x * 1.15, p.y * 0.55, p.z)))
     displace(me, lambda p, n: 0.003 * fbm(p, 50, 2))
+    # missing jaw chunk: bite a real, jagged notch out of the mandible (not just a bloody tint)
+    me = carve(me, 'jaw', [noisy_blob(JAW_CHUNK, JAW_CHUNK_R, seed=31, irregularity=0.55, subdiv=2)])
     me = decimate('jaw', me, 800)
-    teeth = [box_mesh(((i - 3) * 0.011, -0.012, 0.085 - abs((i - 3) * 0.011) * 0.35), (0.009, 0.011, 0.008), 0.0015, 1) for i in range(7)]
-    export('jaw', me, lambda p, n: (0, max(0.6 * smooth01((p.z - 0.05) / 0.03) * smooth01((p.y + 0.01) / 0.02), 0), 0, 1), ao_dist=0.03,
-           emissive_parts=[(join_meshes('jt', teeth), 0.9)])
+    teeth_pos = [((i - 3) * 0.011, -0.012, 0.085 - abs((i - 3) * 0.011) * 0.35) for i in range(7)]
+    teeth = [box_mesh(tp, (0.009, 0.011, 0.008), 0.0015, 1) for tp in teeth_pos
+             if (V(tp) - JAW_CHUNK).length > JAW_CHUNK_R * 0.85]   # drop teeth that now sit in the missing chunk
+    def mask(p, n):
+        exposed = smooth01(1 - (p - JAW_CHUNK).length / (JAW_CHUNK_R * 1.1))
+        blood = max(0.6 * smooth01((p.z - 0.05) / 0.03) * smooth01((p.y + 0.01) / 0.02), exposed)
+        return 0, blood, 0, 1 - 0.35 * exposed
+    export('jaw', me, mask, ao_dist=0.03, emissive_parts=[(join_meshes('jt', teeth), 0.9)])
 
 # torso skeleton (spine-local; the pelvis sits below y 0, shoulders at y ~0.52)
 def torso_skel(variant):
@@ -341,12 +384,12 @@ def build_torso(variant):
         """1 where cloth covers the body"""
         if bare: return 0.0
         top = 0.64 if jacket else 0.575
-        if p.y > top + 0.01 * fbm(p, 20, 1, 3): return 0.0
+        if p.y > top + 0.028 * fbm(p, 16, 2, 3): return 0.0   # ragged hem, not a clean cutoff line
         if jacket:
             return 0.0 if (p.z > 0.03 and abs(p.x) < 0.035 + 0.05 * smooth01((p.y - 0.3) / 0.3) and p.y > 0.3) else 1.0   # open zip at the neck
         tear = fbm(p, 7, 3, 4)
-        if tear > 0.46: return 0.0
-        if p.z > 0.06 and gauss((p - BITE).length, 0.06) > 0.5: return 0.0
+        if tear > 0.4: return 0.0   # lower threshold: bigger, more frequent open rips
+        if p.z > 0.06 and gauss((p - BITE).length, 0.075) > 0.42: return 0.0   # bite tears cloth open wider
         if bloat and p.z > 0.02 and p.y < 0.34 - 0.06 * abs(fbm(p, 12, 2, 5)) and abs(p.x) < 0.13: return 0.0   # shirt split over the gut
         return 1.0
     def sculpt(p, n):
@@ -355,7 +398,7 @@ def build_torso(variant):
         ribs = gauss(p.y - 0.34, 0.1) * (front * 0.6 + side)
         cl = cover(p)
         skin = 1 - cl
-        o += (0.007 if bare else 0.0025) * math.sin(p.y * 2 * math.pi / 0.04) * ribs * (0.4 + 0.6 * skin)   # ribcage
+        o += (0.013 if bare else 0.005) * math.sin(p.y * 2 * math.pi / 0.04) * ribs * (0.4 + 0.6 * skin)   # ribcage (deeper: reads from further away)
         o -= 0.006 * gauss(p.x, 0.012) * front * smooth01((p.y - 0.25) / 0.1) * smooth01((0.5 - p.y) / 0.05)  # sternum
         o -= 0.007 * gauss(p.x, 0.014) * back * smooth01((p.y + 0.02) / 0.1) * smooth01((0.56 - p.y) / 0.05)  # spine groove
         for sx in (-1, 1):
@@ -363,8 +406,10 @@ def build_torso(variant):
             o -= 0.003 * gauss((p - V((sx * 0.045, 0.02, 0.1))).length, 0.03) * skin                            # hip hollows
         o -= 0.014 * gauss(p.y - 0.12, 0.05) * gauss(p.x, 0.07) * front * (1 if bare else 0.3)                 # sunken belly
         o -= 0.006 * gauss((p - V((0, 0.08, 0.1))).length, 0.008) * skin                                        # navel
-        o -= 0.016 * gauss((p - BITE).length, 0.035)                                                            # bite wound
-        if variant == 'bare': o -= 0.02 * gauss((p - V((0.06, 0.1, 0.1))).length, 0.04)                         # torn-open flank
+        wound = gauss((p - BITE).length, 0.05)                                                                  # open bite wound: broken silhouette
+        o -= 0.045 * wound                                                                                      # deep crater (carved for real below)
+        o += 0.024 * math.sin(p.y * 2 * math.pi / 0.026) * wound * smooth01((p.z + 0.02) / 0.05)                # exposed ribs inside the crater
+        if variant == 'bare': o -= 0.03 * gauss((p - V((0.06, 0.1, 0.1))).length, 0.05)                         # torn-open flank
         if lean:
             o += 0.004 * math.sin(p.y * 2 * math.pi / 0.04) * ribs                                              # deeper ribs
             o += 0.008 * gauss(p.x, 0.012) * back * (0.5 + 0.5 * math.cos(p.y * 2 * math.pi / 0.035))          # vertebrae
@@ -376,7 +421,10 @@ def build_torso(variant):
             fold = fbm(V((p.x * 1.6, p.y * 0.5, p.z * 1.6)), 14, 2, 2)                     # vertical drape folds
             creases = math.sin(p.y * 2 * math.pi / 0.05 + fbm(p, 8, 1, 9) * 4) * gauss(p.y - 0.02, 0.07)   # bunching at the waist
             o += thick + 0.006 * fold + 0.003 * creases
-            if p.y < 0.03: o += (0.03 - p.y) * (0.5 if jacket else 0.35) * (0.6 + 0.4 * fbm(p, 12, 1, 5))  # loose hem hangs away
+            if p.y < 0.05: o += (0.05 - p.y) * (0.55 if jacket else 0.45) * (0.6 + 0.4 * fbm(p, 12, 1, 5))  # loose, ragged hem hangs away
+            if not jacket:
+                tear_edge = smooth01(1 - abs(fbm(p, 7, 3, 4) - 0.4) / 0.06)
+                o += 0.018 * tear_edge * (0.5 + 0.5 * fbm(p, 40, 2, 15))                    # frayed flap poking out at a torn edge
             if jacket:
                 o -= 0.004 * gauss(abs(p.x) - 0.035, 0.004) * front * smooth01((0.34 - p.y) / 0.02)           # zip seam
                 for sx in (-1, 1): o += 0.006 * gauss((p - V((sx * 0.1, 0.05, 0.12))).length, 0.04)             # pockets
@@ -385,6 +433,7 @@ def build_torso(variant):
                 o += 0.004 * gauss(p.y - 0.572, 0.006)                                                          # shirt collar
         return o
     displace(me, sculpt)
+    me = carve(me, 'torso', [noisy_blob(BITE, 0.042, seed=41, irregularity=0.5, subdiv=2)])   # real open wound, not a shader dent
     me = decimate('torso', me, 5200)
     def mask(p, n):
         cloth = cover(p)
