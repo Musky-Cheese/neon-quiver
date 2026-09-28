@@ -2,3 +2,4 @@ build/
 __pycache__/
 .DS_Store
 textures_src/
+models/zombie_raw.glb
