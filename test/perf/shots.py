@@ -15,7 +15,7 @@ WX = {  # surface + sky state pinned exactly (no easing: the game loop is frozen
 }
 httpd, url = serve(); t0 = time.time()
 with sync_playwright() as pw:
-    b, pg, errs = open_game(pw, url, W, H)
+    b, pg, errs = open_game(pw, url, W, H, loop=False)
     pg.evaluate("""() => { const N = window.NQ; N.noLoop(true); N.play(); N.clear(); N.freeze(true); N.DBG.noVM = false; }""")
     spots = pg.evaluate(SPOTS_JS)
     if a.only: spots = [s for s in spots if s['id'].rsplit('-', 1)[0] in a.only.split(',')]
@@ -26,7 +26,7 @@ with sync_playwright() as pw:
         for wx in a.wx.split(','):
             for s in spots:
                 png = pg.evaluate("""([s, w]) => { const N = window.NQ; Object.assign(N.WX, w, { flash: 0, gust: 0, forced: w.state }); N.WX.thunder.length = 0;
-                  N.clear(); N.GAME.time = 100; N.PLAYER.dmgFlash = 0;
+                  N.clear(); N.GAME.time = 100; N.PLAYER.dmgFlash = 0; window.__nqSeed(12345);
                   // a few infected in view so skinned shading is covered too
                   for (let i = 0; i < 5; i++) { const z = N.spawnZombie(['walker', 'runner', 'brute', 'walker', 'walker'][i], s.x - Math.sin(s.yaw) * (6 + i * 2.5) + (i - 2) * 1.6, s.z - Math.cos(s.yaw) * (6 + i * 2.5), 1); z.speed = 0; }
                   N.pose({ x: s.x, z: s.z, y: 0, yaw: s.yaw, pitch: -0.07, roll: 0, fov: 70 });

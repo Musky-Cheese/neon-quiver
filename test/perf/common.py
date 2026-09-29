@@ -6,7 +6,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHROME = '/opt/pw-browsers/chromium'
 ARGS = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
 # deterministic Math.random (mulberry32) so rain, flicker, spawns and shake are identical run to run
-SEED_JS = """(() => { let a = 0x9e3779b9; Math.random = function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+SEED_JS = """(() => { let a = 0x9e3779b9; window.__nqSeed = (s) => { a = s | 0; }; Math.random = function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
   t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();"""
 
 class _Quiet(http.server.SimpleHTTPRequestHandler):
@@ -18,13 +18,14 @@ def serve():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd, f'http://127.0.0.1:{port}/index.html'
 
-def open_game(pw, url, w, h, capture=True, query=''):
+def open_game(pw, url, w, h, capture=True, query='', loop=True):
     b = pw.chromium.launch(executable_path=CHROME, args=ARGS)
     pg = b.new_page(viewport={'width': w, 'height': h})
     errs = []
     pg.on('pageerror', lambda e: errs.append('PAGE ' + str(e)[:300]))
     pg.on('console', lambda m: m.type == 'error' and errs.append('CONSOLE ' + m.text[:300]))
-    pg.add_init_script(SEED_JS + ('window.__NQ_CAPTURE = true; window.__NQ_CAPTURE_DPR = 1;' if capture else ''))
+    # loop=False: the game's own rAF loop never runs, so nothing steps (or draws random numbers) on wall-clock time
+    pg.add_init_script(SEED_JS + ('' if loop else 'window.requestAnimationFrame = () => 0;') + ('window.__NQ_CAPTURE = true; window.__NQ_CAPTURE_DPR = 1;' if capture else ''))
     pg.goto(url + query); pg.wait_for_function('window.NQ_READY === true', timeout=300000)
     return b, pg, errs
 
