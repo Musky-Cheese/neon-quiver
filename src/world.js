@@ -13,7 +13,7 @@ const NAV_INF = 65535;
 const WORLD_INDEX = { cell: 16, boxes: new Map(), circles: new Map(), stamp: 1, ready: false };
 const _worldQB = [], _worldQC = [];
 const WORLD_TILES = { cell: 56, maps: {}, out: {} };
-const worldCellKey = (i, j) => i + ',' + j;
+const worldCellKey = (i, j) => i * 2097152 + j;   // numeric key, unique for |j| < 2^20 cells (no string building per lookup)
 function buildWorldSpatialIndex() {
   const S = WORLD_INDEX.cell; WORLD_INDEX.boxes.clear(); WORLD_INDEX.circles.clear();
   const add = (map, o, x0, x1, z0, z1) => {
@@ -37,21 +37,24 @@ function buildWorldSpatialIndex() {
 function nearbyWorld(kind, x, z, radius) {
   const map = WORLD_TILES.maps[kind], out = WORLD_TILES.out[kind]; if (!map || !out) return WORLD[kind] || [];
   out.length = 0; const S = WORLD_TILES.cell;
-  for (let j = Math.floor((z - radius) / S); j <= Math.floor((z + radius) / S); j++) for (let i = Math.floor((x - radius) / S); i <= Math.floor((x + radius) / S); i++) { const a = map.get(worldCellKey(i, j)); if (a) out.push(...a); }
+  const i0 = Math.floor((x - radius) / S), i1 = Math.floor((x + radius) / S), j1 = Math.floor((z + radius) / S);
+  for (let j = Math.floor((z - radius) / S); j <= j1; j++) for (let i = i0; i <= i1; i++) { const a = map.get(worldCellKey(i, j)); if (a) for (let n = 0; n < a.length; n++) out.push(a[n]); }
   return out;
+}
+const _worldQ = [_worldQB, _worldQC];   // callers destructure the pair straight away
+function worldCollect(map, out, x0, x1, z0, z1, stamp) {
+  const S = WORLD_INDEX.cell, i0 = Math.floor(x0 / S), i1 = Math.floor(x1 / S), j1 = Math.floor(z1 / S);
+  for (let j = Math.floor(z0 / S); j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const a = map.get(worldCellKey(i, j)); if (!a) continue;
+    for (let n = 0; n < a.length; n++) { const o = a[n]; if (o._wq !== stamp) { o._wq = stamp; out.push(o); } }
+  }
 }
 function worldCandidates(x0, x1, z0, z1) {
   if (!WORLD_INDEX.ready) return [WORLD.boxes, WORLD.circles];
   _worldQB.length = 0; _worldQC.length = 0;
-  const S = WORLD_INDEX.cell, stamp = ++WORLD_INDEX.stamp;
-  const collect = (map, out) => {
-    for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) {
-      const a = map.get(worldCellKey(i, j)); if (!a) continue;
-      for (const o of a) if (o._wq !== stamp) { o._wq = stamp; out.push(o); }
-    }
-  };
-  collect(WORLD_INDEX.boxes, _worldQB); collect(WORLD_INDEX.circles, _worldQC);
-  return [_worldQB, _worldQC];
+  const stamp = ++WORLD_INDEX.stamp;
+  worldCollect(WORLD_INDEX.boxes, _worldQB, x0, x1, z0, z1, stamp); worldCollect(WORLD_INDEX.circles, _worldQC, x0, x1, z0, z1, stamp);
+  return _worldQ;
 }
 
 function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.floor((z - NAV.z0) / NAV.cell); return (i < 0 || j < 0 || i >= NAV.w || j >= NAV.h) ? -1 : j * NAV.w + i; }

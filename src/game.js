@@ -121,6 +121,8 @@ function fireArrow(power) {
   updateQuiverHUD();
 }
 const _seg0 = [0, 0, 0], _seg1 = [0, 0, 0], _so = { s: 0 };
+const _trailC = [0, 0, 0];
+const LEG_SEGS = ['hipL', 'knL', 'knL', 'ftL', 'hipR', 'knR', 'knR', 'ftR'];
 function updateProjectiles(dt) {
   for (let i = PROJ.length - 1; i >= 0; i--) {
     const a = PROJ[i];
@@ -132,8 +134,8 @@ function updateProjectiles(dt) {
     _seg1[0] = nx; _seg1[1] = ny; _seg1[2] = nz;
     const sl = Math.hypot(a.vx, a.vy, a.vz); a.dir[0] = a.vx / sl; a.dir[1] = a.vy / sl; a.dir[2] = a.vz / sl;
     // trail
-    const A = ARROWS[a.type]; const tc = A.glow;
-    for (let k = 0; k < (a.type === 0 ? 1 : 3); k++) { const t = Math.random(); emit(lerp(a.x, nx, t), lerp(a.y, ny, t), lerp(a.z, nz, t), rand(-0.2, 0.2), rand(-0.1, 0.3), rand(-0.2, 0.2), a.type === 0 ? 0.25 : 0.5, [tc[0] * 0.5, tc[1] * 0.5, tc[2] * 0.5], a.type === 0 ? 0.05 : 0.12, 0, 2, a.type === 1 ? 0.3 : 0.05, a.type === 0 ? 0.5 : 1); }
+    const A = ARROWS[a.type]; const tc = A.glow, trc = _trailC; trc[0] = tc[0] * 0.5; trc[1] = tc[1] * 0.5; trc[2] = tc[2] * 0.5;   // emit copies the colour
+    for (let k = 0; k < (a.type === 0 ? 1 : 3); k++) { const t = Math.random(); emit(lerp(a.x, nx, t), lerp(a.y, ny, t), lerp(a.z, nz, t), rand(-0.2, 0.2), rand(-0.1, 0.3), rand(-0.2, 0.2), a.type === 0 ? 0.25 : 0.5, trc, a.type === 0 ? 0.05 : 0.12, 0, 2, a.type === 1 ? 0.3 : 0.05, a.type === 0 ? 0.5 : 1); }
     // --- find earliest hit
     let best = 1.01, hitKind = null, hitZ = null, hitPart = null; const segL = Math.hypot(nx - a.x, ny - a.y, nz - a.z) || 1e-3;
     // zombies
@@ -150,7 +152,7 @@ function updateProjectiles(dt) {
       // a clean line through the head wins over grazing the top of the torso capsule
       const mg = hitZ === z && hitPart === 'head' ? Math.max(0.02, 0.3 / segL) : 0.02;
       if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - mg) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
-      for (const [p0, p1] of [[z.hipL, z.knL], [z.knL, z.ftL], [z.hipR, z.knR], [z.knR, z.ftR]]) if (segSegDist2(_seg0, _seg1, p0, p1, _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
+      for (let L = 0; L < 8; L += 2) if (segSegDist2(_seg0, _seg1, z[LEG_SEGS[L]], z[LEG_SEGS[L + 1]], _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
     }
     // the hive nest (field objective)
     { const t = objNestHit(_seg0, _seg1, _so); if (t >= 0 && t < best) { best = t; hitKind = 'n'; } }
@@ -481,17 +483,20 @@ function updateQuiverHUD() {
 }
 function flashQuiver(i) { const d = $('slot' + i); if (!d) return; d.classList.remove('deny'); void d.offsetWidth; d.classList.add('deny'); }
 let _lastSel = -1;
+// per-frame HUD: write to the DOM only when a value actually changes (each write can cost a style recalc)
+const _hudC = new Map();
+function hudSet(id, prop, v) { const k = id + prop, c = _hudC.get(k); if (c === v) return; _hudC.set(k, v); const el = $(id); if (prop === 't') el.textContent = v; else el.style.transform = v; }
+function hudCls(id, cls, on) { const k = id + '.' + cls, c = _hudC.get(k); if (c === on) return; _hudC.set(k, on); $(id).classList.toggle(cls, on); }
 function hudFrame() {
   const hpK = PLAYER.hp / PLAYER.maxHp;
-  $('hpFill').style.transform = `scaleX(${clamp(hpK, 0, 1)})`; $('hpText').textContent = Math.ceil(PLAYER.hp); $('hpMax').textContent = '/ ' + PLAYER.maxHp;
-  $('hp').classList.toggle('low', hpK < 0.3);
+  hudSet('hpFill', 's', `scaleX(${clamp(hpK, 0, 1)})`); hudSet('hpText', 't', String(Math.ceil(PLAYER.hp))); hudSet('hpMax', 't', '/ ' + PLAYER.maxHp);
+  hudCls('hp', 'low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  const rem = $('remain');
-  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); rem.textContent = `NEXT WAVE IN ${t}s · N TO SKIP`; rem.classList.toggle('soon', t <= 5); rem.classList.add('count'); }
-  else { rem.textContent = GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''; rem.classList.remove('soon', 'count'); }
-  $('hp').classList.toggle('regen', !!PLAYER.regen);
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
+  else { hudSet('remain', 't', GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''); hudCls('remain', 'soon', false); hudCls('remain', 'count', false); }
+  hudCls('hp', 'regen', !!PLAYER.regen);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
-  if (GAME.boss) { $('bossFill').style.transform = `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`; }
+  if (GAME.boss) hudSet('bossFill', 's', `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`);
 }
 function setScreen(name) {
   if (name === null && document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -678,13 +683,22 @@ function step(dt) {
   if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 2 && Math.random() < dt * 20) { const p = BOW.tipWorld; emit(p[0], p[1], p[2], rand(-0.2, 0.2), rand(-0.2, 0.2), rand(-0.2, 0.2), 0.2, [2, 0.3, 2], 0.03, 0, 3); }
 }
 
-const PERF = { scale: 1, acc: 0, n: 0, pressure: 0 };
+const PERF = { scale: 1, acc: 0, n: 0, pressure: 0, fAcc: 0, fN: 0, fSlow: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
   now /= 1000; const raw = now - lastT; let dt = Math.min(0.05, raw); lastT = now;
   if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
     PERF.acc += raw; PERF.n++;
     if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
+    // fast path for genuinely slow machines: a third of a second where nearly every frame misses 30 fps steps the
+    // resolution down right away instead of waiting out the 1.5 s window (a lone hitch never qualifies; scaling back
+    // up still only happens through the slow window above, so fast frames render exactly as before)
+    PERF.fAcc += raw; PERF.fN++; if (raw > 0.028) PERF.fSlow++;
+    if (PERF.fN >= 20) {
+      const avg = PERF.fAcc / PERF.fN;
+      if (PERF.fSlow >= 16 && avg > 0.034 && PERF.scale > 0.35) { PERF.scale *= 0.8; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); PERF.acc = 0; PERF.n = 0; }
+      PERF.fAcc = 0; PERF.fN = 0; PERF.fSlow = 0;
+    }
   }
   if (GAME.noLoop) return;
   const c0 = performance.now();
