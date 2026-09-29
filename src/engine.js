@@ -592,8 +592,9 @@ const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMate
 /* ---------------- Geometry builder ---------------- */
 /* ---------------- Geometry builder ---------------- */
 // vertex layout: pos3 nor3 col3 mat2 => 11 floats
+const _GEO_I = M4.create();
 class Geo {
-  constructor() { this.v = []; this.i = []; this.n = 0; }
+  constructor() { this.v = []; this.i = []; this.n = 0; this.solids = []; }   // solids: every closed box, [first index, 3x4 matrix] (r3.js hides faces buried in them)
   _vert(m, x, y, z, nx, ny, nz, c, e, mat) {
     let px = x, py = y, pz = z, qx = nx, qy = ny, qz = nz;
     if (m) {
@@ -614,6 +615,7 @@ class Geo {
   // unit box centered at origin (size 1) transformed by m
   box(m, c, e = 0, mat = 0, skipBottom = false) {
     const h = 0.5;
+    if (!skipBottom && (!m || (m[3] === 0 && m[7] === 0 && m[11] === 0 && m[15] === 1))) { const I = m || _GEO_I; this.solids.push(this.i.length, I[0], I[1], I[2], I[4], I[5], I[6], I[8], I[9], I[10], I[12], I[13], I[14]); }
     this.quad(m, [h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h], [1, 0, 0], c, e, mat);
     this.quad(m, [-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h], [-1, 0, 0], c, e, mat);
     this.quad(m, [-h, h, h], [h, h, h], [h, h, -h], [-h, h, -h], [0, 1, 0], c, e, mat);
@@ -794,6 +796,7 @@ class Geo {
     g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
     g.setIndex(n > 65535 ? new THREE.BufferAttribute(new Uint32Array(this.i), 1) : new THREE.BufferAttribute(new Uint16Array(this.i), 1));
     g.computeBoundingSphere();
+    if (this.solids.length) g.userData.solids = new Float64Array(this.solids);
     return g;
   }
 }

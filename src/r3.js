@@ -79,25 +79,75 @@ scene.add(skyMesh);
 
 /* ---------------- signs + decals (textured quads) ---------------- */
 const PLANE = new THREE.PlaneGeometry(1, 1);
-const SIGN_VS = `varying vec2 vUV; varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vUV = uv; gl_Position = projectionMatrix*viewMatrix*w; }`;
-const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; uniform sampler2D uTex; uniform vec3 uCol; uniform float uTime, uMode, uSeed, uA, uFogDen; uniform vec3 uFogCol;
+// Signs are drawn in batches: one instanced draw per texture size and blend mode instead of one per sign. Each
+// batch keeps its signs' canvases, untouched, as the layers of a texture array (same size, format, filtering,
+// mip chain and anisotropy as the single textures), and the per-sign uniforms become per-instance attributes.
+const SIGN_VS = `attribute vec3 iCol; attribute vec3 iSign; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign;
+void main(){ vec4 w = modelMatrix*(instanceMatrix*vec4(position,1.)); vW = w.xyz; vUV = uv; vCol = iCol; vSign = iSign; gl_Position = projectionMatrix*viewMatrix*w; }`;
+const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
 ${NOISE_GLSL}
 void main(){
-  vec2 uv = vUV; float flick = 1.;
+  vec2 uv = vUV; float flick = 1.; float uMode = vSign.y, uSeed = vSign.x;
   if (uMode > 0.5) { float row = floor((1.-uv.y)*24.); float g = step(0.93, h21(vec2(row, floor(uTime*6.)+uSeed))); uv.x += g*(h21(vec2(row,uTime))-0.5)*0.08; flick = 0.8+0.2*sin(uv.y*300.+uTime*20.); }
   else flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
-  vec4 t = texture2D(uTex, uv);
-  vec3 c = t.rgb*uCol*flick;
+  vec4 t = texture(uTex, vec3(uv, vSign.z));
+  vec3 c = t.rgb*vCol*flick;
   float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-d*uFogDen))*0.8, 0., 1.));
   gl_FragColor = vec4(c, t.a*uA);
 }`;
-const SIGNS = [];
+const SIGNS = [];          // { s: WORLD.signs entry, b: its batch, layer, vis }
+const SIGN_BATCHES = [];   // { mesh, list }
+function signArray(texs) {
+  // a texture array holding these canvas textures as layers, uploaded exactly as three.js uploads a CanvasTexture
+  const t0 = texs[0], w = t0.image.width, h = t0.image.height;
+  const arr = new THREE.DataArrayTexture(null, w, h, texs.length);
+  arr.source.dataReady = false;   // storage only: the layers are copied in below
+  Object.assign(arr, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType, colorSpace: t0.colorSpace, generateMipmaps: true, minFilter: t0.minFilter, magFilter: t0.magFilter,
+    anisotropy: t0.anisotropy, wrapS: t0.wrapS, wrapT: t0.wrapT, flipY: t0.flipY, premultiplyAlpha: t0.premultiplyAlpha, unpackAlignment: t0.unpackAlignment });
+  arr.needsUpdate = true; renderer.initTexture(arr);
+  const gl = renderer.getContext(), pos = new THREE.Vector3();
+  renderer.state.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);   // NoColorSpace canvases: no conversion, as for the single textures
+  texs.forEach((t, i) => { arr.generateMipmaps = i === texs.length - 1; renderer.copyTextureToTexture(t, arr, null, pos.set(0, 0, i)); });   // mips once, after the last layer
+  arr.generateMipmaps = true;
+  return arr;
+}
 function buildSigns() {
+  const groups = new Map();
   for (const s of WORLD.signs) {
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: s.tex }, uCol: { value: new THREE.Color() }, uTime: NQU.uTime, uMode: { value: s.mode }, uSeed: { value: s.seed }, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
-      vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: s.add, depthWrite: !s.add, blending: s.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
-    const m = new THREE.Mesh(PLANE, mat); m.matrixAutoUpdate = false; m.matrix.fromArray(s.m); m.matrixWorldNeedsUpdate = true; m.renderOrder = s.add ? 5 : 0;
-    scene.add(m); SIGNS.push({ s, m });
+    const k = s.tex.image.width + 'x' + s.tex.image.height + (s.add ? '+' : '');
+    let g = groups.get(k); if (!g) groups.set(k, g = { add: s.add, list: [], texs: [], layer: new Map() });
+    if (!g.layer.has(s.tex)) { g.layer.set(s.tex, g.texs.length); g.texs.push(s.tex); }
+    g.list.push(s);
+  }
+  for (const g of groups.values()) {
+    const n = g.list.length;
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
+      vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
+    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
+    const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+    col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
+    const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
+    mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs';
+    scene.add(mesh);
+    const b = { mesh, list: [] }; SIGN_BATCHES.push(b);
+    for (const s of g.list) { const q = { s, b, layer: g.layer.get(s.tex), vis: false }; b.list.push(q); SIGNS.push(q); }
+  }
+}
+// per frame: the visible signs of each batch, packed in their original order, with this frame's flicker
+function syncSigns(time, T) {
+  for (const b of SIGN_BATCHES) {
+    const m = b.mesh, g = m.geometry, M = m.instanceMatrix.array, C = g.attributes.iCol.array, S = g.attributes.iSign.array; let n = 0;
+    for (const { s, layer, vis } of b.list) {   // dead city: some signs are out, a third sputter on failing power
+      if (!vis) continue;
+      const f = s.seed % 1; let k = 1;
+      if (f < 0.08) k = 0.06;
+      else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
+      M.set(s.m, n * 16);
+      C[n * 3] = s.col[0] * T.sign * k; C[n * 3 + 1] = s.col[1] * T.sign * k; C[n * 3 + 2] = s.col[2] * T.sign * k;
+      S[n * 3] = s.seed; S[n * 3 + 1] = s.mode; S[n * 3 + 2] = layer; n++;
+    }
+    m.count = n; m.visible = n > 0;
+    if (n) { m.instanceMatrix.needsUpdate = true; g.attributes.iCol.needsUpdate = true; g.attributes.iSign.needsUpdate = true; }
   }
 }
 const DECAL_POOL = [];
@@ -263,27 +313,113 @@ const WORLD_CHUNK_SIZE = 56;
 const WORLD_MESHES = [];
 const WORLD_STREAM = { x: Infinity, z: Infinity, active: 0 };
 
-// Keep the compact, shared vertex buffers produced by city.js, but split their
-// triangle indices into spatial buckets. Each bucket has a tight bounding
-// sphere, so the main camera, mirror camera and every shadow camera can reject
-// whole parts of the city before issuing a draw.
-function spatialChunks(geo, size = WORLD_CHUNK_SIZE) {
+// Split a city.js mesh into spatial buckets by triangle centroid. Each bucket gets its own compact vertex
+// buffers and a tight bounding sphere + box, so the main camera, mirror camera and every shadow camera can
+// reject whole parts of the city before issuing a draw. Lossless clean-up on the way (the picture is identical):
+//  - vertices whose attributes are bit-identical are welded (the vertex shader would compute the same thing twice)
+//  - triangles with two coincident corners are dropped (zero area: they never produce a fragment in any pass)
+//  - a bucket with fewer than 65535 vertices gets 16-bit indices
+// The bounding sphere is taken over the original triangle set, exactly as before, because streaming and the
+// opaque draw order are keyed on it.
+function weldVerts(geo) {
+  const A = Object.values(geo.attributes), n = geo.attributes.position.count;
+  let K = 0; for (const a of A) K += a.itemSize;
+  const R = new Uint32Array(n * K);   // every vertex's attribute bits in one row
+  for (let o = 0, a = 0; a < A.length; a++) {
+    const s = A[a].itemSize, src = A[a].array, u = new Uint32Array(src.buffer, src.byteOffset, src.length);
+    for (let v = 0; v < n; v++) for (let j = 0; j < s; j++) R[v * K + o + j] = u[v * s + j];
+    o += s;
+  }
+  let cap = 1; while (cap < n * 2) cap <<= 1;
+  const table = new Int32Array(cap).fill(-1), canon = new Int32Array(n);
+  for (let v = 0; v < n; v++) {
+    const r = v * K; let h = 0x811c9dc5;
+    for (let j = 0; j < K; j++) h = Math.imul(h ^ R[r + j], 0x01000193);
+    let k = (h >>> 0) & (cap - 1);
+    for (;;) {
+      const w = table[k];
+      if (w < 0) { table[k] = v; canon[v] = v; break; }
+      let j = 0; const q = w * K; while (j < K && R[r + j] === R[q + j]) j++;
+      if (j === K) { canon[v] = w; break; }
+      k = (k + 1) & (cap - 1);
+    }
+  }
+  return canon;
+}
+// Faces buried inside a closed box of the same mesh group and the same bucket (the back of a window sill against
+// its wall, a roof slab's underside on the roof, a pipe running into a wall): a triangle can go when all of it lies
+// in the box and the side it faces is the box's inside. It is then only visible from inside that box: any ray to
+// it from outside first crosses a kept face of the box (or of another buried-in box) in the same bucket, which is
+// always drawn together with it. Only for groups that cast no shadows (the shadow pass draws back faces, where a
+// buried face can matter) and only for boxes the mirror camera (below the street) can never be inside.
+function buriedTris(geo, triBucket) {
+  const S = geo.userData.solids; if (!S) return null;
+  const pos = geo.attributes.position.array, src = geo.index.array, nt = src.length / 3;
+  const B = [], GRID = 4, grid = new Map(), big = [];
+  for (let o = 0; o < S.length; o += 13) {
+    const t0 = S[o] / 3; if (t0 + 12 > nt) continue;
+    const bk = triBucket[t0]; let ok = true; for (let k = 1; k < 12; k++) if (triBucket[t0 + k] !== bk) { ok = false; break; }
+    if (!ok) continue;
+    const ax = S[o + 1], ay = S[o + 2], az = S[o + 3], bx = S[o + 4], by = S[o + 5], bz = S[o + 6], cx = S[o + 7], cy = S[o + 8], cz = S[o + 9], tx = S[o + 10], ty = S[o + 11], tz = S[o + 12];
+    const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz), lc = Math.hypot(cx, cy, cz);
+    if (la < 1e-3 || lb < 1e-3 || lc < 1e-3) continue;
+    if (Math.abs(ax * bx + ay * by + az * bz) > 1e-5 * la * lb || Math.abs(ax * cx + ay * cy + az * cz) > 1e-5 * la * lc || Math.abs(bx * cx + by * cy + bz * cz) > 1e-5 * lb * lc) continue;
+    if ((ay * bz - az * by) * cx + (az * bx - ax * bz) * cy + (ax * by - ay * bx) * cz <= 0) continue;   // mirrored: its faces point inward
+    const ex = (Math.abs(ax) + Math.abs(bx) + Math.abs(cx)) / 2, ey = (Math.abs(ay) + Math.abs(by) + Math.abs(cy)) / 2, ez = (Math.abs(az) + Math.abs(bz) + Math.abs(cz)) / 2;
+    if (ty - ey < -0.2) continue;   // reaches below the street: the mirror camera could be inside it
+    const b = { t0, bk, tx, ty, tz, x0: tx - ex - 1e-4, x1: tx + ex + 1e-4, y0: ty - ey - 1e-4, y1: ty + ey + 1e-4, z0: tz - ez - 1e-4, z1: tz + ez + 1e-4, u: [ax / (la * la), ay / (la * la), az / (la * la)], v: [bx / (lb * lb), by / (lb * lb), bz / (lb * lb)], w: [cx / (lc * lc), cy / (lc * lc), cz / (lc * lc)], ea: 1e-4 / la, eb: 1e-4 / lb, ec: 1e-4 / lc };
+    B.push(b);
+    const i0 = Math.floor((tx - ex) / GRID), i1 = Math.floor((tx + ex) / GRID), j0 = Math.floor((tz - ez) / GRID), j1 = Math.floor((tz + ez) / GRID);
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) { big.push(b); continue; }
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = i * 65536 + j; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(b); }
+  }
+  if (!B.length) return null;
+  const hidden = new Uint8Array(nt), L = [0, 0, 0];
+  const loc = (b, x, y, z) => { const dx = x - b.tx, dy = y - b.ty, dz = z - b.tz; L[0] = dx * b.u[0] + dy * b.u[1] + dz * b.u[2]; L[1] = dx * b.v[0] + dy * b.v[1] + dz * b.v[2]; L[2] = dx * b.w[0] + dy * b.w[1] + dz * b.w[2]; };
+  const inClosed = (b, x, y, z) => { loc(b, x, y, z); return Math.abs(L[0]) <= 0.5 + b.ea && Math.abs(L[1]) <= 0.5 + b.eb && Math.abs(L[2]) <= 0.5 + b.ec; };
+  const inOpen = (b, x, y, z) => { loc(b, x, y, z); return Math.abs(L[0]) < 0.5 && Math.abs(L[1]) < 0.5 && Math.abs(L[2]) < 0.5; };
+  let X0 = 0, X1 = 0, Y0 = 0, Y1 = 0, Z0 = 0, Z1 = 0;   // the triangle's bounds
+  const test = (b, t, a, bb, c) => {
+    if (b.bk !== triBucket[t] || X0 < b.x0 || X1 > b.x1 || Y0 < b.y0 || Y1 > b.y1 || Z0 < b.z0 || Z1 > b.z1 || (t >= b.t0 && t < b.t0 + 12)) return false;
+    if (!inClosed(b, pos[a], pos[a + 1], pos[a + 2]) || !inClosed(b, pos[bb], pos[bb + 1], pos[bb + 2]) || !inClosed(b, pos[c], pos[c + 1], pos[c + 2])) return false;
+    const ux = pos[bb] - pos[a], uy = pos[bb + 1] - pos[a + 1], uz = pos[bb + 2] - pos[a + 2], wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, nl = Math.hypot(nx, ny, nz); if (!(nl > 0)) return false;
+    const d = 1e-3 / nl;
+    return inOpen(b, (pos[a] + pos[bb] + pos[c]) / 3 + nx * d, (pos[a + 1] + pos[bb + 1] + pos[c + 1]) / 3 + ny * d, (pos[a + 2] + pos[bb + 2] + pos[c + 2]) / 3 + nz * d);
+  };
+  for (let t = 0; t < nt; t++) {
+    const a = src[t * 3] * 3, bb = src[t * 3 + 1] * 3, c = src[t * 3 + 2] * 3;
+    X0 = Math.min(pos[a], pos[bb], pos[c]); X1 = Math.max(pos[a], pos[bb], pos[c]); Y0 = Math.min(pos[a + 1], pos[bb + 1], pos[c + 1]); Y1 = Math.max(pos[a + 1], pos[bb + 1], pos[c + 1]);
+    Z0 = Math.min(pos[a + 2], pos[bb + 2], pos[c + 2]); Z1 = Math.max(pos[a + 2], pos[bb + 2], pos[c + 2]);
+    let found = false;
+    for (const b of big) if (test(b, t, a, bb, c)) { found = true; break; }
+    if (!found) {
+      const i = Math.floor((X0 + X1) / 2 / GRID), j = Math.floor((Z0 + Z1) / 2 / GRID);   // any box holding the triangle covers its middle
+      const cell = grid.get(i * 65536 + j);
+      if (cell) for (const b of cell) if (test(b, t, a, bb, c)) { found = true; break; }
+    }
+    if (found) hidden[t] = 1;
+  }
+  return hidden;
+}
+function spatialChunks(geo, size = WORLD_CHUNK_SIZE, hideBuried = false) {
   if (!geo || !geo.index || !geo.attributes.position) return geo ? [geo] : [];
-  const pos = geo.attributes.position, src = geo.index.array, buckets = new Map();
+  for (const k in geo.attributes) { const a = geo.attributes[k].array; if (a.BYTES_PER_ELEMENT !== 4) throw new Error('spatialChunks: 32-bit attributes only'); }
+  const pos = geo.attributes.position, src = geo.index.array, buckets = new Map(), triBucket = new Int32Array(src.length / 3);
   for (let i = 0; i < src.length; i += 3) {
     const a = src[i], b = src[i + 1], c = src[i + 2];
     const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
     const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
     const key = Math.floor(cx / size) + ',' + Math.floor(cz / size);
-    let out = buckets.get(key); if (!out) { out = []; buckets.set(key, out); }
-    out.push(a, b, c);
+    let out = buckets.get(key); if (!out) { out = []; out.id = buckets.size; out.t = []; buckets.set(key, out); }
+    out.push(a, b, c); out.t.push(i / 3); triBucket[i / 3] = out.id;
   }
+  const hidden = hideBuried ? buriedTris(geo, triBucket) : null;
+  const canon = weldVerts(geo), P = new Uint32Array(pos.array.buffer, pos.array.byteOffset, pos.array.length);
+  const same = (a, b) => P[a * 3] === P[b * 3] && P[a * 3 + 1] === P[b * 3 + 1] && P[a * 3 + 2] === P[b * 3 + 2];
+  const local = new Int32Array(pos.count).fill(-1), attrs = Object.entries(geo.attributes);
   const chunks = [];
-  for (const [key, idx] of buckets) {
-    const g = new THREE.BufferGeometry();
-    for (const [name, attr] of Object.entries(geo.attributes)) g.setAttribute(name, attr);
-    const I = src instanceof Uint32Array ? new Uint32Array(idx) : new Uint16Array(idx);
-    g.setIndex(new THREE.BufferAttribute(I, 1));
+  for (const [key, I] of buckets) {
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (let i = 0; i < I.length; i++) {
       const k = I[i], x = pos.getX(k), y = pos.getY(k), z = pos.getZ(k);
@@ -297,20 +433,56 @@ function spatialChunks(geo, size = WORLD_CHUNK_SIZE) {
       const k = I[i], dx = pos.getX(k) - center.x, dy = pos.getY(k) - center.y, dz = pos.getZ(k) - center.z;
       r2 = Math.max(r2, dx * dx + dy * dy + dz * dz);
     }
+    // welded, non-degenerate triangles in their original order, re-indexed into a compact local vertex list
+    const triAll = new Uint32Array(I.length), vertsAll = new Int32Array(I.length); let nt = 0, nv = 0;
+    for (let i = 0; i < I.length; i += 3) {
+      if (hidden && hidden[I.t[i / 3]]) continue;
+      const a = canon[I[i]], b = canon[I[i + 1]], c = canon[I[i + 2]];
+      if (same(a, b) || same(b, c) || same(a, c)) continue;
+      if (local[a] < 0) vertsAll[local[a] = nv++] = a; triAll[nt++] = local[a];
+      if (local[b] < 0) vertsAll[local[b] = nv++] = b; triAll[nt++] = local[b];
+      if (local[c] < 0) vertsAll[local[c] = nv++] = c; triAll[nt++] = local[c];
+    }
+    const verts = vertsAll.subarray(0, nv), tri = triAll.subarray(0, nt);
+    for (const v of verts) local[v] = -1;
+    if (!nt) continue;
+    const g = new THREE.BufferGeometry();
+    for (const [name, attr] of attrs) {
+      const s = attr.itemSize, from = attr.array, to = new from.constructor(verts.length * s);
+      for (let j = 0; j < verts.length; j++) for (let q = 0, o = verts[j] * s; q < s; q++) to[j * s + q] = from[o + q];
+      g.setAttribute(name, new THREE.BufferAttribute(to, s, attr.normalized));
+    }
+    g.setIndex(new THREE.BufferAttribute(nv < 65535 ? new Uint16Array(tri) : tri.slice(), 1));
     g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
     g.boundingSphere = new THREE.Sphere(center, Math.sqrt(r2));
+    g.userData.cullBox = g.boundingBox;
     const [gx, gz] = key.split(',').map(Number); g.userData.chunkX = gx; g.userData.chunkZ = gz;
     chunks.push(g);
   }
   return chunks;
 }
+// Frustum test for anything that carries a bounding box (world chunks): the sphere test first, as three.js does,
+// then the box. A tall city block's sphere is mostly empty air; its box is not. Only ever rejects a chunk none of
+// whose triangles is inside the frustum, so nothing that was drawn can go missing.
+const _cullBoxW = new THREE.Box3();
+{
+  const F = THREE.Frustum.prototype, sphereTest = F.intersectsObject;
+  F.intersectsObject = function (object) {
+    if (!sphereTest.call(this, object)) return false;
+    const b = object.geometry && object.geometry.userData.cullBox;
+    return !b || this.intersectsBox(_cullBoxW.copy(b).applyMatrix4(object.matrixWorld));
+  };
+}
 
 function addWorldChunks(geo, castShadow, receiveShadow, name) {
-  const chunks = spatialChunks(geo);
+  const streamRadius = name === 'far' ? 900 : name === 'near' ? 420 : 300;
+  const chunks = spatialChunks(geo, WORLD_CHUNK_SIZE, !castShadow);
+  // the chunks own compact copies of everything now: keep only the source's index (triangle counts for tests)
+  for (const k of Object.keys(geo.attributes)) geo.deleteAttribute(k);
   for (let i = 0; i < chunks.length; i++) {
     const mesh = new THREE.Mesh(chunks[i], MAT.static);
     mesh.name = name + '-' + i; mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
-    mesh.userData.streamRadius = name === 'far' ? 900 : name === 'near' ? 420 : 300;
+    mesh.userData.streamRadius = streamRadius;
     mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
   }
 }
@@ -325,17 +497,19 @@ function updateWorldStreaming(cam, force = false) {
     if (m.visible) active++;
   }
   WORLD_STREAM.active = active;
-  for (const q of SIGNS) { const e = q.s.m; q.m.visible = (e[12] - x) ** 2 + (e[14] - z) ** 2 < 260 * 260; }
+  for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < 260 * 260; }
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
 
 function buildWorld3() {
+  const t0 = performance.now();
   addWorldChunks(WORLD.meshProps, true, true, 'props');
   addWorldChunks(WORLD.mesh, false, true, 'near');
   addWorldChunks(WORLD.meshFar, false, true, 'far');
   addWorldChunks(WORLD.meshGarden, true, true, 'garden');
   addWorldChunks(WORLD.meshForest, false, true, 'forest');
   addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
+  if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
   R3.built = true;
@@ -485,10 +659,17 @@ void main(){
 const CONES = [];
 const HALOS = [];
 function buildVolumes() {
+  // every lamp cone in one mesh: they share a material and blend additively (order-free), so one draw (two: back
+  // faces, then front) replaces two per cone; the cones are baked in world space, their shading uses no model matrix
+  const cones = [];
   for (const l of WORLD.lights) if (l.kind === 'lamp') {
     const h = l.p[1] - 0.2, rb = Math.min(6, l.r * 0.3);
-    const g = new THREE.CylinderGeometry(0.35, rb, h, 24, 1, true); g.translate(0, -h / 2, 0);
-    const m = new THREE.Mesh(g, coneMat); m.position.set(l.p[0], l.p[1] - 0.1, l.p[2]); m.renderOrder = 8; m.frustumCulled = true;
+    const g = new THREE.CylinderGeometry(0.35, rb, h, 24, 1, true); g.translate(0, -h / 2, 0); g.translate(l.p[0], l.p[1] - 0.1, l.p[2]);
+    cones.push(g);
+  }
+  if (cones.length) {
+    const g = cones.length > 1 ? mergeGeometries(cones) : cones[0]; g.computeBoundingSphere(); g.computeBoundingBox(); g.userData.cullBox = g.boundingBox;
+    const m = new THREE.Mesh(g, coneMat); m.name = 'cones'; m.renderOrder = 8; m.frustumCulled = true; m.matrixAutoUpdate = false;
     scene.add(m); CONES.push(m);
   }
   const mat = new THREE.ShaderMaterial({
@@ -498,10 +679,9 @@ function buildVolumes() {
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
     fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
 void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-vD * uFogDen * 0.4), 0.); }` });
-  const groups = new Map();
-  for (const h of WORLD.halos) { const k = Math.floor(h.p[0] / WORLD_CHUNK_SIZE) + ',' + Math.floor(h.p[2] / WORLD_CHUNK_SIZE); let a = groups.get(k); if (!a) groups.set(k, a = []); a.push(h); }
+  // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
-  for (const H of groups.values()) {
+  for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
     const n = H.length, geo = new THREE.InstancedBufferGeometry(); geo.index = quad.index; geo.setAttribute('position', quad.attributes.position); geo.setAttribute('uv', quad.attributes.uv);
     const pos = new Float32Array(n * 4), col = new Float32Array(n * 3); let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
@@ -732,13 +912,7 @@ function render3(time, W, H, fov, cam) {
   applyThemeUniforms(); NQU.uTime.value = time;
   const T = THEME;
   SKY_U.uZen.value.setRGB(...T.zen); SKY_U.uMid.value.setRGB(...T.mid); SKY_U.uGlow.value.setRGB(...T.glow); SKY_U.uCloud.value.setRGB(...T.cloud); SKY_U.uDiscCol.value.setRGB(...T.disc); SKY_U.uDiscDir.value.set(...T.discDir); SKY_U.uStars.value = T.stars;
-  for (const { s, m } of SIGNS) {   // dead city: some signs are out, a third sputter on failing power
-    if (!m.visible) continue;
-    const f = s.seed % 1; let k = 1;
-    if (f < 0.08) k = 0.06;
-    else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
-    m.material.uniforms.uCol.value.setRGB(s.col[0] * T.sign * k, s.col[1] * T.sign * k, s.col[2] * T.sign * k);
-  }
+  syncSigns(time, T);
   // weather (weather.js) on top of the Look: how much falls, rain or snow, wind, how wet or white the streets are, lightning
   const rk = wxRainK(), sk = wxSnowK(), wetK = T.rain > 0.2 ? 1 : 0.5;
   rainMat.uniforms.uAlpha.value = Math.max(0.35, T.rain) * (0.75 + 0.45 * rk); rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol); rainMat.uniforms.uDens.value = rk * wetK; rainMat.uniforms.uWind.value = WX.wind + WX.gust;
