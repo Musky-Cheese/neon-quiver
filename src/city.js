@@ -369,6 +369,7 @@ function updateCity(dt) {
 function drawCityDynamic(time) {
   for (const c of WORLD.cars) {
     const x = c.alongX ? c.t : c.off, z = c.alongX ? c.off : c.t, ry = c.alongX ? (c.s > 0 ? Math.PI / 2 : -Math.PI / 2) : (c.s > 0 ? 0 : Math.PI);
+    if ((x - PLAYER.x) ** 2 + (z - PLAYER.z) ** 2 > 220 * 220) continue;
     const L = c.big ? 9 : 4.2, W = c.big ? 3 : 1.8;
     const m = M4.trs(poolM(), x, c.h, z, 0, ry, 0, W, c.big ? 2.2 : 0.9, L); drawItem(MESH.metal, m, [0.12, 0.12, 0.15]);
     const f = M4.trs(poolM(), x + Math.sin(ry) * L / 2, c.h, z + Math.cos(ry) * L / 2, 0, ry, 0, W * 0.8, 0.2, 0.1); drawItem(MESH.box, f, [1, 1, 1], [3, 3, 2.6]);
@@ -376,12 +377,13 @@ function drawCityDynamic(time) {
     const u = M4.trs(poolM(), x, c.h - 0.5, z, 0, ry, 0, W * 0.9, 0.08, L * 0.9); drawItem(MESH.box, u, c.c, [c.c[0] * 2, c.c[1] * 2, c.c[2] * 2]);
   }
   const T = WORLD.train;
-  if (T.wait <= 0) for (let i = 0; i < 5; i++) {
+  if (T.wait <= 0 && (T.x - PLAYER.x) ** 2 + (-24 - PLAYER.z) ** 2 < 260 * 260) for (let i = 0; i < 5; i++) {
     const x = T.x - i * 13.5;
     drawItem(MESH.metal, M4.trs(poolM(), x, 26.1, -24, 0, 0, 0, 13, 3, 2.8), [0.16, 0.16, 0.2]);
     drawItem(MESH.box, M4.trs(poolM(), x, 26.4, -24, 0, 0, 0, 12, 0.9, 2.9), [0.04, 0.045, 0.05]);   // dark, dead windows
   }
   // fountain hologram: rotating rings + beam
+  if (PLAYER.x * PLAYER.x + PLAYER.z * PLAYER.z > 190 * 190) return;
   for (let i = 0; i < 3; i++) {
     const m = M4.trs(poolM(), 0, 4.5 + i * 0.3, 0, 0.5 + i * 0.4 + Math.sin(time * 0.5 + i) * 0.2, time * (0.4 + i * 0.25), 0.3 * i, 2.2 + i * 0.7, 2.2 + i * 0.7, 2.2 + i * 0.7);
     drawItem(MESH.ring, m, [0.2, 0.9, 1.0], [0.3, 1.6, 2.2]);

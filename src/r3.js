@@ -102,21 +102,30 @@ function buildSigns() {
 }
 const DECAL_POOL = [];
 function buildDecalPool() {
-  for (let i = 0; i < DECAL_CAP; i++) {
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[0] }, uCol: { value: new THREE.Color(1, 1, 1) }, uTime: NQU.uTime, uMode: { value: 0 }, uSeed: { value: 0 }, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
-      vertexShader: SIGN_VS, fragmentShader: SIGN_FS.replace('flick = 1. - step(0.985', 'flick = 1. - 0.0*step(0.985'), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    const m = new THREE.Mesh(PLANE, mat); m.matrixAutoUpdate = false; m.visible = false; m.renderOrder = 2; m.receiveShadow = false;
+  const vs = `attribute float iAlpha; varying vec2 vUV; varying vec3 vW; varying float vA;
+void main(){ vec4 w=modelMatrix*instanceMatrix*vec4(position,1.); vW=w.xyz; vUV=uv; vA=iAlpha; gl_Position=projectionMatrix*viewMatrix*w; }`;
+  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec3 uFogCol;
+void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-d*uFogDen))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
+  for (let v = 0; v < DECAL_TEX.length; v++) {
+    const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
   }
 }
 function syncDecals() {
-  for (let i = 0; i < DECAL_POOL.length; i++) {
-    const m = DECAL_POOL[i], d = DECALS[i];
-    if (!d) { m.visible = false; continue; }
+  const counts = new Uint16Array(DECAL_POOL.length);
+  for (const d of DECALS) {
+    if ((d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2 > 150 * 150) continue;
+    const m = DECAL_POOL[d.v], i = counts[d.v]++;
     const fadeAt = DECAL_LIFE - 9;
     const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
-    M4.trs(m.matrix.elements, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1); m.matrixWorldNeedsUpdate = true;
-    m.material.uniforms.uTex.value = DECAL_TEX[d.v]; m.material.uniforms.uA.value = a * 0.92; m.visible = true;
+    M4.trs(m.instanceMatrix.array.subarray(i * 16, i * 16 + 16), d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1);
+    m.geometry.attributes.iAlpha.array[i] = a * 0.92;
+  }
+  for (let v = 0; v < DECAL_POOL.length; v++) {
+    const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
+    if (n) { m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true; }
   }
 }
 
@@ -189,6 +198,7 @@ const PL = [];
 for (let i = 0; i < MAX_PL; i++) { const l = new THREE.PointLight(0xffffff, 0, 10, 1); l.layers.enableAll(); scene.add(l); PL.push(l); }
 const SPOTS = [];      // pool of spot lights parked on the nearest street lamps / floodlights
 const N_SPOTS = 6, N_SHADOW_SPOTS = 4;
+const SHADOW_CACHE = { sunX: Infinity, sunZ: Infinity, frame: -1 };
 const PL_K = Math.PI * 0.142;   // matches the old (1-d/r)^2 falloff with decay=1 lights
 function setPL(l, p, c, r) { l.position.set(p[0], p[1], p[2]); l.color.setRGB(c[0], c[1], c[2]); l.distance = r; l.intensity = PL_K * r; }
 function buildLights() {
@@ -207,29 +217,34 @@ function updateLights3(cam) {
   // the sun's shadow box follows the player (snapped so the shadow texels don't swim)
   const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
   sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
+  sun.shadow.autoUpdate = false;
   // lamps: nearest ones get the spot pool (the first few cast shadows)
-  _lampsNear.length = 0; for (const l of WORLD.lights) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
+  _lampsNear.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
   _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   R3.tick = (R3.tick + 1) | 0;
+  const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
+  if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
+    sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
+  }
   for (let i = 0; i < SPOTS.length; i++) {
     const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
     if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
     // Ultra keeps shadows fresh (3 of every 4 lamps refresh each frame) without forcing every shadow map to redraw
     // in the same frame every frame — that all-at-once cost was compounding with heavy single-frame spikes (e.g. a
     // multi-kill AOE hit) into visible stalls. Lower tiers keep their coarser alternating refresh.
-    else if (SETTINGS.quality >= 3 ? (i + R3.tick) % 4 !== 0 : (i + R3.tick) % 2 === 0) s.shadow.needsUpdate = true;
+    else { const cadence = SETTINGS.quality >= 3 ? 2 : PERF.pressure > 0.55 ? 4 : 3; if ((i + R3.tick) % cadence === 0) s.shadow.needsUpdate = true; }
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
   }
   // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
-  _stat.length = 0; for (const l of WORLD.lights) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
+  _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
   _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   _dyn.length = 0;
   for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
   for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const f of WORLD.fires) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
+  for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
   for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
   if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
   for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
@@ -244,14 +259,85 @@ function updateLights3(cam) {
 }
 
 /* ---------------- world meshes ---------------- */
+const WORLD_CHUNK_SIZE = 56;
+const WORLD_MESHES = [];
+const WORLD_STREAM = { x: Infinity, z: Infinity, active: 0 };
+
+// Keep the compact, shared vertex buffers produced by city.js, but split their
+// triangle indices into spatial buckets. Each bucket has a tight bounding
+// sphere, so the main camera, mirror camera and every shadow camera can reject
+// whole parts of the city before issuing a draw.
+function spatialChunks(geo, size = WORLD_CHUNK_SIZE) {
+  if (!geo || !geo.index || !geo.attributes.position) return geo ? [geo] : [];
+  const pos = geo.attributes.position, src = geo.index.array, buckets = new Map();
+  for (let i = 0; i < src.length; i += 3) {
+    const a = src[i], b = src[i + 1], c = src[i + 2];
+    const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
+    const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    const key = Math.floor(cx / size) + ',' + Math.floor(cz / size);
+    let out = buckets.get(key); if (!out) { out = []; buckets.set(key, out); }
+    out.push(a, b, c);
+  }
+  const chunks = [];
+  for (const [key, idx] of buckets) {
+    const g = new THREE.BufferGeometry();
+    for (const [name, attr] of Object.entries(geo.attributes)) g.setAttribute(name, attr);
+    const I = src instanceof Uint32Array ? new Uint32Array(idx) : new Uint16Array(idx);
+    g.setIndex(new THREE.BufferAttribute(I, 1));
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (let i = 0; i < I.length; i++) {
+      const k = I[i], x = pos.getX(k), y = pos.getY(k), z = pos.getZ(k);
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z; if (z > z1) z1 = z;
+    }
+    const center = new THREE.Vector3((x0 + x1) * 0.5, (y0 + y1) * 0.5, (z0 + z1) * 0.5);
+    let r2 = 0;
+    for (let i = 0; i < I.length; i++) {
+      const k = I[i], dx = pos.getX(k) - center.x, dy = pos.getY(k) - center.y, dz = pos.getZ(k) - center.z;
+      r2 = Math.max(r2, dx * dx + dy * dy + dz * dz);
+    }
+    g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+    g.boundingSphere = new THREE.Sphere(center, Math.sqrt(r2));
+    const [gx, gz] = key.split(',').map(Number); g.userData.chunkX = gx; g.userData.chunkZ = gz;
+    chunks.push(g);
+  }
+  return chunks;
+}
+
+function addWorldChunks(geo, castShadow, receiveShadow, name) {
+  const chunks = spatialChunks(geo);
+  for (let i = 0; i < chunks.length; i++) {
+    const mesh = new THREE.Mesh(chunks[i], MAT.static);
+    mesh.name = name + '-' + i; mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
+    mesh.userData.streamRadius = name === 'far' ? 900 : name === 'near' ? 420 : 300;
+    mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
+  }
+}
+
+function updateWorldStreaming(cam, force = false) {
+  const x = cam[0], z = cam[2];
+  if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
+  WORLD_STREAM.x = x; WORLD_STREAM.z = z; let active = 0;
+  for (const m of WORLD_MESHES) {
+    const s = m.geometry.boundingSphere; if (!s) { m.visible = true; active++; continue; } const r = m.userData.streamRadius;
+    m.visible = (s.center.x - x) ** 2 + (s.center.z - z) ** 2 <= (r + s.radius) ** 2;
+    if (m.visible) active++;
+  }
+  WORLD_STREAM.active = active;
+  for (const q of SIGNS) { const e = q.s.m; q.m.visible = (e[12] - x) ** 2 + (e[14] - z) ** 2 < 260 * 260; }
+  REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
+}
+
 function buildWorld3() {
-  const props = new THREE.Mesh(WORLD.meshProps, MAT.static); props.castShadow = true; props.receiveShadow = true; props.matrixAutoUpdate = false; scene.add(props);
-  const near = new THREE.Mesh(WORLD.mesh, MAT.static); near.castShadow = false; near.receiveShadow = true; near.matrixAutoUpdate = false; scene.add(near);
-  const far = new THREE.Mesh(WORLD.meshFar, MAT.static); far.receiveShadow = true; far.matrixAutoUpdate = false; scene.add(far);
-  const garden = new THREE.Mesh(WORLD.meshGarden, MAT.static); garden.castShadow = true; garden.receiveShadow = true; garden.matrixAutoUpdate = false; scene.add(garden);   // own mesh: culled when out of view
-  const forest = new THREE.Mesh(WORLD.meshForest, MAT.static); forest.receiveShadow = true; forest.matrixAutoUpdate = false; scene.add(forest);   // background trees: no shadow casting
-  const sub = new THREE.Mesh(WORLD.meshSub, MAT.static); sub.castShadow = true; sub.receiveShadow = true; sub.matrixAutoUpdate = false; scene.add(sub);
+  addWorldChunks(WORLD.meshProps, true, true, 'props');
+  addWorldChunks(WORLD.mesh, false, true, 'near');
+  addWorldChunks(WORLD.meshFar, false, true, 'far');
+  addWorldChunks(WORLD.meshGarden, true, true, 'garden');
+  addWorldChunks(WORLD.meshForest, false, true, 'forest');
+  addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
+  updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
   R3.built = true;
 }
 
@@ -278,7 +364,11 @@ void main(){
   float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-d * uFogDen)) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
-  const m = new THREE.Mesh(gg.build(), mat); m.matrixAutoUpdate = false; m.renderOrder = 3; scene.add(m);
+  const chunks = spatialChunks(gg.build());
+  for (let i = 0; i < chunks.length; i++) {
+    const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280;
+    scene.add(m); WORLD_MESHES.push(m);
+  }
 }
 
 /* ---------------- baked occlusion: sky visibility of every half-metre of street ----------------
@@ -286,7 +376,8 @@ void main(){
    and keep the steepest skyline, so alleys, wall bases, corners and the ground under props darken.
    Computed once at load (well under a second), then one texture lookup per pixel: it replaces the old per-frame AO pass. */
 function buildOcclusion() {
-  const t0 = performance.now(), C = 0.5, X0 = -154, Z0 = -154, W = Math.ceil((WORLD_BOUNDS.x1 + 16 - X0) / C), H = 800;   // covers x -154..(east edge + 16), z -154..246
+  const t0 = performance.now(), C = 0.5, X0 = WORLD_BOUNDS.x0 - 14, Z0 = WORLD_BOUNDS.z0 - 14;
+  const W = Math.ceil((WORLD_BOUNDS.x1 + 14 - X0) / C), H = Math.ceil((WORLD_BOUNDS.z1 + 14 - Z0) / C);
   const hgt = new Float32Array(W * H);
   for (const b of WORLD.boxes) {
     if (b.y1 < 0.35) continue;
@@ -392,7 +483,7 @@ void main(){
   gl_FragColor = vec4(c, 0.);
 }` });
 const CONES = [];
-const haloGeo = new THREE.InstancedBufferGeometry();
+const HALOS = [];
 function buildVolumes() {
   for (const l of WORLD.lights) if (l.kind === 'lamp') {
     const h = l.p[1] - 0.2, rb = Math.min(6, l.r * 0.3);
@@ -400,13 +491,6 @@ function buildVolumes() {
     const m = new THREE.Mesh(g, coneMat); m.position.set(l.p[0], l.p[1] - 0.1, l.p[2]); m.renderOrder = 8; m.frustumCulled = true;
     scene.add(m); CONES.push(m);
   }
-  const H = WORLD.halos, n = H.length;
-  const quad = new THREE.PlaneGeometry(1, 1);
-  haloGeo.index = quad.index; haloGeo.setAttribute('position', quad.attributes.position); haloGeo.setAttribute('uv', quad.attributes.uv);
-  const pos = new Float32Array(n * 4), col = new Float32Array(n * 3);
-  H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); });
-  haloGeo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); haloGeo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3));
-  haloGeo.instanceCount = n;
   const mat = new THREE.ShaderMaterial({
     uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U), transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -414,7 +498,17 @@ function buildVolumes() {
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
     fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
 void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-vD * uFogDen * 0.4), 0.); }` });
-  const mesh = new THREE.Mesh(haloGeo, mat); mesh.frustumCulled = false; mesh.renderOrder = 9; scene.add(mesh);
+  const groups = new Map();
+  for (const h of WORLD.halos) { const k = Math.floor(h.p[0] / WORLD_CHUNK_SIZE) + ',' + Math.floor(h.p[2] / WORLD_CHUNK_SIZE); let a = groups.get(k); if (!a) groups.set(k, a = []); a.push(h); }
+  const quad = new THREE.PlaneGeometry(1, 1);
+  for (const H of groups.values()) {
+    const n = H.length, geo = new THREE.InstancedBufferGeometry(); geo.index = quad.index; geo.setAttribute('position', quad.attributes.position); geo.setAttribute('uv', quad.attributes.uv);
+    const pos = new Float32Array(n * 4), col = new Float32Array(n * 3); let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
+    geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
+    const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh); HALOS.push(mesh);
+  }
 }
 
 /* ---------------- wet-street reflections: the scene mirrored in y, at half resolution ---------------- */
@@ -422,19 +516,35 @@ const reflRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
 const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
 const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
+const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
 NQU.uRefl.value = BLACK_TEX;
 function renderReflection(r) {
   const k = SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // sharper mirror on High
-  if (reflRT.width !== W || reflRT.height !== H) reflRT.setSize(W, H);
+  const resized = reflRT.width !== W || reflRT.height !== H;
+  if (resized) { reflRT.setSize(W, H); REFL_CACHE.valid = false; }
+  const cm = camera.matrixWorld.elements, pm = REFL_CACHE.matrix.elements;
+  const dx = cm[12] - pm[12], dy = cm[13] - pm[13], dz = cm[14] - pm[14];
+  const movedFar = dx * dx + dy * dy + dz * dz > 16;
+  const turnedFar = Math.abs(cm[0] - pm[0]) + Math.abs(cm[2] - pm[2]) + Math.abs(cm[8] - pm[8]) + Math.abs(cm[10] - pm[10]) > 0.7;
+  const cadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;   // reuse more only while the frame budget is under pressure
+  const stale = R3.tick - REFL_CACHE.frame >= cadence;
+  const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== SETTINGS.quality || movedFar || turnedFar || stale;
+  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H); return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
   NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
   const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
   partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
+  const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
+  const hiddenRigs = [];
+  for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
   r.render(scene, reflCam);
+  for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
+  REFL_CACHE.quality = SETTINGS.quality; REFL_CACHE.w = W; REFL_CACHE.h = H;
 }
 
 /* ---------------- post: passes ---------------- */
@@ -533,7 +643,7 @@ function profFrame(cpuMs) {
   let gpu = 0, lines = [];
   for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
-  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 function buildComposer(W, H, q) {
@@ -613,6 +723,7 @@ function render3(time, W, H, fov, cam) {
   // cameras
   camera.matrixWorld.fromArray(camM); camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
   camera.fov = fov; camera.aspect = W / H; camera.updateProjectionMatrix();
+  updateWorldStreaming(cam);
   vmCamera.matrixWorld.copy(camera.matrixWorld); vmCamera.matrixWorldInverse.copy(camera.matrixWorldInverse);
   vmCamera.fov = VM_FOV; vmCamera.aspect = W / H; vmCamera.updateProjectionMatrix();
   M4.mul(_vp, camera.projectionMatrix.elements, camera.matrixWorldInverse.elements);
@@ -622,6 +733,7 @@ function render3(time, W, H, fov, cam) {
   const T = THEME;
   SKY_U.uZen.value.setRGB(...T.zen); SKY_U.uMid.value.setRGB(...T.mid); SKY_U.uGlow.value.setRGB(...T.glow); SKY_U.uCloud.value.setRGB(...T.cloud); SKY_U.uDiscCol.value.setRGB(...T.disc); SKY_U.uDiscDir.value.set(...T.discDir); SKY_U.uStars.value = T.stars;
   for (const { s, m } of SIGNS) {   // dead city: some signs are out, a third sputter on failing power
+    if (!m.visible) continue;
     const f = s.seed % 1; let k = 1;
     if (f < 0.08) k = 0.06;
     else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;

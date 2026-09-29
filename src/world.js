@@ -5,10 +5,60 @@
 const NAV = { cell: 1.5, x0: -142, z0: -142, w: 0, h: 0, block: null, dist: null, queue: null, t: 0, ready: false };
 const NAV_INF = 65535;
 
+/* ---------------- scalable static-world queries ----------------
+   The authored collision arrays stay the source of truth, while this coarse
+   grid makes runtime queries depend on nearby streets instead of total map
+   size. It is deliberately independent of render chunks: gameplay remains
+   deterministic even when a visual district is streamed out. */
+const WORLD_INDEX = { cell: 16, boxes: new Map(), circles: new Map(), stamp: 1, ready: false };
+const _worldQB = [], _worldQC = [];
+const WORLD_TILES = { cell: 56, maps: {}, out: {} };
+const worldCellKey = (i, j) => i + ',' + j;
+function buildWorldSpatialIndex() {
+  const S = WORLD_INDEX.cell; WORLD_INDEX.boxes.clear(); WORLD_INDEX.circles.clear();
+  const add = (map, o, x0, x1, z0, z1) => {
+    for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) {
+      const k = worldCellKey(i, j); let a = map.get(k); if (!a) map.set(k, a = []); a.push(o);
+    }
+  };
+  for (const b of WORLD.boxes) add(WORLD_INDEX.boxes, b, b.x0, b.x1, b.z0, b.z1);
+  for (const c of WORLD.circles) add(WORLD_INDEX.circles, c, c.x - c.r, c.x + c.r, c.z - c.r, c.z + c.r);
+  const tiled = {
+    lights: [WORLD.lights, o => o.p[0], o => o.p[2]], fires: [WORLD.fires, o => o.x, o => o.z],
+    steam: [WORLD.steam, o => o[0], o => o[2]], petals: [WORLD.petals, o => o[0], o => o[2]], supplies: [WORLD.supplies, o => o.x, o => o.z],
+  };
+  WORLD_TILES.maps = {}; WORLD_TILES.out = {};
+  for (const [kind, [list, getX, getZ]] of Object.entries(tiled)) {
+    const map = WORLD_TILES.maps[kind] = new Map(); WORLD_TILES.out[kind] = [];
+    for (const o of list) { const k = worldCellKey(Math.floor(getX(o) / WORLD_TILES.cell), Math.floor(getZ(o) / WORLD_TILES.cell)); let a = map.get(k); if (!a) map.set(k, a = []); a.push(o); }
+  }
+  WORLD_INDEX.ready = true;
+}
+function nearbyWorld(kind, x, z, radius) {
+  const map = WORLD_TILES.maps[kind], out = WORLD_TILES.out[kind]; if (!map || !out) return WORLD[kind] || [];
+  out.length = 0; const S = WORLD_TILES.cell;
+  for (let j = Math.floor((z - radius) / S); j <= Math.floor((z + radius) / S); j++) for (let i = Math.floor((x - radius) / S); i <= Math.floor((x + radius) / S); i++) { const a = map.get(worldCellKey(i, j)); if (a) out.push(...a); }
+  return out;
+}
+function worldCandidates(x0, x1, z0, z1) {
+  if (!WORLD_INDEX.ready) return [WORLD.boxes, WORLD.circles];
+  _worldQB.length = 0; _worldQC.length = 0;
+  const S = WORLD_INDEX.cell, stamp = ++WORLD_INDEX.stamp;
+  const collect = (map, out) => {
+    for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) {
+      const a = map.get(worldCellKey(i, j)); if (!a) continue;
+      for (const o of a) if (o._wq !== stamp) { o._wq = stamp; out.push(o); }
+    }
+  };
+  collect(WORLD_INDEX.boxes, _worldQB); collect(WORLD_INDEX.circles, _worldQC);
+  return [_worldQB, _worldQC];
+}
+
 function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.floor((z - NAV.z0) / NAV.cell); return (i < 0 || j < 0 || i >= NAV.w || j >= NAV.h) ? -1 : j * NAV.w + i; }
 function navCenter(k, out) { out[0] = NAV.x0 + (k % NAV.w + 0.5) * NAV.cell; out[1] = NAV.z0 + (Math.floor(k / NAV.w) + 0.5) * NAV.cell; return out; }
 
 function buildNav() {
+  NAV.x0 = WORLD_BOUNDS.x0 - 2; NAV.z0 = WORLD_BOUNDS.z0 - 2;
   const c = NAV.cell; NAV.w = Math.ceil((WORLD_BOUNDS.x1 + 2 - NAV.x0) / c); NAV.h = Math.ceil((WORLD_BOUNDS.z1 + 2 - NAV.z0) / c);
   const N = NAV.w * NAV.h, B = new Uint8Array(N);
   const mark = (x0, x1, z0, z1) => {
@@ -26,7 +76,7 @@ function buildNav() {
   while (qh < qt) { const k = Q[qh++], i = k % NAV.w, j = (k / NAV.w) | 0;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= NAV.w || b >= NAV.h) continue; const n = b * NAV.w + a; if (!reach[n] && !B[n]) { reach[n] = 1; Q[qt++] = n; } } }
   for (let k = 0; k < N; k++) if (!reach[k]) B[k] = 1;
-  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.queue = new Int32Array(N);
+  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.queue = new Int32Array(N); NAV.touched = [];
   NAV.walk = []; for (let k = 0; k < N; k++) if (!B[k]) NAV.walk.push(k);
   NAV.ready = true;
   buildMinimap();
@@ -35,18 +85,22 @@ function buildNav() {
 const _nb = [[1, 0, 10], [-1, 0, 10], [0, 1, 10], [0, -1, 10], [1, 1, 14], [1, -1, 14], [-1, 1, 14], [-1, -1, 14]];
 function navUpdate(px, pz) {
   const D = NAV.dist, B = NAV.block, W = NAV.w, H = NAV.h, Q = NAV.queue, N = Q.length;
-  const inQ = NAV.inQ || (NAV.inQ = new Uint8Array(N)); D.fill(NAV_INF); inQ.fill(0);
+  const inQ = NAV.inQ || (NAV.inQ = new Uint8Array(N)), touched = NAV.touched;
+  for (let i = 0; i < touched.length; i++) { const k = touched[i]; D[k] = NAV_INF; inQ[k] = 0; }
+  touched.length = 0;
   let s = navIdx(px, pz); if (s < 0) return; if (B[s]) s = navNearestFree(s); if (s < 0) return;
-  let qh = 0, qt = 0, cnt = 0; D[s] = 0; Q[qt] = s; qt = (qt + 1) % N; cnt++; inQ[s] = 1;
+  const maxCost = Math.ceil(135 / NAV.cell) * 10;   // active district + spawn ring; constant work as the map grows
+  let qh = 0, qt = 0, cnt = 0; D[s] = 0; touched.push(s); Q[qt] = s; qt = (qt + 1) % N; cnt++; inQ[s] = 1;
   while (cnt > 0) {   // label-correcting shortest paths with octile costs (10 / 14)
     const k = Q[qh]; qh = (qh + 1) % N; cnt--; inQ[k] = 0;
     const i = k % W, j = (k / W) | 0, dk = D[k];
+    if (dk >= maxCost) continue;
     for (let n = 0; n < 8; n++) {
       const a = i + _nb[n][0], b = j + _nb[n][1]; if (a < 0 || b < 0 || a >= W || b >= H) continue;
       const m = b * W + a; if (B[m]) continue;
       if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue;
       const nd = dk + _nb[n][2];
-      if (nd < D[m]) { D[m] = nd; if (!inQ[m]) { Q[qt] = m; qt = (qt + 1) % N; cnt++; inQ[m] = 1; } }
+      if (nd < D[m]) { if (D[m] === NAV_INF) touched.push(m); D[m] = nd; if (!inQ[m]) { Q[qt] = m; qt = (qt + 1) % N; cnt++; inQ[m] = 1; } }
     }
   }
 }
@@ -89,7 +143,7 @@ function navSpawnPoint(minD = 26, maxD = 62) {
 /* ---------------- supplies ---------------- */
 function nearestSupply(kind, x, z) {
   let best = null, bd = 1e9;
-  for (const s of WORLD.supplies) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
+  for (const s of nearbyWorld('supplies', x, z, 12)) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
   return best ? { s: best, d: bd } : null;
 }
 function updateSupplies(dt) {
@@ -109,7 +163,7 @@ function updateSupplies(dt) {
 }
 // burn barrels: a bright core and flickering tongues of flame above the rim (particles do the rest)
 function drawFires(time) {
-  for (const f of WORLD.fires) {
+  for (const f of nearbyWorld('fires', PLAYER.x, PLAYER.z, 48)) {
     if (Math.abs(f.x - PLAYER.x) > 45 || Math.abs(f.z - PLAYER.z) > 45) continue;
     const s0 = f.x * 1.7 + f.z * 3.1, lean = (WX.wind + WX.gust) * 0.25;
     for (let i = 0; i < 5; i++) {
@@ -121,7 +175,7 @@ function drawFires(time) {
   }
 }
 function drawSupplies(time) {
-  for (const s of WORLD.supplies) {
+  for (const s of nearbyWorld('supplies', PLAYER.x, PLAYER.z, 92)) {
     if (Math.abs(s.x - PLAYER.x) > 90 || Math.abs(s.z - PLAYER.z) > 90) continue;
     if (s.kind === 'cache') {
       const on = s.cd <= 0, k = on ? 0.6 + 0.4 * Math.sin(time * 4 + s.x) : 0.08;
@@ -143,15 +197,16 @@ function updateAmbient(dt) {
   // takes the colour of the night air, and hangs thicker in the cold
   const wx = (WX.wind + WX.gust) * 1.4, cold = 1 + 0.8 * WX.snow, fc = THEME.fog;
   const stc = [fc[0] * 1.15 + 0.055, fc[1] * 1.15 + 0.055, fc[2] * 1.15 + 0.065];
-  for (let i = 0; i < WORLD.steam.length; i++) {
-    const s = WORLD.steam[i];
+  const steamNear = nearbyWorld('steam', px, pz, 52);
+  for (let i = 0; i < steamNear.length; i++) {
+    const s = steamNear[i];
     if (Math.abs(s[0] - px) > 50 || Math.abs(s[2] - pz) > 50) continue;
     const pulse = 0.55 + 0.9 * Math.max(0, Math.sin(GAME.time * 0.8 + i * 2.3)) ** 2;
     if (Math.random() < dt * 30 * pulse * cold) emit(s[0] + rand(-0.25, 0.25), s[1] + 0.05, s[2] + rand(-0.25, 0.25), rand(-0.3, 0.3) + wx * 0.3, rand(1.3, 2.4) * (0.7 + 0.4 * pulse), rand(-0.3, 0.3), rand(2.2, 3.6), stc, -rand(0.3, 0.55), -0.35, 0.55, 0.75 * cold, 0.2);
     if (Math.random() < dt * 5 * cold) emit(s[0] + rand(-1.2, 1.2), 0.12, s[2] + rand(-1.2, 1.2), rand(-0.3, 0.3) + wx * 0.5, rand(0.05, 0.25), rand(-0.3, 0.3), rand(3, 5), stc, -rand(0.7, 1.1), -0.02, 0.4, 0.35, 0.1);   // low mist pooling round the grate
   }
   // burn barrels: licking flame, a bright core, embers that ride the heat, the odd crackle of sparks, and smoke that leans with the wind
-  for (const f of WORLD.fires) {
+  for (const f of nearbyWorld('fires', px, pz, 52)) {
     if (Math.abs(f.x - px) > 50 || Math.abs(f.z - pz) > 50) continue;
     if (Math.random() < dt * 48) { const hot = Math.random(); emit(f.x + rand(-0.2, 0.2), f.y - 0.05, f.z + rand(-0.2, 0.2), rand(-0.18, 0.18) + wx * 0.15, rand(1.4, 2.6), rand(-0.18, 0.18), rand(0.28, 0.55), hot < 0.3 ? [3, 2.1, 0.7] : [2.8, 0.95 + hot * 0.6, 0.12], rand(0.22, 0.42), -1.2, 1.2, -0.35); }
     if (Math.random() < dt * 9) emit(f.x + rand(-0.15, 0.15), f.y + 0.1, f.z + rand(-0.15, 0.15), rand(-0.6, 0.6) + wx * 0.4, rand(2, 4.2), rand(-0.6, 0.6), rand(1.2, 2.4), [3.2, 1.3, 0.25], rand(0.025, 0.045), -0.6, 0.35, 0);   // embers
@@ -159,7 +214,7 @@ function updateAmbient(dt) {
     if (Math.random() < dt * 6) emit(f.x + rand(-0.1, 0.1), f.y + 0.7, f.z + rand(-0.1, 0.1), rand(-0.2, 0.2) + wx * 0.6, rand(1, 1.7), rand(-0.2, 0.2), rand(2.6, 4.4), [0.045, 0.04, 0.04], -rand(0.35, 0.5), -0.25, 0.45, 0.95, 0.5);
   }
   // cherry blossom petals drifting down from nearby canopies
-  for (const t of WORLD.petals) {
+  for (const t of nearbyWorld('petals', px, pz, 48)) {
     const dx = t[0] - px, dz = t[2] - pz; if (dx * dx + dz * dz > 45 * 45) continue;
     if (Math.random() < dt * 7) { const a = Math.random() * TAU, r = Math.random() * t[3];
       emit(t[0] + Math.cos(a) * r, t[1] + rand(-0.4, 0.3), t[2] + Math.sin(a) * r, rand(0.2, 0.7), rand(-0.5, -0.2), rand(-0.3, 0.3), rand(5, 8), [1.0, 0.5 + Math.random() * 0.15, 0.68], rand(0.04, 0.07), 0.25, 0.9, 0, 0.95); }

@@ -31,6 +31,16 @@ const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
+const ZGRID = { cell: 4, map: new Map(), out: [] };
+function rebuildZombieGrid() {
+  ZGRID.map.clear(); const S = ZGRID.cell;
+  for (const z of ZOMBIES) { const k = Math.floor(z.x / S) + ',' + Math.floor(z.z / S); let a = ZGRID.map.get(k); if (!a) ZGRID.map.set(k, a = []); a.push(z); }
+}
+function zombieCandidates(x0, x1, z0, z1) {
+  const out = ZGRID.out; out.length = 0; const S = ZGRID.cell;
+  for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) { const a = ZGRID.map.get(i + ',' + j); if (a) out.push(...a); }
+  return out;
+}
 function ensurePose(z) { if (z._ps !== STEPN.n) { if (ZRIG.ready) poseZombieRig(z, 0, GAME.time); else drawZombieFramesOnly(z); } }
 let groanCd = 0;
 const V0 = () => [0, 0, 0];
@@ -79,7 +89,8 @@ function spawnZombie(type, x, z, wave) {
 
 /* -------- collision helpers -------- */
 function pushOutCircle(o, rad) {
-  for (const b of WORLD.boxes) {
+  const [boxes, circles] = worldCandidates(o.x - rad - 0.5, o.x + rad + 0.5, o.z - rad - 0.5, o.z + rad + 0.5);
+  for (const b of boxes) {
     if (o.y > b.y1 - 0.02) continue;   // standing on top of it
     if ((o.grounded || o.T) && b.y1 - (o.y || 0) < (o.T ? 0.45 : 0.33)) continue;   // a step you can walk up (zombies wade over low ones)
     if (b.y0 > o.y + 2.2) continue;     // overhead (upper floors above a walk-in shop, the manor roof)
@@ -93,7 +104,7 @@ function pushOutCircle(o, rad) {
       }
     }
   }
-  for (const c of WORLD.circles) {
+  for (const c of circles) {
     if (o.y > c.h - 0.02) continue;
     const dx = o.x - c.x, dz = o.z - c.z, d2 = dx * dx + dz * dz, R = rad + c.r;
     if (d2 < R * R && d2 > 1e-8) { const d = Math.sqrt(d2), k = (R - d) / d; o.x += dx * k; o.z += dz * k; }
@@ -211,6 +222,7 @@ function shakeNear(z, a) { const d = Math.hypot(z.x - PLAYER.x, z.z - PLAYER.z);
 function updateZombies(dt, time) {
   const P = PLAYER;
   groanCd -= dt;
+  rebuildZombieGrid();
   // corpse cap: if too many bodies are lying around, retire the oldest one (past its death flail) a little early
   let deadN = 0; for (const zz of ZOMBIES) if (zz.dead) deadN++;
   if (deadN > CORPSE_CAP) {
@@ -267,7 +279,7 @@ function updateZombies(dt, time) {
     if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
     if (z.pin > 0) { z.vx = 0; z.vz = 0; }
     z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
-    for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
+    for (const o of zombieCandidates(z.x - 2.2, z.x + 2.2, z.z - 2.2, z.z + 2.2)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
     pushOutCircle(z, 0.32 * z.scale);
     const moved = Math.hypot(z.x - z.lastX, z.z - z.lastZ); z.lastX = z.x; z.lastZ = z.z;
     if (spd > 0.5 && moved < spd * dt * 0.3) z.stuckT += dt; else z.stuckT = Math.max(0, z.stuckT - dt * 0.5);
@@ -296,7 +308,7 @@ function updateZombies(dt, time) {
 }
 // Cryo Burst: everything within 5 m slows to a crawl (attacks too) for a few seconds
 function frostBurst(x, y, z) {
-  for (const o of ZOMBIES) {
+  for (const o of zombieCandidates(x - 5, x + 5, z - 5, z + 5)) {
     if (o.dead || o.state === 'drop') continue;
     const d = Math.hypot(o.x - x, o.z - z); if (d > 5) continue;
     o.chill = Math.max(o.chill, o.type === 'boss' ? 2.5 : 6); o.burn = 0;
@@ -311,7 +323,7 @@ function frostBurst(x, y, z) {
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
 function tetherFrom(z, hx, hy, hz) {
   z.pin = Math.max(z.pin, z.type === 'boss' ? 1.2 : 4.5);
-  const near = ZOMBIES.filter(o => o !== z && !o.dead && o.type !== 'boss' && o.state !== 'drop' && Math.hypot(o.x - z.x, o.z - z.z) < 6)
+  const near = zombieCandidates(z.x - 6, z.x + 6, z.z - 6, z.z + 6).filter(o => o !== z && !o.dead && o.type !== 'boss' && o.state !== 'drop' && Math.hypot(o.x - z.x, o.z - z.z) < 6)
     .sort((a, b) => Math.hypot(a.x - z.x, a.z - z.z) - Math.hypot(b.x - z.x, b.z - z.z)).slice(0, 2);
   for (const o of near) { o.pin = Math.max(o.pin, 3.5); damageZombie(o, 12 * PLAYER.dmgMult, 'body', null, null, 5); }
   z.tetherTo = near;
@@ -354,7 +366,8 @@ function hasLineOfSight(z, P) {
   return t === null || t > L - 0.5;
 }
 function separateFrom(z, rad) {
-  for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = rad * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
+  const rr = rad * (z.scale + 3.2);
+  for (const o of zombieCandidates(z.x - rr, z.x + rr, z.z - rr, z.z + rr)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = rad * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
 }
 const ZPROJ = [];
 function spitAt(z, P) {
@@ -408,7 +421,7 @@ function updateSpitter(z, dt, P) {
 }
 function screamPulse(z) {
   AUD.scream(PLAYER.panOf(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
-  for (const o of ZOMBIES) { if (o === z || o.dead || o.state === 'drop' || o.type === 'boss') continue; if (Math.hypot(o.x - z.x, o.z - z.z) < 9) o.buffT = Math.max(o.buffT, 6); }
+  for (const o of zombieCandidates(z.x - 9, z.x + 9, z.z - 9, z.z + 9)) { if (o === z || o.dead || o.state === 'drop' || o.type === 'boss') continue; if (Math.hypot(o.x - z.x, o.z - z.z) < 9) o.buffT = Math.max(o.buffT, 6); }
   for (let k = 0; k < 40; k++) { const a = Math.random() * TAU, v = rand(2, 6); emit(z.x, 1.4 * z.scale, z.z, Math.cos(a) * v, rand(0.5, 2), Math.sin(a) * v, 0.6, [0.9, 0.25, 1], 0.06, 1, 2, 0.2); }
 }
 function updateScreamer(z, dt, P) {
@@ -439,7 +452,8 @@ function updateScreamer(z, dt, P) {
 }
 function findClimbWall(z) {
   let best = null, bestD = 2.4;
-  for (const b of WORLD.boxes) {
+  const [boxes] = worldCandidates(z.x - bestD, z.x + bestD, z.z - bestD, z.z + bestD);
+  for (const b of boxes) {
     if (b.y1 < 3.2 || b.y1 > 9) continue;
     const cx = clamp(z.x, b.x0, b.x1), cz = clamp(z.z, b.z0, b.z1), d = Math.hypot(z.x - cx, z.z - cz);
     if (d < bestD) { bestD = d; best = b; }

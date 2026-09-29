@@ -11,7 +11,9 @@ const HOOK_CFG = { range: 36, cooldown: 8, reel: 27, hang: 1.5, maxReel: 1.8, sa
 // ray against the city's boxes and poles, returning the hit point, its surface normal and the top of what was hit
 function hookRay(ox, oy, oz, dx, dy, dz, maxD) {
   let best = null;
-  for (const b of WORLD.boxes) {
+  const ex = ox + dx * maxD, ez = oz + dz * maxD;
+  const [boxes, circles] = worldCandidates(Math.min(ox, ex), Math.max(ox, ex), Math.min(oz, ez), Math.max(oz, ez));
+  for (const b of boxes) {
     if (b.y1 < 0.6) continue;
     let t0 = 0, t1 = maxD, ok = true, ax0 = -1, sg = 0; const o = [ox, oy, oz], d = [dx, dy, dz], mn = [b.x0, b.y0, b.z0], mx = [b.x1, b.y1, b.z1];
     for (let a = 0; a < 3 && ok; a++) {
@@ -21,7 +23,7 @@ function hookRay(ox, oy, oz, dx, dy, dz, maxD) {
     }
     if (ok && ax0 >= 0 && t0 > 0.5 && (!best || t0 < best.t)) { const n = [0, 0, 0]; n[ax0] = sg; best = { t: t0, n, top: b.y1 }; }
   }
-  for (const c of WORLD.circles) {
+  for (const c of circles) {
     if (c.h < 0.6) continue;
     const px = ox - c.x, pz = oz - c.z, A = dx * dx + dz * dz; if (A < 1e-9) continue;
     const B = 2 * (px * dx + pz * dz), C = px * px + pz * pz - c.r * c.r, D = B * B - 4 * A * C; if (D < 0) continue;

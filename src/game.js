@@ -138,7 +138,8 @@ function updateProjectiles(dt) {
     // --- find earliest hit
     let best = 1.01, hitKind = null, hitZ = null, hitPart = null; const segL = Math.hypot(nx - a.x, ny - a.y, nz - a.z) || 1e-3;
     // zombies
-    for (const z of ZOMBIES) {
+    const zPad = 4;
+    for (const z of zombieCandidates(Math.min(a.x, nx) - zPad, Math.max(a.x, nx) + zPad, Math.min(a.z, nz) - zPad, Math.max(a.z, nz) + zPad)) {
       if (z.dead || z.state === 'drop' || a.hits.includes(z)) continue;
       const sc = z.scale;
       if (Math.abs(z.x - a.x) > 20 || Math.abs(z.z - a.z) > 20) continue;
@@ -157,13 +158,14 @@ function updateProjectiles(dt) {
     // ground
     if (ny <= 0.02) { const t = (a.y - 0.02) / (a.y - ny); if (t < best) { best = t; hitKind = 'w'; } }
     // boxes (slab test)
-    for (const b of WORLD.boxes) {
+    const [nearBoxes, nearCircles] = worldCandidates(Math.min(a.x, nx) - 0.2, Math.max(a.x, nx) + 0.2, Math.min(a.z, nz) - 0.2, Math.max(a.z, nz) + 0.2);
+    for (const b of nearBoxes) {
       let t0 = 0, t1 = 1; const d = [nx - a.x, ny - a.y, nz - a.z], o = [a.x, a.y, a.z], mn = [b.x0, b.y0, b.z0], mx = [b.x1, b.y1, b.z1]; let ok = true;
       for (let ax = 0; ax < 3 && ok; ax++) { if (Math.abs(d[ax]) < 1e-9) { if (o[ax] < mn[ax] || o[ax] > mx[ax]) ok = false; } else { let ta = (mn[ax] - o[ax]) / d[ax], tb = (mx[ax] - o[ax]) / d[ax]; if (ta > tb) { const q = ta; ta = tb; tb = q; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 > t1) ok = false; } }
       if (ok && t0 < best) { best = t0; hitKind = 'w'; }
     }
     // circles (vertical cylinders)
-    for (const c of WORLD.circles) {
+    for (const c of nearCircles) {
       const ox = a.x - c.x, oz = a.z - c.z, dx = nx - a.x, dz = nz - a.z; const A2 = dx * dx + dz * dz; if (A2 < 1e-9) continue;
       const Bq = 2 * (ox * dx + oz * dz), C = ox * ox + oz * oz - c.r * c.r; const disc = Bq * Bq - 4 * A2 * C; if (disc < 0) continue;
       const t = (-Bq - Math.sqrt(disc)) / (2 * A2); if (t < 0 || t > best) continue; const y = a.y + (ny - a.y) * t; if (y > c.h) continue; best = t; hitKind = 'w';
@@ -216,12 +218,13 @@ function updateProjectiles(dt) {
    with (or just below, so a jump that clips an edge still lands) count; taller things stay walls. */
 function groundAt(x, z, y, rad) {
   let h = 0; const lim = y + 0.32;
-  for (const b of WORLD.boxes) {
+  const [boxes, circles] = worldCandidates(x - rad, x + rad, z - rad, z + rad);
+  for (const b of boxes) {
     if (b.y1 > lim || b.y1 > 2.5 || b.y1 <= h) continue;
     if (x + rad < b.x0 || x - rad > b.x1 || z + rad < b.z0 || z - rad > b.z1) continue;
     h = b.y1;
   }
-  for (const c of WORLD.circles) {
+  for (const c of circles) {
     if (c.h > lim || c.h > 2.5 || c.h <= h) continue;
     const dx = x - c.x, dz = z - c.z, R = c.r + rad * 0.5;
     if (dx * dx + dz * dz < R * R) h = c.h;
@@ -232,12 +235,14 @@ function groundAt(x, z, y, rad) {
 function rayWorld(ox, oy, oz, dx, dy, dz, maxD) {
   const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
   let best = null; const o = [ox, oy, oz], d = [dx, dy, dz];
-  for (const b of WORLD.boxes) {
+  const ex = ox + dx * maxD, ez = oz + dz * maxD;
+  const [boxes, circles] = worldCandidates(Math.min(ox, ex), Math.max(ox, ex), Math.min(oz, ez), Math.max(oz, ez));
+  for (const b of boxes) {
     let t0 = 0, t1 = maxD, ok = true; const mn = [b.x0, b.y0, b.z0], mx = [b.x1, b.y1, b.z1];
     for (let a = 0; a < 3 && ok; a++) { if (Math.abs(d[a]) < 1e-9) { if (o[a] < mn[a] || o[a] > mx[a]) ok = false; } else { let ta = (mn[a] - o[a]) / d[a], tb = (mx[a] - o[a]) / d[a]; if (ta > tb) { const q = ta; ta = tb; tb = q; } t0 = Math.max(t0, ta); t1 = Math.min(t1, tb); if (t0 > t1) ok = false; } }
     if (ok && (best === null || t0 < best)) best = t0;
   }
-  for (const c of WORLD.circles) {
+  for (const c of circles) {
     const px = ox - c.x, pz = oz - c.z, A = dx * dx + dz * dz; if (A < 1e-9) continue;
     const B = 2 * (px * dx + pz * dz), C = px * px + pz * pz - c.r * c.r, D = B * B - 4 * A * C; if (D < 0) continue;
     const t = (-B - Math.sqrt(D)) / (2 * A); if (t < 0 || t > maxD) continue; if (oy + dy * t > c.h) continue; if (best === null || t < best) best = t;
@@ -249,7 +254,7 @@ function updateFires(dt) {
   for (let i = FIRES.length - 1; i >= 0; i--) {
     const f = FIRES[i]; f.t -= dt; if (f.t <= 0) { FIRES.splice(i, 1); continue; }
     if (Math.random() < dt * 30) emit(f.x + rand(-0.6, 0.6), 0.1, f.z + rand(-0.6, 0.6), rand(-0.2, 0.2), rand(1.5, 3), rand(-0.2, 0.2), rand(0.4, 0.8), [2.6, 1 + Math.random() * 0.4, 0.15], rand(0.25, 0.5), -1, 1, -0.3);
-    for (const z of ZOMBIES) if (!z.dead && Math.hypot(z.x - f.x, z.z - f.z) < 1.8) z.burn = Math.max(z.burn, 2);
+    for (const z of zombieCandidates(f.x - 1.8, f.x + 1.8, f.z - 1.8, f.z + 1.8)) if (!z.dead && Math.hypot(z.x - f.x, z.z - f.z) < 1.8) z.burn = Math.max(z.burn, 2);
   }
 }
 function explode(x, y, z) {
@@ -261,7 +266,7 @@ function explode(x, y, z) {
   burst(x, y, z, 60, [3, 2.2, 3], 8, 0.35, 0.45, 0, 4);
   burst(x, y, z, 50, [0.25, 0.18, 0.3], 5, 1.6, 0.9, -0.5, 1.2, 1);
   for (let k = 0; k < 48; k++) { const a = k / 48 * TAU; emit(x, Math.max(0.2, y * 0.3), z, Math.cos(a) * 18, 0.3, Math.sin(a) * 18, 0.4, [2.5, 0.6, 2.4], 0.3, 0, 4); }
-  for (const zz of ZOMBIES) {
+  for (const zz of zombieCandidates(x - R * 1.4, x + R * 1.4, z - R * 1.4, z + R * 1.4)) {
     if (zz.dead) continue; const d = Math.hypot(zz.x - x, (zz.y + 1) - y, zz.z - z);
     if (d < R * (zz.type === 'boss' ? 1.4 : 1)) { const k = 1 - d / (R * 1.4); const dir = [(zz.x - x) / (d || 1), 0, (zz.z - z) / (d || 1)];
       const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
@@ -650,9 +655,11 @@ function step(dt) {
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') {
     updateZombies(dt, t); if (ZRIG.ready) { syncRigs(); for (const z of ZOMBIES) if (z.state !== 'drop' || z.y < 30) {
-      // far bodies (45 m+) animate every other step: nobody can see the difference, and big hordes cost half the skinning
+      // Animation LOD: full rate close up; progressively lower only where distance and fog hide the difference.
       z._pdt = (z._pdt || 0) + dt;
-      if (z.rig && z.state !== 'dying' && (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 2025 && ((STEPN.n + (z.seed * 10 | 0)) & 1)) continue;
+      const zd2 = (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2, phase = STEPN.n + (z.seed * 10 | 0);
+      if (z.rig && z.state === 'dying' && z.dieT > 4 && z.dieT < CORPSE_SETTLE && phase % 12) continue;
+      if (z.rig && z.state !== 'dying' && ((zd2 > 8100 && phase % 4) || (zd2 > 2025 && phase % 2))) continue;
       poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
@@ -666,13 +673,13 @@ function step(dt) {
   if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 2 && Math.random() < dt * 20) { const p = BOW.tipWorld; emit(p[0], p[1], p[2], rand(-0.2, 0.2), rand(-0.2, 0.2), rand(-0.2, 0.2), 0.2, [2, 0.3, 2], 0.03, 0, 3); }
 }
 
-const PERF = { scale: 1, acc: 0, n: 0 };
+const PERF = { scale: 1, acc: 0, n: 0, pressure: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
   now /= 1000; const raw = now - lastT; let dt = Math.min(0.05, raw); lastT = now;
   if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
     PERF.acc += raw; PERF.n++;
-    if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
+    if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
   }
   if (GAME.noLoop) return;
   const c0 = performance.now();
@@ -746,7 +753,7 @@ function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
-  buildCity(); buildNav(); buildWorld3();
+  buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
   wireUI();
   toTitle();
