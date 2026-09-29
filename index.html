@@ -2513,17 +2513,85 @@ const AUD = {
   hookRelease() { if (!this.ctx) return; this.tone('triangle', 700, 300, 0.12, 0.05); },
   _reelT: 0,
   hookReel(dt, k) { if (!this.ctx) return; this._reelT -= dt; if (this._reelT > 0) return; this._reelT = 0.05; this.burst('bandpass', 700 + 1400 * k, 900 + 1600 * k, 6, 0.06, 0.05); },
+  // rain is built from layers so it never sits on one steady hiss: a slowly drifting mid "wash", a bright
+  // hiss, a soft low body, plus randomly timed droplets and the odd bigger plink. Everything breathes with gusts.
+  startRain() {
+    const c = this.ctx, sr = c.sampleRate, len = sr * 12;
+    const buf = c.createBuffer(1, len, sr), d = buf.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < len; i++) {   // pink-ish noise: softer and more natural than white
+      const w = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+    }
+    const xf = Math.floor(sr * 0.6);   // crossfade the loop seam so the repeat can't be heard
+    for (let i = 0; i < xf; i++) { const k = i / xf; d[i] = d[i] * k + d[len - xf + i] * (1 - k); }
+    this.rainBuf = buf; this.rainLen = len - xf;
+    const master = c.createGain(); master.gain.value = 0.16; master.connect(this.amb); this.rainG = master;
+    const layer = (type, freq, q, gain, lfoRate, gainDepth, freqDepth) => {
+      const s = c.createBufferSource(); s.buffer = buf; s.loop = true; s.loopStart = 0; s.loopEnd = this.rainLen;
+      const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+      const g = c.createGain(); g.gain.value = gain; s.connect(f); f.connect(g); g.connect(master);
+      const l = c.createOscillator(); l.frequency.value = lfoRate;
+      const lg = c.createGain(); lg.gain.value = gainDepth; l.connect(lg); lg.connect(g.gain);
+      if (freqDepth) { const lf = c.createGain(); lf.gain.value = freqDepth; l.connect(lf); lf.connect(f.frequency); }
+      s.start(0, Math.random() * (this.rainLen / sr)); l.start();
+      return { f, g, base: gain };
+    };
+    this.rainL = {
+      wash: layer('bandpass', 1500, 0.45, 0.55, 0.083, 0.16, 380),
+      hiss: layer('highpass', 4800, 0.7, 0.10, 0.19, 0.03, 0),
+      body: layer('lowpass', 650, 0.6, 0.45, 0.047, 0.10, 0),
+    };
+    this._dropT = 0; this._plinkT = 0;
+  },
   weather(rain, snow, wind) {
-    if (!this.ctx || !this.rainG) return; const t = this.now();
-    this.rainG.gain.setTargetAtTime(0.02 + 0.24 * rain, t, 0.8);
+    if (!this.ctx || !this.rainG) return; const t = this.now(), L = this.rainL;
+    // slow, uneven swelling like gusts pushing sheets of rain past
+    const swell = 0.86 + 0.14 * Math.sin(t * 0.31) * Math.sin(t * 0.083 + 1.3) + 0.06 * Math.sin(t * 1.7 + Math.sin(t * 0.21) * 3);
+    this.rainG.gain.setTargetAtTime((0.02 + 0.24 * rain) * swell * (1 + 0.25 * wind), t, 0.5);
+    // light rain is soft and dull with a few sharp drops; heavy rain is fuller, lower and brighter
+    L.wash.f.frequency.setTargetAtTime(1100 + 900 * rain, t, 1.5);
+    L.wash.g.gain.setTargetAtTime(L.wash.base * (0.6 + 0.6 * rain), t, 1.5);
+    L.hiss.g.gain.setTargetAtTime(L.hiss.base * (0.3 + 1.4 * rain * rain), t, 1.5);
+    L.body.g.gain.setTargetAtTime(L.body.base * rain * rain * 1.6, t, 1.5);
     this.windG.gain.setTargetAtTime(0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
-    this.windF.frequency.setTargetAtTime(320 + 260 * wind + 120 * Math.sin(t * 0.4), t, 0.6);
+    this.windF.frequency.setTargetAtTime(320 + 260 * wind + 120 * Math.sin(t * 0.4) + 90 * Math.sin(t * 1.3), t, 0.6);
+    if (rain < 0.03) { this._dropT = t; this._plinkT = t; return; }
+    // random droplets (poisson-ish spacing, clustered by the swell)
+    if (this._dropT < t - 0.3) this._dropT = t;
+    const rate = (2 + 26 * rain) * swell;
+    let n = 0;
+    while (this._dropT < t + 0.12 && n++ < 8) {
+      const at = Math.max(t, this._dropT), fq = rand(2200, 7500);
+      let dest = this.amb;
+      if (this.ctx.createStereoPanner && Math.random() < 0.6) { const p = this.ctx.createStereoPanner(); p.pan.value = rand(-0.9, 0.9); p.connect(this.amb); dest = p; }
+      this.burst('bandpass', fq, fq * rand(0.6, 0.9), rand(4, 10), rand(0.012, 0.035), rand(0.01, 0.045) * (0.5 + rain), dest, at, 0.002);
+      this._dropT += -Math.log(1 - Math.random()) / rate;
+    }
+    // now and then a bigger drop lands in a puddle or on metal
+    if (this._plinkT < t - 0.3) this._plinkT = t;
+    while (this._plinkT < t + 0.12) {
+      const at = Math.max(t, this._plinkT), f = rand(500, 1500);
+      let dest = this.amb;
+      if (this.ctx.createStereoPanner) { const p = this.ctx.createStereoPanner(); p.pan.value = rand(-1, 1); p.connect(this.amb); dest = p; }
+      this.tone('sine', f, f * rand(1.4, 2.1), rand(0.04, 0.09), rand(0.008, 0.022) * (0.4 + rain), dest, at, 0.003);
+      this._plinkT += rand(0.4, 2.6) / (0.25 + rain);
+    }
   },
   thunder(k) {
     if (!this.ctx) return; const t = this.now(), v = clamp(k, 0.25, 1.2);
-    this.burst('lowpass', 900, 60, 0.7, 3.6, 0.5 * v, this.amb, t, 0.02);
-    this.burst('lowpass', 240, 40, 0.5, 5, 0.45 * v, this.amb, t + 0.15, 0.3);
     if (k > 0.9) this.burst('highpass', 2500, 700, 0.6, 0.35, 0.28 * v, this.amb, t, 0.002);   // close strike: the crack
+    this.burst('lowpass', rand(700, 1100), 60, 0.7, rand(2.8, 4), 0.45 * v, this.amb, t + (k > 0.9 ? 0.05 : 0), 0.03);
+    // rolling rumble: several swells at uneven intervals that die away
+    const n = 3 + Math.floor(Math.random() * 3); let at = t + 0.3;
+    for (let i = 0; i < n; i++) {
+      const fall = 1 - i / (n + 1);
+      this.burst('lowpass', rand(150, 400), rand(35, 70), rand(0.4, 1), rand(1.2, 2.6), rand(0.2, 0.42) * v * fall, this.amb, at, rand(0.15, 0.5));
+      at += rand(0.3, 1.1);
+    }
+    this.tone('sine', rand(45, 65), 28, 3.5, 0.25 * v, this.amb, t + 0.1, 0.2);
   },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
   frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
@@ -2537,8 +2605,7 @@ const AUD = {
   // ---------------- ambient ----------------
   startAmbient() {
     const c = this.ctx;
-    const r = this.noiseSrc(); const rf = c.createBiquadFilter(); rf.type = 'bandpass'; rf.frequency.value = 2600; rf.Q.value = 0.4;
-    const rg = c.createGain(); rg.gain.value = 0.16; r.connect(rf); rf.connect(rg); rg.connect(this.amb); r.start(); this.rainG = rg;
+    this.startRain();
     // wind: a low hollow howl that rises in gusts, storms and snow
     const wn = this.noiseSrc(), wf = c.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 420; wf.Q.value = 1.4; const wg = c.createGain(); wg.gain.value = 0; wn.connect(wf); wf.connect(wg); wg.connect(this.amb); wn.start(); this.windG = wg; this.windF = wf;
     const r2 = this.noiseSrc(); const rf2 = c.createBiquadFilter(); rf2.type = 'lowpass'; rf2.frequency.value = 260; const rg2 = c.createGain(); rg2.gain.value = 0.25; r2.connect(rf2); rf2.connect(rg2); rg2.connect(this.amb); r2.start();
