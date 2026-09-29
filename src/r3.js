@@ -361,75 +361,18 @@ function weldVerts(geo) {
   }
   return canon;
 }
-// Faces buried inside a closed box of the same mesh group and the same bucket (the back of a window sill against
-// its wall, a roof slab's underside on the roof, a pipe running into a wall): a triangle can go when all of it lies
-// in the box and the side it faces is the box's inside. It is then only visible from inside that box: any ray to
-// it from outside first crosses a kept face of the box (or of another buried-in box) in the same bucket, which is
-// always drawn together with it. Only for groups that cast no shadows (the shadow pass draws back faces, where a
-// buried face can matter) and only for boxes the mirror camera (below the street) can never be inside.
-function buriedTris(geo, triBucket) {
-  const S = geo.userData.solids; if (!S) return null;
-  const pos = geo.attributes.position.array, src = geo.index.array, nt = src.length / 3;
-  const B = [], GRID = 4, grid = new Map(), big = [];
-  for (let o = 0; o < S.length; o += 13) {
-    const t0 = S[o] / 3; if (t0 + 12 > nt) continue;
-    const bk = triBucket[t0]; let ok = true; for (let k = 1; k < 12; k++) if (triBucket[t0 + k] !== bk) { ok = false; break; }
-    if (!ok) continue;
-    const ax = S[o + 1], ay = S[o + 2], az = S[o + 3], bx = S[o + 4], by = S[o + 5], bz = S[o + 6], cx = S[o + 7], cy = S[o + 8], cz = S[o + 9], tx = S[o + 10], ty = S[o + 11], tz = S[o + 12];
-    const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz), lc = Math.hypot(cx, cy, cz);
-    if (la < 1e-3 || lb < 1e-3 || lc < 1e-3) continue;
-    if (Math.abs(ax * bx + ay * by + az * bz) > 1e-5 * la * lb || Math.abs(ax * cx + ay * cy + az * cz) > 1e-5 * la * lc || Math.abs(bx * cx + by * cy + bz * cz) > 1e-5 * lb * lc) continue;
-    if ((ay * bz - az * by) * cx + (az * bx - ax * bz) * cy + (ax * by - ay * bx) * cz <= 0) continue;   // mirrored: its faces point inward
-    const ex = (Math.abs(ax) + Math.abs(bx) + Math.abs(cx)) / 2, ey = (Math.abs(ay) + Math.abs(by) + Math.abs(cy)) / 2, ez = (Math.abs(az) + Math.abs(bz) + Math.abs(cz)) / 2;
-    if (ty - ey < -0.2) continue;   // reaches below the street: the mirror camera could be inside it
-    const b = { t0, bk, tx, ty, tz, x0: tx - ex - 1e-4, x1: tx + ex + 1e-4, y0: ty - ey - 1e-4, y1: ty + ey + 1e-4, z0: tz - ez - 1e-4, z1: tz + ez + 1e-4, u: [ax / (la * la), ay / (la * la), az / (la * la)], v: [bx / (lb * lb), by / (lb * lb), bz / (lb * lb)], w: [cx / (lc * lc), cy / (lc * lc), cz / (lc * lc)], ea: 1e-4 / la, eb: 1e-4 / lb, ec: 1e-4 / lc };
-    B.push(b);
-    const i0 = Math.floor((tx - ex) / GRID), i1 = Math.floor((tx + ex) / GRID), j0 = Math.floor((tz - ez) / GRID), j1 = Math.floor((tz + ez) / GRID);
-    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4096) { big.push(b); continue; }
-    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const k = i * 65536 + j; let a = grid.get(k); if (!a) grid.set(k, a = []); a.push(b); }
-  }
-  if (!B.length) return null;
-  const hidden = new Uint8Array(nt), L = [0, 0, 0];
-  const loc = (b, x, y, z) => { const dx = x - b.tx, dy = y - b.ty, dz = z - b.tz; L[0] = dx * b.u[0] + dy * b.u[1] + dz * b.u[2]; L[1] = dx * b.v[0] + dy * b.v[1] + dz * b.v[2]; L[2] = dx * b.w[0] + dy * b.w[1] + dz * b.w[2]; };
-  const inClosed = (b, x, y, z) => { loc(b, x, y, z); return Math.abs(L[0]) <= 0.5 + b.ea && Math.abs(L[1]) <= 0.5 + b.eb && Math.abs(L[2]) <= 0.5 + b.ec; };
-  const inOpen = (b, x, y, z) => { loc(b, x, y, z); return Math.abs(L[0]) < 0.5 && Math.abs(L[1]) < 0.5 && Math.abs(L[2]) < 0.5; };
-  let X0 = 0, X1 = 0, Y0 = 0, Y1 = 0, Z0 = 0, Z1 = 0;   // the triangle's bounds
-  const test = (b, t, a, bb, c) => {
-    if (b.bk !== triBucket[t] || X0 < b.x0 || X1 > b.x1 || Y0 < b.y0 || Y1 > b.y1 || Z0 < b.z0 || Z1 > b.z1 || (t >= b.t0 && t < b.t0 + 12)) return false;
-    if (!inClosed(b, pos[a], pos[a + 1], pos[a + 2]) || !inClosed(b, pos[bb], pos[bb + 1], pos[bb + 2]) || !inClosed(b, pos[c], pos[c + 1], pos[c + 2])) return false;
-    const ux = pos[bb] - pos[a], uy = pos[bb + 1] - pos[a + 1], uz = pos[bb + 2] - pos[a + 2], wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
-    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, nl = Math.hypot(nx, ny, nz); if (!(nl > 0)) return false;
-    const d = 1e-3 / nl;
-    return inOpen(b, (pos[a] + pos[bb] + pos[c]) / 3 + nx * d, (pos[a + 1] + pos[bb + 1] + pos[c + 1]) / 3 + ny * d, (pos[a + 2] + pos[bb + 2] + pos[c + 2]) / 3 + nz * d);
-  };
-  for (let t = 0; t < nt; t++) {
-    const a = src[t * 3] * 3, bb = src[t * 3 + 1] * 3, c = src[t * 3 + 2] * 3;
-    X0 = Math.min(pos[a], pos[bb], pos[c]); X1 = Math.max(pos[a], pos[bb], pos[c]); Y0 = Math.min(pos[a + 1], pos[bb + 1], pos[c + 1]); Y1 = Math.max(pos[a + 1], pos[bb + 1], pos[c + 1]);
-    Z0 = Math.min(pos[a + 2], pos[bb + 2], pos[c + 2]); Z1 = Math.max(pos[a + 2], pos[bb + 2], pos[c + 2]);
-    let found = false;
-    for (const b of big) if (test(b, t, a, bb, c)) { found = true; break; }
-    if (!found) {
-      const i = Math.floor((X0 + X1) / 2 / GRID), j = Math.floor((Z0 + Z1) / 2 / GRID);   // any box holding the triangle covers its middle
-      const cell = grid.get(i * 65536 + j);
-      if (cell) for (const b of cell) if (test(b, t, a, bb, c)) { found = true; break; }
-    }
-    if (found) hidden[t] = 1;
-  }
-  return hidden;
-}
-function spatialChunks(geo, size = WORLD_CHUNK_SIZE, hideBuried = false) {
+function spatialChunks(geo, size = WORLD_CHUNK_SIZE) {
   if (!geo || !geo.index || !geo.attributes.position) return geo ? [geo] : [];
   for (const k in geo.attributes) { const a = geo.attributes[k].array; if (a.BYTES_PER_ELEMENT !== 4) throw new Error('spatialChunks: 32-bit attributes only'); }
-  const pos = geo.attributes.position, src = geo.index.array, buckets = new Map(), triBucket = new Int32Array(src.length / 3);
+  const pos = geo.attributes.position, src = geo.index.array, buckets = new Map();
   for (let i = 0; i < src.length; i += 3) {
     const a = src[i], b = src[i + 1], c = src[i + 2];
     const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
     const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
     const key = Math.floor(cx / size) + ',' + Math.floor(cz / size);
-    let out = buckets.get(key); if (!out) { out = []; out.id = buckets.size; out.t = []; buckets.set(key, out); }
-    out.push(a, b, c); out.t.push(i / 3); triBucket[i / 3] = out.id;
+    let out = buckets.get(key); if (!out) { out = []; buckets.set(key, out); }
+    out.push(a, b, c);
   }
-  const hidden = hideBuried ? buriedTris(geo, triBucket) : null;
   const canon = weldVerts(geo), P = new Uint32Array(pos.array.buffer, pos.array.byteOffset, pos.array.length);
   const same = (a, b) => P[a * 3] === P[b * 3] && P[a * 3 + 1] === P[b * 3 + 1] && P[a * 3 + 2] === P[b * 3 + 2];
   const local = new Int32Array(pos.count).fill(-1), attrs = Object.entries(geo.attributes);
@@ -451,7 +394,6 @@ function spatialChunks(geo, size = WORLD_CHUNK_SIZE, hideBuried = false) {
     // welded, non-degenerate triangles in their original order, re-indexed into a compact local vertex list
     const triAll = new Uint32Array(I.length), vertsAll = new Int32Array(I.length); let nt = 0, nv = 0;
     for (let i = 0; i < I.length; i += 3) {
-      if (hidden && hidden[I.t[i / 3]]) continue;
       const a = canon[I[i]], b = canon[I[i + 1]], c = canon[I[i + 2]];
       if (same(a, b) || same(b, c) || same(a, c)) continue;
       if (local[a] < 0) vertsAll[local[a] = nv++] = a; triAll[nt++] = local[a];
@@ -491,7 +433,7 @@ const _cullBoxW = new THREE.Box3();
 
 function addWorldChunks(geo, castShadow, receiveShadow, name) {
   const streamRadius = name === 'far' ? 900 : name === 'near' ? 420 : 300;
-  const chunks = spatialChunks(geo, WORLD_CHUNK_SIZE, !castShadow);
+  const chunks = spatialChunks(geo, WORLD_CHUNK_SIZE);
   // the chunks own compact copies of everything now: keep only the source's index (triangle counts for tests)
   for (const k of Object.keys(geo.attributes)) geo.deleteAttribute(k);
   for (let i = 0; i < chunks.length; i++) {
