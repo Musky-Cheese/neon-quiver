@@ -13,6 +13,11 @@ const WORLD = {
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
   glass: [],       // {m, c} see-through shopfront panes (r3.js draws them blended)
   indoor: [],      // {x0,x1,z0,z1,y1} rooms: no rain, no wet surfaces, no sky light inside
+  floods: [],      // {x0,x1,z0,z1} knee-deep standing water (the Metro's track beds)
+  cascades: [],    // [x, y, z, dx, dz] water pouring out of broken pipes
+  tanks: [],       // {x, z, r, h, circle} the Refinery's fuel tanks (hazards.js blows them up)
+  flares: [],      // [x, y, z] flare stacks, burning
+  plumes: [],      // [x, y, z, r] cooling-tower steam
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -348,7 +353,14 @@ function buildCity() {
   for (const bx of [-3.4, 3.4]) { propBench(g, R, bx, -12.5, '+z'); propBench(g, R, bx, 12.5, '-z'); propBench(g, R, -12.5, bx, '+x'); }
   propBench(g, R, 12.5, -3.4, '-x');
   for (const [x, z] of [[0, -12.7], [0, 12.7], [-12.7, 0], [12.7, -6]]) propBin(g, R, x, z);
-  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
+  // run fn against a throwaway mesh and collision lists: it rolls the same dice as the real build, so cutting
+  // an opening through a wall never reshuffles the random layout of everything built after it
+  const ghost = (fn) => {
+    const pg = g, keep = {}; g = new Geo();
+    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
+    try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
+  };
+  buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
   // hub supply points
   WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });

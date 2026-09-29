@@ -101,7 +101,7 @@ function fireArrow(power) {
   const type = BOW.type, A = ARROWS[type];
   if (type !== 0) { PLAYER.ammo[type]--; }
   camBasis();
-  const eye = [PLAYER.x, PLAYER.y + 1.62, PLAYER.z];
+  const eye = [PLAYER.x, PLAYER.y + 1.62 - (PLAYER.sink || 0), PLAYER.z];
   const spd = (40 + 64 * power) * A.speed;
   // tiny spread when not fully drawn
   const spr = (1 - power) * 0.012 + (BOW.hold > 2.2 ? 0.004 : 0);
@@ -203,6 +203,7 @@ function updateProjectiles(dt) {
     } else {
       a.x = hx - a.dir[0] * 0.05; a.y = hy - a.dir[1] * 0.05; a.z = hz - a.dir[2] * 0.05;
       a.stuck = true; a.stuckT = 0;
+      hazArrowHit(hx, hy, hz, a.type);
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
       if (a.type === 2) { explode(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
       if (a.type === AT.FROST) { frostBurst(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
@@ -271,6 +272,7 @@ function explode(x, y, z) {
       const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
   }
   const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < 3.2 && GAME.state === 'playing') PLAYER.hurt(8, x, z);
+  hazBlast(x, z, R, y);   // fuel tanks in reach go up too
 }
 
 /* ---------------- pickups ---------------- */
@@ -329,7 +331,7 @@ const GAME = {
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
-    objReset(); wxReset();
+    objReset(); wxReset(); hazReset(); PLAYER.sink = 0;
     this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
   },
   startWave() {
@@ -603,8 +605,9 @@ function updatePlayer(dt) {
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
   const drawing = BOW.state === 'drawing';
   const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
-  const wading = P.y < 0.05 && inPond(P.x, P.z);   // knee-deep in the koi pond
-  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (wading ? 0.62 : 1);
+  const water = P.y < 0.05 ? waterAt(P.x, P.z) : 0; P.wading = water > 0;   // knee-deep in the koi pond, or the Metro's flooded track beds
+  P.sink = lerp(P.sink || 0, P.wading ? 0.26 : 0, Math.min(1, dt * 6));
+  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
   const hooked = updateHook(dt);   // while reeling in, the grapple owns the movement
@@ -626,7 +629,9 @@ function updatePlayer(dt) {
   pushOutCircle(P, 0.42);
   P.x = clamp(P.x, WORLD_BOUNDS.x0, WORLD_BOUNDS.x1); P.z = clamp(P.z, WORLD_BOUNDS.z0, WORLD_BOUNDS.z1);
   if (P.z > 165.5) P.x = clamp(P.x, -31, 31);   // the grove's treeline
-  else if (P.z > 75.5) P.x = clamp(P.x, -59, 59);   // the suburbs' woods
+  else if (P.z > 75.5 && !(P.x > 50 && P.z > 110.3 && P.z < 121.7)) {   // the suburbs' woods; east of them, the refinery road and the plant inside its fence
+    if (P.x > 104) { P.x = Math.max(P.x, 108.4); P.z = Math.min(P.z, 143.6); } else P.x = clamp(P.x, -59, 59);
+  }
   const hs = Math.hypot(P.vx, P.vz);
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
@@ -664,7 +669,7 @@ function step(dt) {
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
-  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); updateWeather(dt); }
+  if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); updateWeather(dt); updateHazards(dt); }
   const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
@@ -693,7 +698,7 @@ function frame(now) {
 /* ---------------- render ---------------- */
 function setCamera(time) {
   const P = PLAYER;
-  let x = P.x, y = P.y + 1.62, z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
+  let x = P.x, y = P.y + 1.62 - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
   if (GAME.state === 'title' || GAME.attract) {
     const a = time * 0.06; x = Math.sin(a) * 19; z = Math.cos(a) * 19; y = 3.2 + Math.sin(time * 0.2) * 0.6; yaw = a + 0.35; pitch = 0.1; roll = 0;
     if (GAME.camOverride) ({ x, y, z, yaw, pitch, roll } = GAME.camOverride);
@@ -722,7 +727,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHook();
+  drawProjectiles(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHazards(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -743,7 +748,7 @@ function wireUI() {
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
 function toTitle() {
-  GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true;
+  GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true; hazReset();
   for (let i = 0; i < 9; i++) { const zz = spawnZombie(pick(['walker', 'walker', 'walker', 'runner', 'brute']), rand(-30, 30), rand(-30, 30), 1); zz.speed *= 0.5; }
   setScreen('title'); updateTitleStats(); drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); AUD.intensity = 0.35; AUD.setMusicScreen(true);
 }
@@ -766,7 +771,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX,
+  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

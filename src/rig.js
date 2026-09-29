@@ -195,7 +195,7 @@ function poseZombieRig(z, dt, time) {
   }
   // ---------- root transform ----------
   const m = r.mesh;
-  m.position.set(z.x, z.y, z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
+  m.position.set(z.x, z.y - (z.sink || 0), z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
   m.castShadow = SETTINGS.quality > 0 || (PLAYER.x - z.x) ** 2 + (PLAYER.z - z.z) ** 2 < 400;   // Low: only nearby bodies cast shadows
   m.updateMatrixWorld(true);
   // ---------- hit volumes from the skeleton ----------

@@ -236,6 +236,8 @@ function updateZombies(dt, time) {
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
     z.chill = Math.max(0, z.chill - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
+      z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }
     if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
     if (z.burn > 0) {
       z.burn -= dt;
@@ -271,7 +273,7 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
+    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
@@ -319,6 +321,7 @@ function frostBurst(x, y, z) {
   flashLight(x, 1.2, z, [1.4, 2.8, 4], 14, 0.5);
   for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 5) f.t = 0;   // puts out fires too
   AUD.frost(PLAYER.panOf(x, z)); shakeNear({ x, z }, 0.2);
+  hazFrost(x, z);
 }
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
 function tetherFrom(z, hx, hy, hz) {
@@ -403,7 +406,7 @@ function updateSpitter(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  const spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
   pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
   z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
@@ -431,7 +434,7 @@ function updateScreamer(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -468,7 +471,7 @@ function updateClimber(z, dt, P) {
     const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
