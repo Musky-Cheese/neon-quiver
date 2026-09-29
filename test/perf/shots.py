@@ -22,7 +22,7 @@ with sync_playwright() as pw:
     for q in map(int, a.q.split(',')):
         pg.evaluate("(q) => { window.NQ.SETTINGS.quality = q; window.NQ.renderOnce(); }", q)
         if q >= 1:   # surface textures stream in: wait for the right set
-            pg.wait_for_function("(q) => { const U = window.NQ.ULTRA; return U.state === 'failed' || (U.state === 'ready' && U.res === (q >= 2 ? 'full' : 'half')); }", arg=q, timeout=120000)
+            pg.wait_for_function("(q) => { const U = window.NQ.ULTRA; return U.state === 'failed' || (U.state === 'ready' && U.res === (q >= 2 ? 'full' : 'half')); }", arg=q, timeout=120000, polling=250)
         for wx in a.wx.split(','):
             for s in spots:
                 png = pg.evaluate("""([s, w]) => { const N = window.NQ; Object.assign(N.WX, w, { flash: 0, gust: 0, forced: w.state }); N.WX.thunder.length = 0;
