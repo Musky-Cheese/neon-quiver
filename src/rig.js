@@ -96,7 +96,12 @@ function makeRig(z) {
     const B = {}; for (const b of bones) B[ZRIG.logicalOf[b.name]] = b;
     B.shoulderL = B.shoulderL || B['shoulder.L']; // defensive
     const mixer = new THREE.AnimationMixer(mesh);
-    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null };
+    // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
+    const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
+    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1 };
+    // three refreshes a skeleton (and re-uploads its bone texture) once per render call - reflection, world, bow pass...
+    // The bones only move in poseZombieRig, so recompute them only when a new pose has been made since the last time.
+    const rr = r; mesh.skeleton.update = function () { if (rr.skelN === rr.poseN) return; rr.skelN = rr.poseN; THREE.Skeleton.prototype.update.call(this); };
   }
   r.mixer.stopAllAction(); r.cur = null; r.procW = 0;
   scene.add(r.mesh);
@@ -138,11 +143,13 @@ function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
 const _hv = [0, 0, 0];
+const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
 
 function poseZombieRig(z, dt, time) {
   const r = z.rig || makeRig(z);
   z._ps = STEPN.n;
-  const P = zPose(z, time), B = r.B;
+  // the procedural pose only matters once dying (it drives the root tilt and the death blend); the living layers don't read it
+  const P = z.state === 'dying' ? zPose(z, time) : _ZP_ALIVE, B = r.B;
   // ---------- clip selection + playback ----------
   const want = zWantClip(z);
   if (want !== r.cur && z.state !== 'dying') {
@@ -197,7 +204,8 @@ function poseZombieRig(z, dt, time) {
   const m = r.mesh;
   m.position.set(z.x, z.y - (z.sink || 0), z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
   m.castShadow = SETTINGS.quality > 0 || (PLAYER.x - z.x) ** 2 + (PLAYER.z - z.z) ** 2 < 400;   // Low: only nearby bodies cast shadows
-  m.updateMatrixWorld(true);
+  for (const o of r.nodes) o.updateMatrix();   // same result as the renderer's auto-update, done once here
+  m.updateMatrixWorld(true); r.poseN++;
   // ---------- hit volumes from the skeleton ----------
   const hs = z.type === 'boss' ? 0.85 : 1;
   M4.pt(B.neck.matrixWorld.elements, 0, 0.155 * (z.type === 'boss' ? 1 : hs), 0.01, z.head);
@@ -255,16 +263,19 @@ function zLife(z, r, dt, time) {
 }
 const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
+// scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
+const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0];
+function icy(out, c, ice) { if (!ice) return c; out[0] = c[0] + (0.42 - c[0]) * ice; out[1] = c[1] + (0.62 - c[1]) * ice; out[2] = c[2] + (0.8 - c[2]) * ice; return out; }
 function drawZombieRig(z, time) {
   if (!z.rig || z._ps === undefined) poseZombieRig(z, 0, time);
   const r = z.rig, u = r.u, T = z.type, B = r.B;
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
-  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
+  const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
+  const eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
-  const icy = (c) => ice ? [c[0] + (0.42 - c[0]) * ice, c[1] + (0.62 - c[1]) * ice, c[2] + (0.8 - c[2]) * ice] : c;
-  const skin = icy(P.skin), cloth = icy(P.cloth), pants = icy(P.pants);
+  const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
   setV(u.uPT.value[1], cloth); setV(u.uPE.value[1], vein);
@@ -275,7 +286,7 @@ function drawZombieRig(z, time) {
   setV(u.uPT.value[6], skin); u.uPE.value[6].set(0, 0, 0);
   if (T === 'boss') { u.uPT.value[7].set(0.22, 0.16, 0.24); u.uPS.value[7].set(0.12, 0.09, 0.14); u.uPE.value[7].set(2 * pul, 0.3, 1.8 * pul); }
   else { setV(u.uPT.value[7], ARMOUR_PLATE); setV(u.uPS.value[7], ARMOUR_DARK); u.uPE.value[7].set(0, 0, 0); }
-  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 0.55, e[1] * 0.5, e[2] * 0.5]);
+  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else u.uPE.value[8].set(e[0] * 0.55, e[1] * 0.5, e[2] * 0.5);
   setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
   u.uFlash.value = fl; u.uSeed.value = z.seed;

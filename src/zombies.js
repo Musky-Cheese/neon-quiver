@@ -31,14 +31,21 @@ const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
-const ZGRID = { cell: 4, map: new Map(), out: [] };
+// numeric cell keys (i * 2^21 + j, unique for any |j| < 2^20 cells) instead of 'i,j' strings: no string building per
+// lookup. Cell arrays are reused between frames; a cell that empties stays in the map as an empty list (same query results).
+const ZGRID = { cell: 4, map: new Map(), out: [], used: [] };
+const zCellKey = (i, j) => i * 2097152 + j;
 function rebuildZombieGrid() {
-  ZGRID.map.clear(); const S = ZGRID.cell;
-  for (const z of ZOMBIES) { const k = Math.floor(z.x / S) + ',' + Math.floor(z.z / S); let a = ZGRID.map.get(k); if (!a) ZGRID.map.set(k, a = []); a.push(z); }
+  const S = ZGRID.cell, map = ZGRID.map, used = ZGRID.used;
+  for (let u = 0; u < used.length; u++) used[u].length = 0;
+  used.length = 0;
+  if (map.size > 4096) map.clear();   // forget stale cells now and then
+  for (const z of ZOMBIES) { const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
 }
 function zombieCandidates(x0, x1, z0, z1) {
-  const out = ZGRID.out; out.length = 0; const S = ZGRID.cell;
-  for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) { const a = ZGRID.map.get(i + ',' + j); if (a) out.push(...a); }
+  const out = ZGRID.out; out.length = 0; const S = ZGRID.cell, map = ZGRID.map;
+  const i0 = Math.floor(x0 / S), i1 = Math.floor(x1 / S), j1 = Math.floor(z1 / S);
+  for (let j = Math.floor(z0 / S); j <= j1; j++) for (let i = i0; i <= i1; i++) { const a = map.get(zCellKey(i, j)); if (a) for (let n = 0; n < a.length; n++) out.push(a[n]); }
   return out;
 }
 function ensurePose(z) { if (z._ps !== STEPN.n) { if (ZRIG.ready) poseZombieRig(z, 0, GAME.time); else drawZombieFramesOnly(z); } }

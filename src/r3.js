@@ -5,6 +5,7 @@
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
 var ENV_DIRTY = true;
+scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
 
 /* ---------------- instanced draw batches (world + viewmodel) ---------------- */
@@ -30,6 +31,7 @@ function growBatch(b, need) {
   if (b.im) { scene.remove(b.im); b.im.dispose(); }
   scene.add(im); b.im = im; b.cap = cap;
 }
+function upRange(a, count) { a.clearUpdateRanges(); a.addUpdateRange(0, count); a.needsUpdate = true; }
 function flushList(list, vm) {
   const map = BATCHES[vm ? 1 : 0];
   for (const b of map.values()) b.n = 0;
@@ -46,7 +48,10 @@ function flushList(list, vm) {
   for (const b of map.values()) {
     if (!b.im) continue;
     b.im.count = b.n; b.im.visible = b.n > 0;
-    if (b.n) { b.im.instanceMatrix.needsUpdate = true; const g = b.im.geometry; g.attributes.iTint.needsUpdate = g.attributes.iEmit.needsUpdate = g.attributes.iSkin.needsUpdate = true; }
+    if (b.n) {   // upload only the instances in use, not the whole (up to 2x) capacity
+      const g = b.im.geometry, n = b.n;
+      upRange(b.im.instanceMatrix, n * 16); upRange(g.attributes.iTint, n * 4); upRange(g.attributes.iEmit, n * 3); upRange(g.attributes.iSkin, n * 3);
+    }
   }
 }
 
@@ -113,14 +118,16 @@ void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraP
     scene.add(m); DECAL_POOL.push(m);
   }
 }
+let _decalCounts = null; const _decalM = new Float32Array(16);
 function syncDecals() {
-  const counts = new Uint16Array(DECAL_POOL.length);
+  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
+  const counts = _decalCounts; counts.fill(0);
   for (const d of DECALS) {
     if ((d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2 > 150 * 150) continue;
     const m = DECAL_POOL[d.v], i = counts[d.v]++;
     const fadeAt = DECAL_LIFE - 9;
     const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
-    M4.trs(m.instanceMatrix.array.subarray(i * 16, i * 16 + 16), d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1);
+    m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
     m.geometry.attributes.iAlpha.array[i] = a * 0.92;
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
@@ -210,6 +217,13 @@ function buildLights() {
   }
 }
 const _dyn = [], _stat = [], _lampsNear = [];
+// dynamic light candidates come from a reused pool (no per-frame objects); p is either the source's own
+// position array (flashes, the Warden's core) or the entry's own scratch array
+const _dynPool = []; let _dynN = 0;
+function dynE() { let e = _dynPool[_dynN]; if (!e) e = _dynPool[_dynN] = { p: null, own: [0, 0, 0], r: 0, c: [0, 0, 0], d: 0 }; _dynN++; return e; }
+function dynL(p, r, cr, cg, cb) { const e = dynE(); e.p = p; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
+function dynP(x, y, z, r, cr, cg, cb) { const e = dynE(); e.p = e.own; e.own[0] = x; e.own[1] = y; e.own[2] = z; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
+const byD = (a, b) => a.d - b.d;
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
 function updateLights3(cam) {
   const T = THEME;
@@ -240,15 +254,16 @@ function updateLights3(cam) {
   // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
   _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
   _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
-  _dyn.length = 0;
-  for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
-  for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
-  for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
-  for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
-  if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
-  for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
-  _dyn.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  _dyn.length = 0; _dynN = 0;
+  for (const d of DLIGHTS) { const k = d.life / d.max; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
+  for (const a of PROJ) if (!a.stuck && a.type !== 0) { const g = ARROWS[a.type].glow; dynP(a.x, a.y, a.z, 7, g[0] * 0.5, g[1] * 0.5, g[2] * 0.5); }
+  for (const f of FIRES) dynP(f.x, 0.6, f.z, 6, 2.2, 0.9, 0.2);
+  for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if ((f.x - cam[0]) * (f.x - cam[0]) + (f.z - cam[2]) * (f.z - cam[2]) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); dynP(f.x, f.y + 0.6, f.z, 9, 2.2 * fl, 0.95 * fl, 0.25 * fl); }
+  for (const z of ZOMBIES) if (z.burn > 0) dynP(z.x, 1.2 * z.scale, z.z, 6, 2, 0.8, 0.15);
+  if (GAME.boss && !GAME.boss.dead) dynL(GAME.boss.core, 9, 2.4, 0.4, 2.2);
+  for (const p of PICKUPS) { if (p.kind === 'health') dynP(p.x, 1, p.z, 4, 0.3, 1.4, 0.6); else { const g = ARROWS[p.at].glow; dynP(p.x, 1, p.z, 4, g[0] * 0.4, g[1] * 0.4, g[2] * 0.4); } }
+  for (let i = 0; i < _dynN; i++) { const e = _dynPool[i]; e.d = d2c(e.p, cam); _dyn.push(e); }
+  _dyn.sort(byD);
   let n = 0;
   if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; const hl = PL[n++]; setPL(hl, [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.25, BOW.handWorld[2] || cam[2]], [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18], 2.2); hl.intensity *= 0.3; }
   const nStat = Math.min(_stat.length, 8);
@@ -764,5 +779,9 @@ function render3(time, W, H, fov, cam) {
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
   vmPass.enabled = vmOn && !worldPass.withVM;
-  composer.render();
+  // Scene matrices: one update per frame, not one per scene render (reflection, world, bow, GTAO each re-ran it).
+  // The scene root never moves, so it no longer forces every static object's world matrix to be recomputed either;
+  // only objects that auto-update (or were flagged) are refreshed.
+  scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+  try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }

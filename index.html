@@ -4019,7 +4019,7 @@ const NAV_INF = 65535;
 const WORLD_INDEX = { cell: 16, boxes: new Map(), circles: new Map(), stamp: 1, ready: false };
 const _worldQB = [], _worldQC = [];
 const WORLD_TILES = { cell: 56, maps: {}, out: {} };
-const worldCellKey = (i, j) => i + ',' + j;
+const worldCellKey = (i, j) => i * 2097152 + j;   // numeric key, unique for |j| < 2^20 cells (no string building per lookup)
 function buildWorldSpatialIndex() {
   const S = WORLD_INDEX.cell; WORLD_INDEX.boxes.clear(); WORLD_INDEX.circles.clear();
   const add = (map, o, x0, x1, z0, z1) => {
@@ -4043,21 +4043,24 @@ function buildWorldSpatialIndex() {
 function nearbyWorld(kind, x, z, radius) {
   const map = WORLD_TILES.maps[kind], out = WORLD_TILES.out[kind]; if (!map || !out) return WORLD[kind] || [];
   out.length = 0; const S = WORLD_TILES.cell;
-  for (let j = Math.floor((z - radius) / S); j <= Math.floor((z + radius) / S); j++) for (let i = Math.floor((x - radius) / S); i <= Math.floor((x + radius) / S); i++) { const a = map.get(worldCellKey(i, j)); if (a) out.push(...a); }
+  const i0 = Math.floor((x - radius) / S), i1 = Math.floor((x + radius) / S), j1 = Math.floor((z + radius) / S);
+  for (let j = Math.floor((z - radius) / S); j <= j1; j++) for (let i = i0; i <= i1; i++) { const a = map.get(worldCellKey(i, j)); if (a) for (let n = 0; n < a.length; n++) out.push(a[n]); }
   return out;
+}
+const _worldQ = [_worldQB, _worldQC];   // callers destructure the pair straight away
+function worldCollect(map, out, x0, x1, z0, z1, stamp) {
+  const S = WORLD_INDEX.cell, i0 = Math.floor(x0 / S), i1 = Math.floor(x1 / S), j1 = Math.floor(z1 / S);
+  for (let j = Math.floor(z0 / S); j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const a = map.get(worldCellKey(i, j)); if (!a) continue;
+    for (let n = 0; n < a.length; n++) { const o = a[n]; if (o._wq !== stamp) { o._wq = stamp; out.push(o); } }
+  }
 }
 function worldCandidates(x0, x1, z0, z1) {
   if (!WORLD_INDEX.ready) return [WORLD.boxes, WORLD.circles];
   _worldQB.length = 0; _worldQC.length = 0;
-  const S = WORLD_INDEX.cell, stamp = ++WORLD_INDEX.stamp;
-  const collect = (map, out) => {
-    for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) {
-      const a = map.get(worldCellKey(i, j)); if (!a) continue;
-      for (const o of a) if (o._wq !== stamp) { o._wq = stamp; out.push(o); }
-    }
-  };
-  collect(WORLD_INDEX.boxes, _worldQB); collect(WORLD_INDEX.circles, _worldQC);
-  return [_worldQB, _worldQC];
+  const stamp = ++WORLD_INDEX.stamp;
+  worldCollect(WORLD_INDEX.boxes, _worldQB, x0, x1, z0, z1, stamp); worldCollect(WORLD_INDEX.circles, _worldQC, x0, x1, z0, z1, stamp);
+  return _worldQ;
 }
 
 function navIdx(x, z) { const i = Math.floor((x - NAV.x0) / NAV.cell), j = Math.floor((z - NAV.z0) / NAV.cell); return (i < 0 || j < 0 || i >= NAV.w || j >= NAV.h) ? -1 : j * NAV.w + i; }
@@ -4688,14 +4691,21 @@ const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
-const ZGRID = { cell: 4, map: new Map(), out: [] };
+// numeric cell keys (i * 2^21 + j, unique for any |j| < 2^20 cells) instead of 'i,j' strings: no string building per
+// lookup. Cell arrays are reused between frames; a cell that empties stays in the map as an empty list (same query results).
+const ZGRID = { cell: 4, map: new Map(), out: [], used: [] };
+const zCellKey = (i, j) => i * 2097152 + j;
 function rebuildZombieGrid() {
-  ZGRID.map.clear(); const S = ZGRID.cell;
-  for (const z of ZOMBIES) { const k = Math.floor(z.x / S) + ',' + Math.floor(z.z / S); let a = ZGRID.map.get(k); if (!a) ZGRID.map.set(k, a = []); a.push(z); }
+  const S = ZGRID.cell, map = ZGRID.map, used = ZGRID.used;
+  for (let u = 0; u < used.length; u++) used[u].length = 0;
+  used.length = 0;
+  if (map.size > 4096) map.clear();   // forget stale cells now and then
+  for (const z of ZOMBIES) { const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
 }
 function zombieCandidates(x0, x1, z0, z1) {
-  const out = ZGRID.out; out.length = 0; const S = ZGRID.cell;
-  for (let j = Math.floor(z0 / S); j <= Math.floor(z1 / S); j++) for (let i = Math.floor(x0 / S); i <= Math.floor(x1 / S); i++) { const a = ZGRID.map.get(i + ',' + j); if (a) out.push(...a); }
+  const out = ZGRID.out; out.length = 0; const S = ZGRID.cell, map = ZGRID.map;
+  const i0 = Math.floor(x0 / S), i1 = Math.floor(x1 / S), j1 = Math.floor(z1 / S);
+  for (let j = Math.floor(z0 / S); j <= j1; j++) for (let i = i0; i <= i1; i++) { const a = map.get(zCellKey(i, j)); if (a) for (let n = 0; n < a.length; n++) out.push(a[n]); }
   return out;
 }
 function ensurePose(z) { if (z._ps !== STEPN.n) { if (ZRIG.ready) poseZombieRig(z, 0, GAME.time); else drawZombieFramesOnly(z); } }
@@ -5793,7 +5803,12 @@ function makeRig(z) {
     const B = {}; for (const b of bones) B[ZRIG.logicalOf[b.name]] = b;
     B.shoulderL = B.shoulderL || B['shoulder.L']; // defensive
     const mixer = new THREE.AnimationMixer(mesh);
-    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null };
+    // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
+    const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
+    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1 };
+    // three refreshes a skeleton (and re-uploads its bone texture) once per render call - reflection, world, bow pass...
+    // The bones only move in poseZombieRig, so recompute them only when a new pose has been made since the last time.
+    const rr = r; mesh.skeleton.update = function () { if (rr.skelN === rr.poseN) return; rr.skelN = rr.poseN; THREE.Skeleton.prototype.update.call(this); };
   }
   r.mixer.stopAllAction(); r.cur = null; r.procW = 0;
   scene.add(r.mesh);
@@ -5835,11 +5850,13 @@ function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
 const _hv = [0, 0, 0];
+const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
 
 function poseZombieRig(z, dt, time) {
   const r = z.rig || makeRig(z);
   z._ps = STEPN.n;
-  const P = zPose(z, time), B = r.B;
+  // the procedural pose only matters once dying (it drives the root tilt and the death blend); the living layers don't read it
+  const P = z.state === 'dying' ? zPose(z, time) : _ZP_ALIVE, B = r.B;
   // ---------- clip selection + playback ----------
   const want = zWantClip(z);
   if (want !== r.cur && z.state !== 'dying') {
@@ -5894,7 +5911,8 @@ function poseZombieRig(z, dt, time) {
   const m = r.mesh;
   m.position.set(z.x, z.y - (z.sink || 0), z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
   m.castShadow = SETTINGS.quality > 0 || (PLAYER.x - z.x) ** 2 + (PLAYER.z - z.z) ** 2 < 400;   // Low: only nearby bodies cast shadows
-  m.updateMatrixWorld(true);
+  for (const o of r.nodes) o.updateMatrix();   // same result as the renderer's auto-update, done once here
+  m.updateMatrixWorld(true); r.poseN++;
   // ---------- hit volumes from the skeleton ----------
   const hs = z.type === 'boss' ? 0.85 : 1;
   M4.pt(B.neck.matrixWorld.elements, 0, 0.155 * (z.type === 'boss' ? 1 : hs), 0.01, z.head);
@@ -5952,16 +5970,19 @@ function zLife(z, r, dt, time) {
 }
 const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
+// scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
+const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0];
+function icy(out, c, ice) { if (!ice) return c; out[0] = c[0] + (0.42 - c[0]) * ice; out[1] = c[1] + (0.62 - c[1]) * ice; out[2] = c[2] + (0.8 - c[2]) * ice; return out; }
 function drawZombieRig(z, time) {
   if (!z.rig || z._ps === undefined) poseZombieRig(z, 0, time);
   const r = z.rig, u = r.u, T = z.type, B = r.B;
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
-  const vein = [e[0] * vk, e[1] * vk, e[2] * vk], eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
+  const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
+  const eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
-  const icy = (c) => ice ? [c[0] + (0.42 - c[0]) * ice, c[1] + (0.62 - c[1]) * ice, c[2] + (0.8 - c[2]) * ice] : c;
-  const skin = icy(P.skin), cloth = icy(P.cloth), pants = icy(P.pants);
+  const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
   setV(u.uPT.value[1], cloth); setV(u.uPE.value[1], vein);
@@ -5972,7 +5993,7 @@ function drawZombieRig(z, time) {
   setV(u.uPT.value[6], skin); u.uPE.value[6].set(0, 0, 0);
   if (T === 'boss') { u.uPT.value[7].set(0.22, 0.16, 0.24); u.uPS.value[7].set(0.12, 0.09, 0.14); u.uPE.value[7].set(2 * pul, 0.3, 1.8 * pul); }
   else { setV(u.uPT.value[7], ARMOUR_PLATE); setV(u.uPS.value[7], ARMOUR_DARK); u.uPE.value[7].set(0, 0, 0); }
-  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else setV(u.uPE.value[8], [e[0] * 0.55, e[1] * 0.5, e[2] * 0.5]);
+  setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else u.uPE.value[8].set(e[0] * 0.55, e[1] * 0.5, e[2] * 0.5);
   setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
   u.uFlash.value = fl; u.uSeed.value = z.seed;
@@ -6011,6 +6032,7 @@ function drawZombieRig(z, time) {
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
 var ENV_DIRTY = true;
+scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
 
 /* ---------------- instanced draw batches (world + viewmodel) ---------------- */
@@ -6036,6 +6058,7 @@ function growBatch(b, need) {
   if (b.im) { scene.remove(b.im); b.im.dispose(); }
   scene.add(im); b.im = im; b.cap = cap;
 }
+function upRange(a, count) { a.clearUpdateRanges(); a.addUpdateRange(0, count); a.needsUpdate = true; }
 function flushList(list, vm) {
   const map = BATCHES[vm ? 1 : 0];
   for (const b of map.values()) b.n = 0;
@@ -6052,7 +6075,10 @@ function flushList(list, vm) {
   for (const b of map.values()) {
     if (!b.im) continue;
     b.im.count = b.n; b.im.visible = b.n > 0;
-    if (b.n) { b.im.instanceMatrix.needsUpdate = true; const g = b.im.geometry; g.attributes.iTint.needsUpdate = g.attributes.iEmit.needsUpdate = g.attributes.iSkin.needsUpdate = true; }
+    if (b.n) {   // upload only the instances in use, not the whole (up to 2x) capacity
+      const g = b.im.geometry, n = b.n;
+      upRange(b.im.instanceMatrix, n * 16); upRange(g.attributes.iTint, n * 4); upRange(g.attributes.iEmit, n * 3); upRange(g.attributes.iSkin, n * 3);
+    }
   }
 }
 
@@ -6119,14 +6145,16 @@ void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraP
     scene.add(m); DECAL_POOL.push(m);
   }
 }
+let _decalCounts = null; const _decalM = new Float32Array(16);
 function syncDecals() {
-  const counts = new Uint16Array(DECAL_POOL.length);
+  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
+  const counts = _decalCounts; counts.fill(0);
   for (const d of DECALS) {
     if ((d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2 > 150 * 150) continue;
     const m = DECAL_POOL[d.v], i = counts[d.v]++;
     const fadeAt = DECAL_LIFE - 9;
     const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
-    M4.trs(m.instanceMatrix.array.subarray(i * 16, i * 16 + 16), d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1);
+    m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
     m.geometry.attributes.iAlpha.array[i] = a * 0.92;
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
@@ -6216,6 +6244,13 @@ function buildLights() {
   }
 }
 const _dyn = [], _stat = [], _lampsNear = [];
+// dynamic light candidates come from a reused pool (no per-frame objects); p is either the source's own
+// position array (flashes, the Warden's core) or the entry's own scratch array
+const _dynPool = []; let _dynN = 0;
+function dynE() { let e = _dynPool[_dynN]; if (!e) e = _dynPool[_dynN] = { p: null, own: [0, 0, 0], r: 0, c: [0, 0, 0], d: 0 }; _dynN++; return e; }
+function dynL(p, r, cr, cg, cb) { const e = dynE(); e.p = p; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
+function dynP(x, y, z, r, cr, cg, cb) { const e = dynE(); e.p = e.own; e.own[0] = x; e.own[1] = y; e.own[2] = z; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
+const byD = (a, b) => a.d - b.d;
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
 function updateLights3(cam) {
   const T = THEME;
@@ -6246,15 +6281,16 @@ function updateLights3(cam) {
   // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
   _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
   _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
-  _dyn.length = 0;
-  for (const d of DLIGHTS) { const k = d.life / d.max; _dyn.push({ p: d.p, r: d.r, c: [d.c[0] * k, d.c[1] * k, d.c[2] * k] }); }
-  for (const a of PROJ) if (!a.stuck && a.type !== 0) _dyn.push({ p: [a.x, a.y, a.z], r: 7, c: ARROWS[a.type].glow.map(v => v * 0.5) });
-  for (const f of FIRES) _dyn.push({ p: [f.x, 0.6, f.z], r: 6, c: [2.2, 0.9, 0.2] });
-  for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if (d2c([f.x, 0, f.z], cam) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); _dyn.push({ p: [f.x, f.y + 0.6, f.z], r: 9, c: [2.2 * fl, 0.95 * fl, 0.25 * fl] }); }
-  for (const z of ZOMBIES) if (z.burn > 0) _dyn.push({ p: [z.x, 1.2 * z.scale, z.z], r: 6, c: [2, 0.8, 0.15] });
-  if (GAME.boss && !GAME.boss.dead) _dyn.push({ p: GAME.boss.core, r: 9, c: [2.4, 0.4, 2.2] });
-  for (const p of PICKUPS) _dyn.push({ p: [p.x, 1, p.z], r: 4, c: p.kind === 'health' ? [0.3, 1.4, 0.6] : ARROWS[p.at].glow.map(v => v * 0.4) });
-  _dyn.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  _dyn.length = 0; _dynN = 0;
+  for (const d of DLIGHTS) { const k = d.life / d.max; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
+  for (const a of PROJ) if (!a.stuck && a.type !== 0) { const g = ARROWS[a.type].glow; dynP(a.x, a.y, a.z, 7, g[0] * 0.5, g[1] * 0.5, g[2] * 0.5); }
+  for (const f of FIRES) dynP(f.x, 0.6, f.z, 6, 2.2, 0.9, 0.2);
+  for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if ((f.x - cam[0]) * (f.x - cam[0]) + (f.z - cam[2]) * (f.z - cam[2]) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); dynP(f.x, f.y + 0.6, f.z, 9, 2.2 * fl, 0.95 * fl, 0.25 * fl); }
+  for (const z of ZOMBIES) if (z.burn > 0) dynP(z.x, 1.2 * z.scale, z.z, 6, 2, 0.8, 0.15);
+  if (GAME.boss && !GAME.boss.dead) dynL(GAME.boss.core, 9, 2.4, 0.4, 2.2);
+  for (const p of PICKUPS) { if (p.kind === 'health') dynP(p.x, 1, p.z, 4, 0.3, 1.4, 0.6); else { const g = ARROWS[p.at].glow; dynP(p.x, 1, p.z, 4, g[0] * 0.4, g[1] * 0.4, g[2] * 0.4); } }
+  for (let i = 0; i < _dynN; i++) { const e = _dynPool[i]; e.d = d2c(e.p, cam); _dyn.push(e); }
+  _dyn.sort(byD);
   let n = 0;
   if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; const hl = PL[n++]; setPL(hl, [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.25, BOW.handWorld[2] || cam[2]], [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18], 2.2); hl.intensity *= 0.3; }
   const nStat = Math.min(_stat.length, 8);
@@ -6770,7 +6806,11 @@ function render3(time, W, H, fov, cam) {
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
   vmPass.enabled = vmOn && !worldPass.withVM;
-  composer.render();
+  // Scene matrices: one update per frame, not one per scene render (reflection, world, bow, GTAO each re-ran it).
+  // The scene root never moves, so it no longer forces every static object's world matrix to be recomputed either;
+  // only objects that auto-update (or were flagged) are refreshed.
+  scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+  try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
 
 /* ============================================================
@@ -6896,6 +6936,8 @@ function fireArrow(power) {
   updateQuiverHUD();
 }
 const _seg0 = [0, 0, 0], _seg1 = [0, 0, 0], _so = { s: 0 };
+const _trailC = [0, 0, 0];
+const LEG_SEGS = ['hipL', 'knL', 'knL', 'ftL', 'hipR', 'knR', 'knR', 'ftR'];
 function updateProjectiles(dt) {
   for (let i = PROJ.length - 1; i >= 0; i--) {
     const a = PROJ[i];
@@ -6907,8 +6949,8 @@ function updateProjectiles(dt) {
     _seg1[0] = nx; _seg1[1] = ny; _seg1[2] = nz;
     const sl = Math.hypot(a.vx, a.vy, a.vz); a.dir[0] = a.vx / sl; a.dir[1] = a.vy / sl; a.dir[2] = a.vz / sl;
     // trail
-    const A = ARROWS[a.type]; const tc = A.glow;
-    for (let k = 0; k < (a.type === 0 ? 1 : 3); k++) { const t = Math.random(); emit(lerp(a.x, nx, t), lerp(a.y, ny, t), lerp(a.z, nz, t), rand(-0.2, 0.2), rand(-0.1, 0.3), rand(-0.2, 0.2), a.type === 0 ? 0.25 : 0.5, [tc[0] * 0.5, tc[1] * 0.5, tc[2] * 0.5], a.type === 0 ? 0.05 : 0.12, 0, 2, a.type === 1 ? 0.3 : 0.05, a.type === 0 ? 0.5 : 1); }
+    const A = ARROWS[a.type]; const tc = A.glow, trc = _trailC; trc[0] = tc[0] * 0.5; trc[1] = tc[1] * 0.5; trc[2] = tc[2] * 0.5;   // emit copies the colour
+    for (let k = 0; k < (a.type === 0 ? 1 : 3); k++) { const t = Math.random(); emit(lerp(a.x, nx, t), lerp(a.y, ny, t), lerp(a.z, nz, t), rand(-0.2, 0.2), rand(-0.1, 0.3), rand(-0.2, 0.2), a.type === 0 ? 0.25 : 0.5, trc, a.type === 0 ? 0.05 : 0.12, 0, 2, a.type === 1 ? 0.3 : 0.05, a.type === 0 ? 0.5 : 1); }
     // --- find earliest hit
     let best = 1.01, hitKind = null, hitZ = null, hitPart = null; const segL = Math.hypot(nx - a.x, ny - a.y, nz - a.z) || 1e-3;
     // zombies
@@ -6925,7 +6967,7 @@ function updateProjectiles(dt) {
       // a clean line through the head wins over grazing the top of the torso capsule
       const mg = hitZ === z && hitPart === 'head' ? Math.max(0.02, 0.3 / segL) : 0.02;
       if (segSegDist2(_seg0, _seg1, z.a, z.b, _so) < br * br && _so.s < best - mg) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'body'; }
-      for (const [p0, p1] of [[z.hipL, z.knL], [z.knL, z.ftL], [z.hipR, z.knR], [z.knR, z.ftR]]) if (segSegDist2(_seg0, _seg1, p0, p1, _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
+      for (let L = 0; L < 8; L += 2) if (segSegDist2(_seg0, _seg1, z[LEG_SEGS[L]], z[LEG_SEGS[L + 1]], _so) < lr * lr && _so.s < best - 0.02) { best = _so.s; hitKind = 'z'; hitZ = z; hitPart = 'legs'; }
     }
     // the hive nest (field objective)
     { const t = objNestHit(_seg0, _seg1, _so); if (t >= 0 && t < best) { best = t; hitKind = 'n'; } }
@@ -7256,17 +7298,20 @@ function updateQuiverHUD() {
 }
 function flashQuiver(i) { const d = $('slot' + i); if (!d) return; d.classList.remove('deny'); void d.offsetWidth; d.classList.add('deny'); }
 let _lastSel = -1;
+// per-frame HUD: write to the DOM only when a value actually changes (each write can cost a style recalc)
+const _hudC = new Map();
+function hudSet(id, prop, v) { const k = id + prop, c = _hudC.get(k); if (c === v) return; _hudC.set(k, v); const el = $(id); if (prop === 't') el.textContent = v; else el.style.transform = v; }
+function hudCls(id, cls, on) { const k = id + '.' + cls, c = _hudC.get(k); if (c === on) return; _hudC.set(k, on); $(id).classList.toggle(cls, on); }
 function hudFrame() {
   const hpK = PLAYER.hp / PLAYER.maxHp;
-  $('hpFill').style.transform = `scaleX(${clamp(hpK, 0, 1)})`; $('hpText').textContent = Math.ceil(PLAYER.hp); $('hpMax').textContent = '/ ' + PLAYER.maxHp;
-  $('hp').classList.toggle('low', hpK < 0.3);
+  hudSet('hpFill', 's', `scaleX(${clamp(hpK, 0, 1)})`); hudSet('hpText', 't', String(Math.ceil(PLAYER.hp))); hudSet('hpMax', 't', '/ ' + PLAYER.maxHp);
+  hudCls('hp', 'low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  const rem = $('remain');
-  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); rem.textContent = `NEXT WAVE IN ${t}s · N TO SKIP`; rem.classList.toggle('soon', t <= 5); rem.classList.add('count'); }
-  else { rem.textContent = GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''; rem.classList.remove('soon', 'count'); }
-  $('hp').classList.toggle('regen', !!PLAYER.regen);
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
+  else { hudSet('remain', 't', GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''); hudCls('remain', 'soon', false); hudCls('remain', 'count', false); }
+  hudCls('hp', 'regen', !!PLAYER.regen);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
-  if (GAME.boss) { $('bossFill').style.transform = `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`; }
+  if (GAME.boss) hudSet('bossFill', 's', `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`);
 }
 function setScreen(name) {
   if (name === null && document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -7453,13 +7498,22 @@ function step(dt) {
   if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 2 && Math.random() < dt * 20) { const p = BOW.tipWorld; emit(p[0], p[1], p[2], rand(-0.2, 0.2), rand(-0.2, 0.2), rand(-0.2, 0.2), 0.2, [2, 0.3, 2], 0.03, 0, 3); }
 }
 
-const PERF = { scale: 1, acc: 0, n: 0, pressure: 0 };
+const PERF = { scale: 1, acc: 0, n: 0, pressure: 0, fAcc: 0, fN: 0, fSlow: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
   now /= 1000; const raw = now - lastT; let dt = Math.min(0.05, raw); lastT = now;
   if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
     PERF.acc += raw; PERF.n++;
     if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
+    // fast path for genuinely slow machines: a third of a second where nearly every frame misses 30 fps steps the
+    // resolution down right away instead of waiting out the 1.5 s window (a lone hitch never qualifies; scaling back
+    // up still only happens through the slow window above, so fast frames render exactly as before)
+    PERF.fAcc += raw; PERF.fN++; if (raw > 0.028) PERF.fSlow++;
+    if (PERF.fN >= 20) {
+      const avg = PERF.fAcc / PERF.fN;
+      if (PERF.fSlow >= 16 && avg > 0.034 && PERF.scale > 0.35) { PERF.scale *= 0.8; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); PERF.acc = 0; PERF.n = 0; }
+      PERF.fAcc = 0; PERF.fN = 0; PERF.fSlow = 0;
+    }
   }
   if (GAME.noLoop) return;
   const c0 = performance.now();
