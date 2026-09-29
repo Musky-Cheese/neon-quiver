@@ -31,7 +31,7 @@ function tankAt(x, y, z, pad) {
 function tankIgnite(t, fuse, cookAt) {
   if (!t.alive) return;
   if (t.fuse > 0 && t.fuse <= fuse) return;
-  if (cookAt && !(t.fuse > 0)) AUD.tankHiss(PLAYER.panOf(t.x, t.z));
+  if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.panOf(t.x, t.z), 1 - d / 80); }
   t.fuse = fuse; if (cookAt) t.cook = cookAt;
 }
 // an arrow struck the world at x, y, z: an Incendiary head in a tank wall starts it cooking
@@ -42,9 +42,9 @@ function hazArrowHit(x, y, z, type) {
   tankIgnite(t, TANK_COOK, { x: t.x + dx / L * t.r, y: clamp(y, 0.8, t.h - 0.3), z: t.z + dz / L * t.r, nx: dx / L, nz: dz / L });
 }
 // any explosion (Plasma, the hive nest, another tank) sets off the tanks it reaches
-function hazBlast(x, z, R) {
+function hazBlast(x, z, R, y = 0) {
   for (const t of WORLD.tanks) {
-    if (!t.alive) continue; const d = Math.hypot(t.x - x, t.z - z);
+    if (!t.alive || y > t.h + 3) continue; const d = Math.hypot(t.x - x, t.z - z);
     if (d < R + t.r) tankIgnite(t, 0.18 + d * 0.035 + Math.random() * 0.12, null);
   }
 }
@@ -53,7 +53,10 @@ function hazFrost(x, z) {
   let wet = false;
   for (const f of WORLD.floods) if (x > f.x0 - 5 && x < f.x1 + 5 && z > f.z0 - 5 && z < f.z1 + 5) wet = true;
   if (wet) { HAZ.ice.push({ x, z, r: 5, t: 14 }); if (HAZ.ice.length > 6) HAZ.ice.shift(); }
-  for (const t of WORLD.tanks) if (t.alive && t.cook && Math.hypot(t.x - x, t.z - z) < 5 + t.r) { t.fuse = 0; t.cook = null; burst(t.x, 2.5, t.z, 30, [0.8, 1.6, 2.4], 3, 0.8, 0.12, 1, 1.5); }
+  for (const t of WORLD.tanks) if (t.alive && t.cook && Math.hypot(t.x - x, t.z - z) < 5 + t.r) {
+    t.fuse = 0; t.cook = null; burst(t.x, 2.5, t.z, 30, [0.8, 1.6, 2.4], 3, 0.8, 0.12, 1, 1.5);
+    for (const f of FIRES) if (Math.hypot(f.x - t.x, f.z - t.z) < t.r + 1.6) f.t = 0;   // and the fire at its foot, or it cooks again
+  }
 }
 function tankBlast(t) {
   const x = t.x, z = t.z, R = TANK_BLAST_R, pd = Math.hypot(PLAYER.x - x, PLAYER.z - z);
@@ -72,7 +75,9 @@ function tankBlast(t) {
     if (!killed) { zz.burn = Math.max(zz.burn, 5); zz.vx += dir[0] * 12 * k; zz.vz += dir[2] * 12 * k; }
     GAME.hitMarker(false, killed);
   }
-  if (pd < R && GAME.state === 'playing' && !PLAYER.dead) PLAYER.hurt(Math.round(46 * (1 - pd / R) ** 1.2), x, z);
+  const hurt = pd < R ? Math.round(46 * (1 - pd / R) ** 1.2) : 0;
+  if (hurt > 0 && GAME.state === 'playing' && !PLAYER.dead) PLAYER.hurt(hurt, x, z);
+  for (let i = PROJ.length - 1; i >= 0; i--) { const a = PROJ[i]; if (a.stuck && a.y > 1.5 && Math.hypot(a.x - x, a.z - z) < t.r + 0.6) PROJ.splice(i, 1); }   // arrows in its wall go with it
   for (let i = 0; i < 7; i++) { const a = Math.random() * TAU, rr = rand(1.9, 5.5); FIRES.push({ x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr, t: rand(6, 11) }); }
   hazBlast(x, z, R - 1.5);
 }
@@ -92,7 +97,7 @@ function updateHazards(dt) {
       t.fuse -= dt;
       const c = t.cook;
       if (c && d2 < 90 * 90) for (let k = 0; k < 3; k++) if (Math.random() < dt * 30) emit(c.x, c.y, c.z, c.nx * rand(4, 8) + rand(-0.6, 0.6), rand(0.4, 1.8), c.nz * rand(4, 8) + rand(-0.6, 0.6), rand(0.25, 0.45), [3, 1.2 + Math.random() * 0.5, 0.2], rand(0.2, 0.4), -1.5, 1.4, -0.3);
-      if (c && Math.random() < dt * 5) AUD.tick && AUD.tick();
+      if (c && d2 < 35 * 35 && Math.random() < dt * 5) AUD.tick && AUD.tick();
       if (t.fuse <= 0) tankBlast(t);
     } else {
       if (t.burnT > 0) {
@@ -175,10 +180,10 @@ function drawHazards(time) {
 /* ---------------- sound ---------------- */
 Object.assign(AUD, {
   wade(k = 1) { if (!this.ctx) return; this.burst('bandpass', 750, 280, 1.1, 0.24, 0.09 * k); this.burst('highpass', 2600, 1500, 0.8, 0.14, 0.035 * k); },
-  tankHiss(pan) {
+  tankHiss(pan, k = 1) {
     if (!this.ctx) return; const o = this.out(pan), t = this.now();
-    this.burst('highpass', 3200, 5500, 1.2, TANK_COOK, 0.2, o);
-    for (let i = 0; i < 4; i++) this.tone('square', 1320, 1320, 0.09, 0.05, o, t + i * 0.36);
+    this.burst('highpass', 3200, 5500, 1.2, TANK_COOK, 0.2 * k, o);
+    for (let i = 0; i < 4; i++) this.tone('square', 1320, 1320, 0.09, 0.05 * k, o, t + i * 0.36);
   },
   tankBoom(dist) {
     if (!this.ctx) return; const v = clamp(1.3 - dist / 90, 0.25, 1.3);
