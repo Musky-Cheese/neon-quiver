@@ -2,7 +2,7 @@
    Synth audio: SFX + ambient + music, all generated
    ============================================================ */
 const AUD = {
-  ctx: null, master: null, sfx: null, music: null, amb: null, musicOn: true, noise: null, drawNode: null, started: false,
+  ctx: null, master: null, sfx: null, music: null, amb: null, musicOn: true, musicScreen: true, noise: null, drawNode: null, started: false,
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     let AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
@@ -203,5 +203,7 @@ const AUD = {
     };
     setInterval(sched, 40);
   },
-  setMusic(on) { this.musicOn = on; if (!this.ctx) return; const t = this.now(); this.music.gain.cancelScheduledValues(t); this.music.gain.setTargetAtTime(on ? 0.55 : 0, t, 0.4); },
+  applyMusic() { if (!this.ctx) return; const t = this.now(); this.music.gain.cancelScheduledValues(t); this.music.gain.setTargetAtTime(this.musicOn && this.musicScreen ? 0.55 : 0, t, 0.4); },
+  setMusic(on) { this.musicOn = !!on; this.applyMusic(); },
+  setMusicScreen(on) { this.musicScreen = !!on; this.applyMusic(); },
 };

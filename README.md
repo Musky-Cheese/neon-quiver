@@ -33,7 +33,7 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 | W A S D | Move · Shift sprint · Space jump |
 | E | Open an Armory Terminal (between waves) |
 | 1 – 4, mouse wheel | Switch arrow type · Q swaps to the last one |
-| P / Esc | Pause · M toggles music |
+| P / Esc | Pause |
 
 ## What's in the game
 
