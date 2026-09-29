@@ -356,7 +356,8 @@ function propPath(g, R, pts, w, y = 0.018) {
     }
   }
 }
-function inPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
+function inPond(x, z) { return waterAt(x, z) > 0; }   // any water you wade through (see hazards.js)
+function inKoiPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
 // background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
 function propSakuraFar(g, R, x, z, s = 1, detail = 1, leaf = null) {   // leaf: plain foliage colour (non-blossom trees)
   const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
