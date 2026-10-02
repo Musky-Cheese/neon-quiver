@@ -6401,15 +6401,35 @@ const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p
 // static), so while nothing is, its scheduled refresh is skipped: the map it keeps is the one it would redraw.
 // A grace period after the last mover leaves lets that mover's shadow clear on the usual schedule.
 const SHADOW_REACH = 34;   // spot shadow camera far (30 m) + a body's size
-const _movers = { n: 0, xz: new Float32Array(4096) };
+const _movers = { n: 0, xz: new Float32Array(4096), full: false };
+// What moved since last frame: a zombie (they always animate), a drawn item whose matrix or mesh changed, or
+// anything that was drawn last frame and is gone now (its old shadow has to be cleared too). Items drawn every
+// frame without changing (most props) are not movers.
+let _seenA = new Map(), _seenB = new Map();   // matrix array -> { mesh, m16, x, z } (swapped each frame)
+let _zA = new Map(), _zB = new Map();         // zombie -> [x, z]
 function gatherMovers() {
   let n = 0; const a = _movers.xz, cap = a.length >> 1;
-  for (const z of ZRIG.live) if (z.rig && z.rig.mesh.visible && n < cap) { a[n * 2] = z.x; a[n * 2 + 1] = z.z; n++; }
-  for (let i = 0; i < WORLD_ITEMS.n && n < cap; i++) { const m = WORLD_ITEMS.a[i].m; a[n * 2] = m[12]; a[n * 2 + 1] = m[14]; n++; }
+  const add = (x, z) => { if (n < cap) { a[n * 2] = x; a[n * 2 + 1] = z; n++; } };
+  _zB.clear();
+  for (const z of ZRIG.live) if (z.rig && z.rig.mesh.visible) { add(z.x, z.z); _zB.set(z, [z.x, z.z]); }
+  for (const [z, p] of _zA) if (!_zB.has(z)) add(p[0], p[1]);
+  [_zA, _zB] = [_zB, _zA];
+  _seenB.clear();
+  for (let i = 0; i < WORLD_ITEMS.n; i++) {
+    const it = WORLD_ITEMS.a[i], m = it.m; let r = _seenA.get(m);
+    if (!r) { r = { mesh: it.mesh, m16: new Float32Array(16) }; r.m16.set(m); add(m[12], m[14]); }
+    else {
+      let moved = r.mesh !== it.mesh; if (!moved) for (let k = 0; k < 16; k++) if (r.m16[k] !== m[k]) { moved = true; break; }
+      if (moved) { add(r.m16[12], r.m16[14]); add(m[12], m[14]); r.mesh = it.mesh; r.m16.set(m); }
+    }
+    _seenB.set(m, r);
+  }
+  for (const [m, r] of _seenA) if (!_seenB.has(m)) add(r.m16[12], r.m16[14]);
+  [_seenA, _seenB] = [_seenB, _seenA];
   _movers.n = n; _movers.full = n >= cap;
 }
 function spotQuiet(sp, l, cadence) {
-  if (!l) return false;
+  if (!l || DBG.noQuiet) return false;
   if (_movers.full) { sp.dynT = R3.tick; return false; }
   const a = _movers.xz, r2 = SHADOW_REACH * SHADOW_REACH;
   for (let i = 0; i < _movers.n; i++) { const dx = a[i * 2] - l.p[0], dz = a[i * 2 + 1] - l.p[2]; if (dx * dx + dz * dz < r2) { sp.dynT = R3.tick; break; } }
@@ -7911,7 +7931,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, GPU, gpuCheck, R3, FAR, warmShaders, FAR_MATS_N: () => FAR_MATS.length, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, FAR, warmShaders, FAR_MATS_N: () => FAR_MATS.length, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
