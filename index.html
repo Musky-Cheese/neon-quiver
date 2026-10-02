@@ -6092,7 +6092,7 @@ const MAX_PL = 16;             // point-light pool (static shop/fountain lights 
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
 // FAR (the distant-detail budget and its tuning numbers) lives in engine.js, next to the shaders that read it
 function syncFar() {
-  FAR.on = SETTINGS.quality <= 1; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;
+  FAR.on = SETTINGS.quality <= 1 && !DBG.noFar; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;   // DBG.noFar: A/B against the old paths
   NQU.uFar.value.set(FAR.NEAR, FAR.NEAR + FAR.FADE, FAR.on ? 1 : 0);
   NQU.uFogFar.value.set(FAR.laptop ? FAR.lap.fogStart : 1e5, FAR.laptop ? FAR.lap.fogK : 0);
   const key = (FAR.on ? 1 : 0) + (FAR.laptop ? 2 : 0);
