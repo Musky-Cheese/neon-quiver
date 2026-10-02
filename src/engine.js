@@ -127,6 +127,8 @@ const NQU = {
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
   uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
   uSnowCov: { value: 0 },   // weather.js: how snowed-over the city is
+  // r3.js FAR: distant-detail fade start/end in metres + on flag (Low/Balanced/Laptop), and Laptop's extra fog past a start distance
+  uFar: { value: new THREE.Vector3(45, 55, 0) }, uFogFar: { value: new THREE.Vector2(1e5, 0) },
   uTexM: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0.5, 0.5, 0.5, 0.5)) },   // per layer: mean linear albedo (rgb), mean roughness (a)
   // per layer: x = 1 / tile size in metres, y = normal strength   [asphalt, concrete, brick, rust, corrugated, pavers, plaster, cast concrete]
   uTexS: { value: [[1 / 3.5, 1.0], [1 / 3, 0.8], [1 / 2.4, 1.1], [1 / 2, 0.9], [1 / 2, 1.0], [1 / 2.6, 1.0], [1 / 3, 0.7], [1 / 3, 0.9]].map(([a, b]) => new THREE.Vector2(a, b)) },
@@ -201,6 +203,11 @@ uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, 
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 uniform float uTexOn, uSnowCov;
 ${NOISE_GLSL}
+uniform vec3 uFar; uniform vec2 uFogFar;
+// 0 everywhere inside the near zone; past it, fine detail fades to its mean (it is under a pixel there anyway)
+float nqFar = 0.;
+float vnf(vec2 p) { return nqFar <= 0. ? vn(p) : nqFar >= 1. ? 0.5 : mix(vn(p), 0.5, nqFar); }
+float nqFogD(float d) { return d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y; }
 // does a point/spot light (view-space position, colour, range cutoff) reach this fragment at all?
 bool nqLightOn(vec3 p, vec3 c, float r, vec3 g) { vec3 d = p - g; return c != vec3(0.) && (r <= 0. || dot(d, d) < r * r); }
 #if !defined(NQ_Z) && !defined(NQ_VM)
@@ -257,6 +264,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   float dynK = uDyn;
 #endif
   float mat = vNqM.y;
+#if !defined(NQ_Z) && !defined(NQ_VM)
+  if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
+#endif
   vec3 base = vNqC.rgb * tint;
   vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
@@ -283,7 +293,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   // (only the materials below that use it pay for the two noise lookups: facades, corrugated, glass, car paint, cast concrete)
   float streak = 0.;
   if ((mat > 0.5 && mat < 1.5) || (mat > 7.5 && mat < 11.5) || (mat > 15.5 && mat < 16.5))
-    streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vn(vec2(fcW.x * 11.7, fcW.y * 0.3)) * (1. - nqIn);
+    streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vnf(vec2(fcW.x * 11.7, fcW.y * 0.3)) * (1. - nqIn);
   if ((mat > 0.5 && mat < 1.5) || (mat > 8.5 && mat < 9.5)) {   // facades with windows (concrete panels or brick)
     if (abs(N0.y) < 0.5) {
       vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
@@ -300,6 +310,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
       if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+       float roomFar = 0.5 * (0.55 + 0.45 * h21(id + 1.9));   // far away: the room's average brightness, no trace
+       if (nqFar < 1.) {
         vec3 V = normalize(vNqW - cameraPosition);
         vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
         vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
@@ -315,6 +327,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         else sh = 0.42;        // side walls
         sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
         room = sh * (0.55 + 0.45 * h21(id + 1.9));
+        if (nqFar > 0.) room = mix(room, roomFar, nqFar);
+       } else room = roomFar;
       }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
@@ -330,7 +344,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         bumpH = -seam * 0.01;
       }
       // dirty water runs down from every sill; sheltered walls collect more soot
-      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vn(vec2(fc.x * 14., id.y * 3.1)));
+      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vnf(vec2(fc.x * 14., id.y * 3.1)));
       float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5 + sill * 0.55 + (1. - nqOcc) * 0.45;
       wall *= 1. - clamp(grime, 0., 1.4) * 0.5;
       base = mix(wall, vec3(0.015,0.02,0.04), win);
@@ -356,7 +370,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
     float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
     emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
-    float grain = vn(vNqW.xz*3.1), fine = vn(vNqW.xz*23.);
+    float grain = vn(vNqW.xz*3.1), fine = vnf(vNqW.xz*23.);
     float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
     base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
     {   // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
@@ -370,7 +384,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     wetRefl = mix(0.2, 1.0, pud) * clamp(wetK, 0., 1.);
     nqTL = 0.; nqTS = 0.9 * (1. - pud * 0.75);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
-    float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
+    float br = vnf(vec2(fcW.x * 60., fcW.y * 1.5));
     rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
     base *= 0.9 + 0.2 * vn(vNqW.xz * 2.1 + vNqW.y);
   } else if (mat > 7.5 && mat < 8.5) {      // corrugated / painted steel: ribs, rust, scratches
@@ -383,17 +397,17 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
     base *= 0.35; rough = 0.04 + streak * 0.14 * wetK; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
   } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
-    float scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
+    float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
     float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
     base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
     rough = mix(0.24, 0.75, dirt) + streak * 0.05 * wetK; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
   } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
-    float rid = abs(vn(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
+    float rid = abs(vnf(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
     float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
     base = mix(base * (0.55 + 0.6 * rid), vec3(0.05, 0.09, 0.03), moss * 0.7);
     bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
   } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
-    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vn(vNqW.xz * 23.) * 0.5;
+    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vnf(vNqW.xz * 23.) * 0.5;
     base *= (0.7 + 0.45 * gr) * mix(1., 0.72, wetK * step(0.5, N0.y));
     bumpH = gr * 0.002; rough = mix(0.62, 0.35, wetK * step(0.5, N0.y)); rimK = 0.5;
   } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
@@ -419,21 +433,21 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
   } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
-    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vn(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
-    float pit = smoothstep(0.78, 0.9, vn(vNqW.xz * 31. + vNqW.y * 29.));
+    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vnf(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
+    float pit = smoothstep(0.78, 0.9, vnf(vNqW.xz * 31. + vNqW.y * 29.));
     float top = step(0.5, N0.y);
     base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, wetK * top);
     bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, wetK * top * 0.8); rimK = 0.3;
     nqTL = 7.; nqTS = 0.85;
   } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
-    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
+    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vnf(vNqW.xz * 31.);
     base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
     float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
     base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
     emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
     bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(wetK, 0., 1.) * 0.6); rimK = 0.2;
   } else if (mat > 18.5 && mat < 19.5) {    // overgrown lawn: patchy weeds, bare mud, wet sheen
-    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vn(vNqW.xz * 27.);
+    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vnf(vNqW.xz * 27.);
     base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
     base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
     bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
@@ -516,14 +530,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     }
 #endif
   } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture
-    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vn(vec2(fcW.x * 40., fcW.y * 2.));
+    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vnf(vec2(fcW.x * 40., fcW.y * 2.));
     base *= (0.9 + 0.14 * n1 - 0.05 * n2 - 0.03 * n3) * (1. - smoothstep(0.45, 0.0, vNqW.y) * 0.3 * (1. - step(0.5, abs(N0.y))));
     rough = 0.85 - n2 * 0.08; rimK = 0.15; bumpH = n2 * 0.0006 + n3 * 0.0003;
     nqTL = 6.; nqTS = 0.7;
   } else if (mat > 20.5 && mat < 22.5) {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     vec2 q = vNqW.xz / (mat > 21.5 ? 0.33 : 0.6); vec2 gd = abs(fract(q) - 0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
     float grout = smoothstep(0.482 - fw.x * 1.2, 0.494, max(gd.x, gd.y));
-    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vn(vNqW.xz * 13.);
+    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vnf(vNqW.xz * 13.);
     if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
     base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
     rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
@@ -547,7 +561,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float up = smoothstep(0.55, 0.9, N0.y);
     float drift = smoothstep(0.25, 0.6, vn(vNqW.xz * 0.7) * 0.55 + vn(vNqW.xz * 3.1) * 0.2 + uSnowCov * 0.65);
     float snowM = uSnowCov * up * clamp(nqOcc * 1.4 - 0.2, 0., 1.) * (1. - nqIn) * drift;
-    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vn(vNqW.xz * 9.)), snowM);
+    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vnf(vNqW.xz * 9.)), snowM);
     rough = mix(rough, 0.72, snowM); wetRefl *= 1. - snowM; emis *= 1. - snowM * 0.85; nqTexK *= 1. - snowM; bumpH *= 1. - snowM;
   }
 #endif
@@ -585,7 +599,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       .replace('#include <lights_fragment_begin>', NQ_LIGHTS_FRAG || '#include <lights_fragment_begin>')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
       .replace('#include <fog_fragment>', `
-  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
+  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-nqFogD(d));
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
 #if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)

@@ -3,7 +3,7 @@
    ============================================================ */
 const MAXP = 5000;
 const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
-for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
+for (let i = 0; i < MAXP; i++) PART.p.push({ k: (i * 0.6180339887) % 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;
@@ -19,6 +19,9 @@ function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
 }
 function updateParticles(dt) {
   let n = 0; const d = PART.data;
+  // far-detail tiers: past the near zone, up to half the particles are left out of the draw (all still simulate,
+  // so nothing about the near ones changes); which ones is fixed per pool slot, so it never flickers
+  const thin = typeof FAR !== 'undefined' && FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
   for (const p of PART.p) {
     if (!p.alive) continue;
     p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }
@@ -29,6 +32,7 @@ function updateParticles(dt) {
       p.y = 0.03; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6;
     }
     p.size += p.grow * dt * Math.sign(p.size || 1);
+    if (thin) { const dx = p.x - cx, dz = p.z - cz, q = dx * dx + dz * dz; if (q > n2 && p.k < farK(Math.sqrt(q)) * 0.5) continue; }
     const t = p.life / p.max; const a = p.a * Math.min(1, t * 2.5);
     const o = n * 8; d[o] = p.x; d[o + 1] = p.y; d[o + 2] = p.z; d[o + 3] = p.r; d[o + 4] = p.g; d[o + 5] = p.b; d[o + 6] = a; d[o + 7] = p.size;
     n++;

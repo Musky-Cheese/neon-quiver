@@ -161,6 +161,10 @@ button, select, input { font-family: var(--f); }
 .card.a3::after { background: var(--rail); box-shadow: 0 0 8px var(--rail); }
 .term-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 24px 22px; border-top: 1px solid var(--line); }
 
+#swWarn { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--amber); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
+#swWarn b { color: var(--amber); }
+#swWarn code { font-size: 13px; color: var(--cyan); }
+#swWarn .btn { padding: 8px 16px; font-size: 13px; flex: none; }
 #loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
 #nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
 
@@ -204,7 +208,7 @@ button, select, input { font-family: var(--f); }
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="bests">
@@ -253,7 +257,7 @@ button, select, input { font-family: var(--f); }
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
       </div>
     </div>
   </section>
@@ -285,6 +289,7 @@ button, select, input { font-family: var(--f); }
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
+  <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>
 
@@ -432,6 +437,8 @@ const NQU = {
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
   uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
   uSnowCov: { value: 0 },   // weather.js: how snowed-over the city is
+  // r3.js FAR: distant-detail fade start/end in metres + on flag (Low/Balanced/Laptop), and Laptop's extra fog past a start distance
+  uFar: { value: new THREE.Vector3(45, 55, 0) }, uFogFar: { value: new THREE.Vector2(1e5, 0) },
   uTexM: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0.5, 0.5, 0.5, 0.5)) },   // per layer: mean linear albedo (rgb), mean roughness (a)
   // per layer: x = 1 / tile size in metres, y = normal strength   [asphalt, concrete, brick, rust, corrugated, pavers, plaster, cast concrete]
   uTexS: { value: [[1 / 3.5, 1.0], [1 / 3, 0.8], [1 / 2.4, 1.1], [1 / 2, 0.9], [1 / 2, 1.0], [1 / 2.6, 1.0], [1 / 3, 0.7], [1 / 3, 0.9]].map(([a, b]) => new THREE.Vector2(a, b)) },
@@ -506,6 +513,11 @@ uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, 
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 uniform float uTexOn, uSnowCov;
 ${NOISE_GLSL}
+uniform vec3 uFar; uniform vec2 uFogFar;
+// 0 everywhere inside the near zone; past it, fine detail fades to its mean (it is under a pixel there anyway)
+float nqFar = 0.;
+float vnf(vec2 p) { return nqFar <= 0. ? vn(p) : nqFar >= 1. ? 0.5 : mix(vn(p), 0.5, nqFar); }
+float nqFogD(float d) { return d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y; }
 // does a point/spot light (view-space position, colour, range cutoff) reach this fragment at all?
 bool nqLightOn(vec3 p, vec3 c, float r, vec3 g) { vec3 d = p - g; return c != vec3(0.) && (r <= 0. || dot(d, d) < r * r); }
 #if !defined(NQ_Z) && !defined(NQ_VM)
@@ -562,6 +574,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   float dynK = uDyn;
 #endif
   float mat = vNqM.y;
+#if !defined(NQ_Z) && !defined(NQ_VM)
+  if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
+#endif
   vec3 base = vNqC.rgb * tint;
   vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
@@ -588,7 +603,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   // (only the materials below that use it pay for the two noise lookups: facades, corrugated, glass, car paint, cast concrete)
   float streak = 0.;
   if ((mat > 0.5 && mat < 1.5) || (mat > 7.5 && mat < 11.5) || (mat > 15.5 && mat < 16.5))
-    streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vn(vec2(fcW.x * 11.7, fcW.y * 0.3)) * (1. - nqIn);
+    streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vnf(vec2(fcW.x * 11.7, fcW.y * 0.3)) * (1. - nqIn);
   if ((mat > 0.5 && mat < 1.5) || (mat > 8.5 && mat < 9.5)) {   // facades with windows (concrete panels or brick)
     if (abs(N0.y) < 0.5) {
       vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
@@ -605,6 +620,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
       if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+       float roomFar = 0.5 * (0.55 + 0.45 * h21(id + 1.9));   // far away: the room's average brightness, no trace
+       if (nqFar < 1.) {
         vec3 V = normalize(vNqW - cameraPosition);
         vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
         vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
@@ -620,6 +637,8 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         else sh = 0.42;        // side walls
         sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
         room = sh * (0.55 + 0.45 * h21(id + 1.9));
+        if (nqFar > 0.) room = mix(room, roomFar, nqFar);
+       } else room = roomFar;
       }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
@@ -635,7 +654,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         bumpH = -seam * 0.01;
       }
       // dirty water runs down from every sill; sheltered walls collect more soot
-      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vn(vec2(fc.x * 14., id.y * 3.1)));
+      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vnf(vec2(fc.x * 14., id.y * 3.1)));
       float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5 + sill * 0.55 + (1. - nqOcc) * 0.45;
       wall *= 1. - clamp(grime, 0., 1.4) * 0.5;
       base = mix(wall, vec3(0.015,0.02,0.04), win);
@@ -661,7 +680,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
     float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
     emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
-    float grain = vn(vNqW.xz*3.1), fine = vn(vNqW.xz*23.);
+    float grain = vn(vNqW.xz*3.1), fine = vnf(vNqW.xz*23.);
     float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
     base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
     {   // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
@@ -675,7 +694,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     wetRefl = mix(0.2, 1.0, pud) * clamp(wetK, 0., 1.);
     nqTL = 0.; nqTS = 0.9 * (1. - pud * 0.75);
   } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
-    float br = vn(vec2(fcW.x * 60., fcW.y * 1.5));
+    float br = vnf(vec2(fcW.x * 60., fcW.y * 1.5));
     rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
     base *= 0.9 + 0.2 * vn(vNqW.xz * 2.1 + vNqW.y);
   } else if (mat > 7.5 && mat < 8.5) {      // corrugated / painted steel: ribs, rust, scratches
@@ -688,17 +707,17 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
     base *= 0.35; rough = 0.04 + streak * 0.14 * wetK; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
   } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
-    float scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
+    float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
     float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
     base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
     rough = mix(0.24, 0.75, dirt) + streak * 0.05 * wetK; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
   } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
-    float rid = abs(vn(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
+    float rid = abs(vnf(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
     float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
     base = mix(base * (0.55 + 0.6 * rid), vec3(0.05, 0.09, 0.03), moss * 0.7);
     bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
   } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
-    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vn(vNqW.xz * 23.) * 0.5;
+    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vnf(vNqW.xz * 23.) * 0.5;
     base *= (0.7 + 0.45 * gr) * mix(1., 0.72, wetK * step(0.5, N0.y));
     bumpH = gr * 0.002; rough = mix(0.62, 0.35, wetK * step(0.5, N0.y)); rimK = 0.5;
   } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
@@ -724,21 +743,21 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
   } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
-    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vn(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
-    float pit = smoothstep(0.78, 0.9, vn(vNqW.xz * 31. + vNqW.y * 29.));
+    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vnf(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
+    float pit = smoothstep(0.78, 0.9, vnf(vNqW.xz * 31. + vNqW.y * 29.));
     float top = step(0.5, N0.y);
     base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, wetK * top);
     bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, wetK * top * 0.8); rimK = 0.3;
     nqTL = 7.; nqTS = 0.85;
   } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
-    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vn(vNqW.xz * 31.);
+    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vnf(vNqW.xz * 31.);
     base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
     float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
     base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
     emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
     bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(wetK, 0., 1.) * 0.6); rimK = 0.2;
   } else if (mat > 18.5 && mat < 19.5) {    // overgrown lawn: patchy weeds, bare mud, wet sheen
-    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vn(vNqW.xz * 27.);
+    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vnf(vNqW.xz * 27.);
     base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
     base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
     bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
@@ -821,14 +840,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     }
 #endif
   } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture
-    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vn(vec2(fcW.x * 40., fcW.y * 2.));
+    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vnf(vec2(fcW.x * 40., fcW.y * 2.));
     base *= (0.9 + 0.14 * n1 - 0.05 * n2 - 0.03 * n3) * (1. - smoothstep(0.45, 0.0, vNqW.y) * 0.3 * (1. - step(0.5, abs(N0.y))));
     rough = 0.85 - n2 * 0.08; rimK = 0.15; bumpH = n2 * 0.0006 + n3 * 0.0003;
     nqTL = 6.; nqTS = 0.7;
   } else if (mat > 20.5 && mat < 22.5) {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     vec2 q = vNqW.xz / (mat > 21.5 ? 0.33 : 0.6); vec2 gd = abs(fract(q) - 0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
     float grout = smoothstep(0.482 - fw.x * 1.2, 0.494, max(gd.x, gd.y));
-    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vn(vNqW.xz * 13.);
+    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vnf(vNqW.xz * 13.);
     if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
     base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
     rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
@@ -852,7 +871,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     float up = smoothstep(0.55, 0.9, N0.y);
     float drift = smoothstep(0.25, 0.6, vn(vNqW.xz * 0.7) * 0.55 + vn(vNqW.xz * 3.1) * 0.2 + uSnowCov * 0.65);
     float snowM = uSnowCov * up * clamp(nqOcc * 1.4 - 0.2, 0., 1.) * (1. - nqIn) * drift;
-    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vn(vNqW.xz * 9.)), snowM);
+    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vnf(vNqW.xz * 9.)), snowM);
     rough = mix(rough, 0.72, snowM); wetRefl *= 1. - snowM; emis *= 1. - snowM * 0.85; nqTexK *= 1. - snowM; bumpH *= 1. - snowM;
   }
 #endif
@@ -890,7 +909,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       .replace('#include <lights_fragment_begin>', NQ_LIGHTS_FRAG || '#include <lights_fragment_begin>')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
       .replace('#include <fog_fragment>', `
-  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-d*uFogDen);
+  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-nqFogD(d));
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
 #if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)
@@ -2752,7 +2771,7 @@ function wxSnowK() { return WX.precip * WX.snow; }
    ============================================================ */
 const MAXP = 5000;
 const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
-for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
+for (let i = 0; i < MAXP; i++) PART.p.push({ k: (i * 0.6180339887) % 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;
@@ -2768,6 +2787,9 @@ function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
 }
 function updateParticles(dt) {
   let n = 0; const d = PART.data;
+  // far-detail tiers: past the near zone, up to half the particles are left out of the draw (all still simulate,
+  // so nothing about the near ones changes); which ones is fixed per pool slot, so it never flickers
+  const thin = typeof FAR !== 'undefined' && FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
   for (const p of PART.p) {
     if (!p.alive) continue;
     p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }
@@ -2778,6 +2800,7 @@ function updateParticles(dt) {
       p.y = 0.03; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6;
     }
     p.size += p.grow * dt * Math.sign(p.size || 1);
+    if (thin) { const dx = p.x - cx, dz = p.z - cz, q = dx * dx + dz * dz; if (q > n2 && p.k < farK(Math.sqrt(q)) * 0.5) continue; }
     const t = p.life / p.max; const a = p.a * Math.min(1, t * 2.5);
     const o = n * 8; d[o] = p.x; d[o + 1] = p.y; d[o + 2] = p.z; d[o + 3] = p.r; d[o + 4] = p.g; d[o + 5] = p.b; d[o + 6] = a; d[o + 7] = p.size;
     n++;
@@ -6031,6 +6054,33 @@ function drawZombieRig(z, time) {
    ============================================================ */
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
+/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
+   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
+   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
+const FAR = {
+  NEAR: 45, FADE: 10,
+  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
+  on: false, laptop: false, _lap: null,
+};
+function syncFar() {
+  FAR.on = SETTINGS.quality <= 1; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;
+  NQU.uFar.value.set(FAR.NEAR, FAR.NEAR + FAR.FADE, FAR.on ? 1 : 0);
+  NQU.uFogFar.value.set(FAR.laptop ? FAR.lap.fogStart : 1e5, FAR.laptop ? FAR.lap.fogK : 0);
+}
+// The wet-street mirror and the district env map put distant things onto NEAR pixels (a tower in the puddle at
+// your feet), so those passes render the full scene: far-detail off, Laptop's culled chunks back, normal fog.
+const _farSave = { k: 0, fog: 0, hidden: [] };
+function farSuspend() {
+  _farSave.k = NQU.uFar.value.z; _farSave.fog = NQU.uFogFar.value.y; NQU.uFar.value.z = 0; NQU.uFogFar.value.y = 0;
+  const h = _farSave.hidden; h.length = 0;
+  if (FAR.laptop) for (const m of WORLD_MESHES) if (m.userData.lapHidden) { m.visible = true; h.push(m); }
+}
+function farResume() {
+  NQU.uFar.value.z = _farSave.k; NQU.uFogFar.value.y = _farSave.fog;
+  for (const m of _farSave.hidden) m.visible = false; _farSave.hidden.length = 0;
+}
+// 0 inside the near zone, 1 once fully past the fade (always 0 on Sharp / Ultra)
+function farK(d) { return FAR.on ? clamp((d - FAR.NEAR) / FAR.FADE, 0, 1) : 0; }
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
@@ -6116,7 +6166,7 @@ const PLANE = new THREE.PlaneGeometry(1, 1);
 // mip chain and anisotropy as the single textures), and the per-sign uniforms become per-instance attributes.
 const SIGN_VS = `attribute vec3 iCol; attribute vec3 iSign; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign;
 void main(){ vec4 w = modelMatrix*(instanceMatrix*vec4(position,1.)); vW = w.xyz; vUV = uv; vCol = iCol; vSign = iSign; gl_Position = projectionMatrix*viewMatrix*w; }`;
-const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
+const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
 ${NOISE_GLSL}
 void main(){
   vec2 uv = vUV; float flick = 1.; float uMode = vSign.y, uSeed = vSign.x;
@@ -6124,7 +6174,7 @@ void main(){
   else flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
   vec4 t = texture(uTex, vec3(uv, vSign.z));
   vec3 c = t.rgb*vCol*flick;
-  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-d*uFogDen))*0.8, 0., 1.));
+  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*0.8, 0., 1.));
   gl_FragColor = vec4(c, t.a*uA);
 }`;
 const SIGNS = [];          // { s: WORLD.signs entry, b: its batch, layer, vis }
@@ -6153,7 +6203,7 @@ function buildSigns() {
   }
   for (const g of groups.values()) {
     const n = g.list.length;
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
     const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -6186,11 +6236,11 @@ const DECAL_POOL = [];
 function buildDecalPool() {
   const vs = `attribute float iAlpha; varying vec2 vUV; varying vec3 vW; varying float vA;
 void main(){ vec4 w=modelMatrix*instanceMatrix*vec4(position,1.); vW=w.xyz; vUV=uv; vA=iAlpha; gl_Position=projectionMatrix*viewMatrix*w; }`;
-  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec3 uFogCol;
-void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-d*uFogDen))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
+  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
   }
@@ -6200,12 +6250,14 @@ function syncDecals() {
   if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
   const counts = _decalCounts; counts.fill(0);
   for (const d of DECALS) {
-    if ((d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2 > 150 * 150) continue;
+    const dd2 = (d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2;
+    const fk = FAR.on && dd2 > FAR.NEAR * FAR.NEAR ? farK(Math.sqrt(dd2)) : 0;   // far-detail tiers: blood pools fade out past the near zone
+    if (dd2 > 150 * 150 || fk >= 1) continue;
     const m = DECAL_POOL[d.v], i = counts[d.v]++;
     const fadeAt = DECAL_LIFE - 9;
     const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
     m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
-    m.geometry.attributes.iAlpha.array[i] = a * 0.92;
+    m.geometry.attributes.iAlpha.array[i] = fk > 0 ? a * 0.92 * (1 - fk) : a * 0.92;
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
     const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
@@ -6302,6 +6354,24 @@ function dynL(p, r, cr, cg, cb) { const e = dynE(); e.p = p; e.r = r; e.c[0] = c
 function dynP(x, y, z, r, cr, cg, cb) { const e = dynE(); e.p = e.own; e.own[0] = x; e.own[1] = y; e.own[2] = z; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
 const byD = (a, b) => a.d - b.d;
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
+// Far-detail tiers: a lamp's shadow map only changes when something that moves is within its reach (the city is
+// static), so while nothing is, its scheduled refresh is skipped: the map it keeps is the one it would redraw.
+// A grace period after the last mover leaves lets that mover's shadow clear on the usual schedule.
+const SHADOW_REACH = 34;   // spot shadow camera far (30 m) + a body's size
+const _movers = { n: 0, xz: new Float32Array(4096) };
+function gatherMovers() {
+  let n = 0; const a = _movers.xz, cap = a.length >> 1;
+  for (const z of ZRIG.live) if (z.rig && z.rig.mesh.visible && n < cap) { a[n * 2] = z.x; a[n * 2 + 1] = z.z; n++; }
+  for (let i = 0; i < WORLD_ITEMS.n && n < cap; i++) { const m = WORLD_ITEMS.a[i].m; a[n * 2] = m[12]; a[n * 2 + 1] = m[14]; n++; }
+  _movers.n = n; _movers.full = n >= cap;
+}
+function spotQuiet(sp, l, cadence) {
+  if (!l) return false;
+  if (_movers.full) { sp.dynT = R3.tick; return false; }
+  const a = _movers.xz, r2 = SHADOW_REACH * SHADOW_REACH;
+  for (let i = 0; i < _movers.n; i++) { const dx = a[i * 2] - l.p[0], dz = a[i * 2 + 1] - l.p[2]; if (dx * dx + dz * dz < r2) { sp.dynT = R3.tick; break; } }
+  return R3.tick - sp.dynT > cadence * 2 + 1;   // quiet once no mover has been in reach for two full turns
+}
 function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
@@ -6313,17 +6383,18 @@ function updateLights3(cam) {
   _lampsNear.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
   _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   R3.tick = (R3.tick + 1) | 0;
+  if (FAR.on) gatherMovers();
   const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
     sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
   }
   for (let i = 0; i < SPOTS.length; i++) {
     const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
-    if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
+    if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; sp.dynT = R3.tick; }
     // Ultra keeps shadows fresh (3 of every 4 lamps refresh each frame) without forcing every shadow map to redraw
     // in the same frame every frame — that all-at-once cost was compounding with heavy single-frame spikes (e.g. a
     // multi-kill AOE hit) into visible stalls. Lower tiers keep their coarser alternating refresh.
-    else { const cadence = SETTINGS.quality >= 3 ? 2 : PERF.pressure > 0.55 ? 4 : 3; if ((i + R3.tick) % cadence === 0) s.shadow.needsUpdate = true; }
+    else { const cadence = SETTINGS.quality >= 3 ? 2 : PERF.pressure > 0.55 ? 4 : 3; if ((i + R3.tick) % cadence === 0 && !(FAR.on && spotQuiet(sp, l, cadence))) s.shadow.needsUpdate = true; }
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
@@ -6467,21 +6538,26 @@ function addWorldChunks(geo, castShadow, receiveShadow, name) {
     const mesh = new THREE.Mesh(chunks[i], MAT.static);
     mesh.name = name + '-' + i; mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
     mesh.userData.streamRadius = streamRadius;
+    mesh.userData.streamLap = name === 'far' ? 0 : name === 'near' ? FAR.lap.near : FAR.lap.props;   // 0: the skyline keeps its reach
     mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
   }
 }
 
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
+  if (FAR._lap !== FAR.laptop) { FAR._lap = FAR.laptop; force = true; }   // Laptop toggled: re-resolve every radius now
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
   WORLD_STREAM.x = x; WORLD_STREAM.z = z; let active = 0;
   for (const m of WORLD_MESHES) {
-    const s = m.geometry.boundingSphere; if (!s) { m.visible = true; active++; continue; } const r = m.userData.streamRadius;
-    m.visible = (s.center.x - x) ** 2 + (s.center.z - z) ** 2 <= (r + s.radius) ** 2;
+    const s = m.geometry.boundingSphere; if (!s) { m.visible = true; active++; continue; } const r = FAR.laptop && m.userData.streamLap ? m.userData.streamLap : m.userData.streamRadius;
+    const d2 = (s.center.x - x) ** 2 + (s.center.z - z) ** 2, r0 = m.userData.streamRadius;
+    m.visible = d2 <= (r + s.radius) ** 2;
+    m.userData.lapHidden = !m.visible && d2 <= (r0 + s.radius) ** 2;   // culled only because of Laptop's shorter reach
     if (m.visible) active++;
   }
   WORLD_STREAM.active = active;
-  for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < 260 * 260; }
+  const sr = FAR.laptop ? FAR.lap.signs : 260;
+  for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
 
@@ -6504,10 +6580,10 @@ function buildGlass() {
   if (!WORLD.glass.length) return;
   const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
+    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
     transparent: true, depthWrite: false, vertexColors: true,
     vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec2 uFogFar; uniform vec3 uFogCol, uRimCol;
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
@@ -6519,12 +6595,12 @@ void main(){
   vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
   vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
   float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
-  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-d * uFogDen)) * 0.8, 0., 1.));
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y))) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
-    const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280;
+    const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280; m.userData.streamLap = FAR.lap.glass;
     scene.add(m); WORLD_MESHES.push(m);
   }
 }
@@ -6593,41 +6669,67 @@ function buildOcclusion() {
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
 let pmrem = null;
-const ENV = { cache: {}, cur: null };
+const ENV = { cache: {}, cur: null, job: null, old: null, vis: true, refl: 0 };
 const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
 const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
-function captureEnv(d) {
-  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = null;
-  const vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
-  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = false;
-  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = false;
-  const saveOn = NQU.uReflOn.value; NQU.uReflOn.value = 0;
-  cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
-  renderer.shadowMap.needsUpdate = true;
-  cubeCam.update(renderer, scene);
-  NQU.uReflOn.value = saveOn;
-  partPoints.visible = vis; rainLines.visible = true; snowPts.visible = true;
-  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = true;
-  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = m.n > 0;
+// Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
+function envHide(on) {
+  if (on) { ENV.vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false; ENV.refl = NQU.uReflOn.value; NQU.uReflOn.value = 0; }
+  else { partPoints.visible = ENV.vis; rainLines.visible = true; snowPts.visible = true; NQU.uReflOn.value = ENV.refl; }
+  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = !on;
+  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
+}
+function envFace(face) {   // one cube face, exactly as CubeCamera.update renders it
+  const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
+  if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
+  cubeCam.updateMatrixWorld(true);
+  envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
+  const gm = cubeRT.texture.generateMipmaps; if (face < 5) cubeRT.texture.generateMipmaps = false;   // mips build on the last face
+  renderer.setRenderTarget(cubeRT, face); farSuspend(); renderer.render(scene, cubeCam.children[face]); farResume();
+  envHide(false); cubeRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+}
+function envFinish(d) {
   if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
   ENV.cache[d.id] = pmrem.fromCubemap(cubeRT.texture);
   return ENV.cache[d.id];
 }
+function captureEnv(d) {   // all six faces in one frame: only when nothing else can be shown yet
+  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+  ENV.job = null; cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
+  for (let f = 0; f < 6; f++) envFace(f);
+  return envFinish(d);
+}
+// Crossing into a district not captured yet: keep showing the old map, render one face per frame, then the
+// PMREM on the seventh frame, so a district boundary never pays for 6 scene renders + a convolution at once.
 function updateEnv(cam) {
-  if (ENV_DIRTY) { for (const k in ENV.cache) ENV.cache[k].dispose(); ENV.cache = {}; ENV_DIRTY = false; }
+  if (ENV_DIRTY) {   // new Look: every capture is stale. Keep the one on screen alive until its replacement is ready.
+    for (const k in ENV.cache) if (ENV.cache[k].texture !== scene.environment) ENV.cache[k].dispose(); else ENV.old = ENV.cache[k];
+    ENV.cache = {}; ENV.job = null; ENV_DIRTY = false;
+  }
   const d = districtAt(cam[0], cam[2]);
-  const rt = ENV.cache[d.id] || captureEnv(d);
-  if (scene.environment !== rt.texture) scene.environment = rt.texture;
+  let rt = ENV.cache[d.id];
+  if (!rt) {
+    if (!scene.environment) rt = captureEnv(d);   // nothing to show meanwhile (first frame)
+    else {
+      if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+      if (!ENV.job || ENV.job.d !== d) { ENV.job = { d, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
+      if (ENV.job.face < 6) envFace(ENV.job.face++);
+      else { ENV.job = null; rt = envFinish(d); }
+    }
+  }
+  if (rt && scene.environment !== rt.texture) {
+    scene.environment = rt.texture;
+    if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
+  }
 }
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
 const coneMat = new THREE.ShaderMaterial({
-  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U),
+  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
   transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
+  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW);
@@ -6637,7 +6739,7 @@ void main(){
   float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x + 1e-5) * 9., vW.y * 1.4 + uTime * 9.));
   float d = length(vW - cameraPosition);
   float near = smoothstep(0.5, 3.0, d);
-  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-d * uFogDen * 0.5);
+  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y) * 0.5);
   gl_FragColor = vec4(c, 0.);
 }` });
 const CONES = [];
@@ -6657,12 +6759,12 @@ function buildVolumes() {
     scene.add(m); CONES.push(m);
   }
   const mat = new THREE.ShaderMaterial({
-    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U), transparent: true, depthWrite: false,
+    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U), transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
     vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
-    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
-void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-vD * uFogDen * 0.4), 0.); }` });
+    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen; uniform vec2 uFogFar;
+void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-(vD * uFogDen + max(vD - uFogFar.x, 0.) * uFogFar.y) * 0.4), 0.); }` });
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -6703,7 +6805,7 @@ function renderReflection(r) {
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
   for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
-  r.render(scene, reflCam);
+  farSuspend(); r.render(scene, reflCam); farResume();
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
@@ -6879,11 +6981,33 @@ function applyQuality3(q) {
   sun.castShadow = sh; for (const { s, shadow } of SPOTS) s.castShadow = sh && shadow;
 }
 
+/* ---------------- shader warm-up: compile every program at load, not on first use in play ---------------- */
+// Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
+// Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
+function warmShaders() {
+  const t0 = performance.now(), before = renderer.info.programs.length;
+  const g = new THREE.BufferGeometry(), n = 3;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
+  for (const [k, w] of [['iTint', 4], ['iEmit', 3], ['iSkin', 3]]) g.setAttribute(k, new THREE.InstancedBufferAttribute(new Float32Array(w), w));
+  const stand = [new THREE.Mesh(g, MAT.static), new THREE.InstancedMesh(g, MAT.inst, 1), new THREE.InstancedMesh(g, MAT.vm, 1)];
+  stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
+  for (const m of stand) { m.frustumCulled = false; scene.add(m); }
+  const prev = renderer.getRenderTarget();
+  try {
+    renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
+    renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
+  } catch (e) { console.warn('shader warm-up', e); }
+  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); }
+  R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
+}
+
 /* ---------------- per-frame sync + render ---------------- */
 function render3(time, W, H, fov, cam) {
   if (!composer || R3.quality !== SETTINGS.quality) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
   if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); if (msRT) msRT.setSize(W, H); R3.W = W; R3.H = H; }
   if (canvas.width !== W || canvas.height !== H) renderer.setSize(W, H, false);
+  syncFar();
   // cameras
   camera.matrixWorld.fromArray(camM); camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
   camera.fov = fov; camera.aspect = W / H; camera.updateProjectionMatrix();
@@ -6943,10 +7067,11 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, look: 'noir' };
+const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir' };
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
-Object.assign(SETTINGS, loadLS('nq_settings', {}));
+const SAVED_SETTINGS = loadLS('nq_settings', {});
+Object.assign(SETTINGS, SAVED_SETTINGS);
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
@@ -7688,7 +7813,9 @@ function wireUI() {
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
-  for (const id of ['quality', 'quality2']) { const s = $(id); s.value = SETTINGS.quality; s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.quality = +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
+  // 'L' is the Laptop level: Balanced's pipeline, plus lighter detail on distant things (r3.js FAR)
+  const qv = () => SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality);
+  for (const id of ['quality', 'quality2']) { const s = $(id); s.value = qv(); s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   syncMusicBtn();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
@@ -7699,21 +7826,38 @@ function toTitle() {
 }
 function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best.toLocaleString() : '—'; $('bestWave').textContent = GAME.bestWave || '—'; }
 
+/* ---------------- GPU check: software-rendering warning, first-run quality pick ---------------- */
+function gpuName() {
+  try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || ''); } catch (e) { return ''; }
+}
+function gpuCheck() {
+  const g = gpuName(), q = new URLSearchParams(location.search);
+  const soft = /swiftshader|llvmpipe|softpipe|microsoft basic render|software/i.test(g);
+  if (soft && !q.has('nowarn') && !window.__NQ_CAPTURE) { $('swWarn').hidden = false; $('swWarnX').addEventListener('click', () => { $('swWarn').hidden = true; }); }
+  // first run only: integrated GPUs start on Laptop. A saved choice is never overridden.
+  const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc a|rx|rtx|gtx|radeon pro)\b/i.test(g);
+  if (!('quality' in SAVED_SETTINGS) && integrated && !soft) { SETTINGS.quality = 1; SETTINGS.laptop = true; }
+  GPU.name = g; GPU.soft = soft; GPU.integrated = integrated;
+}
+const GPU = { name: '', soft: false, integrated: false };
+
 /* ---------------- boot ---------------- */
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
+  gpuCheck();
   wireUI();
   toTitle();
+  render(GAME.time); warmShaders();   // build the post chain, then compile everything before the first real frame
   $('loading').hidden = true;
   requestAnimationFrame(frame);
   window.NQ_READY = true;
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, camera, vmCamera, GPU, gpuCheck, R3, FAR, warmShaders, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,

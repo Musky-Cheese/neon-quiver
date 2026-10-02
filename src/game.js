@@ -12,10 +12,11 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, look: 'noir' };
+const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir' };
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
-Object.assign(SETTINGS, loadLS('nq_settings', {}));
+const SAVED_SETTINGS = loadLS('nq_settings', {});
+Object.assign(SETTINGS, SAVED_SETTINGS);
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
@@ -757,7 +758,9 @@ function wireUI() {
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
-  for (const id of ['quality', 'quality2']) { const s = $(id); s.value = SETTINGS.quality; s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.quality = +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
+  // 'L' is the Laptop level: Balanced's pipeline, plus lighter detail on distant things (r3.js FAR)
+  const qv = () => SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality);
+  for (const id of ['quality', 'quality2']) { const s = $(id); s.value = qv(); s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   syncMusicBtn();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
@@ -768,21 +771,38 @@ function toTitle() {
 }
 function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best.toLocaleString() : '—'; $('bestWave').textContent = GAME.bestWave || '—'; }
 
+/* ---------------- GPU check: software-rendering warning, first-run quality pick ---------------- */
+function gpuName() {
+  try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || ''); } catch (e) { return ''; }
+}
+function gpuCheck() {
+  const g = gpuName(), q = new URLSearchParams(location.search);
+  const soft = /swiftshader|llvmpipe|softpipe|microsoft basic render|software/i.test(g);
+  if (soft && !q.has('nowarn') && !window.__NQ_CAPTURE) { $('swWarn').hidden = false; $('swWarnX').addEventListener('click', () => { $('swWarn').hidden = true; }); }
+  // first run only: integrated GPUs start on Laptop. A saved choice is never overridden.
+  const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc a|rx|rtx|gtx|radeon pro)\b/i.test(g);
+  if (!('quality' in SAVED_SETTINGS) && integrated && !soft) { SETTINGS.quality = 1; SETTINGS.laptop = true; }
+  GPU.name = g; GPU.soft = soft; GPU.integrated = integrated;
+}
+const GPU = { name: '', soft: false, integrated: false };
+
 /* ---------------- boot ---------------- */
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
+  gpuCheck();
   wireUI();
   toTitle();
+  render(GAME.time); warmShaders();   // build the post chain, then compile everything before the first real frame
   $('loading').hidden = true;
   requestAnimationFrame(frame);
   window.NQ_READY = true;
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, camera, vmCamera, GPU, gpuCheck, R3, FAR, warmShaders, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,

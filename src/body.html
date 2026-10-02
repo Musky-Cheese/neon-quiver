@@ -26,7 +26,7 @@
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="bests">
@@ -75,7 +75,7 @@
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
       </div>
     </div>
   </section>
@@ -107,5 +107,6 @@
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
+  <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>

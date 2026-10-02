@@ -65,7 +65,7 @@ with sync_playwright() as pw:
               zd.forEach((d, i) => { const zz = N.spawnZombie(K[i % 4], x - Math.sin(yaw) * d + (i % 2 ? 1.2 : -1.2), z - Math.cos(yaw) * d, 1); zz.speed = 0; });
               N.BOW.state = drawn ? 'drawing' : 'ready'; N.BOW.draw = drawn ? 1 : 0;
               N.pose({ x, z, y: 0, yaw, pitch, roll: 0, fov: 70 });
-              for (let i = 0; i < 4; i++) N.renderOnce();
+              for (let i = 0; i < 10; i++) N.renderOnce();   // enough for a spread env capture to finish
               return N.renderer.domElement.toDataURL('image/png'); }""", [[pid, x, z, yaw, pitch, zd, drawn], WET])
             open(os.path.join(a.out, f'q{qs}_{pid}.png'), 'wb').write(base64.b64decode(png.split(',')[1]))
             w, h, raw = pg.evaluate(DEPTH_JS)

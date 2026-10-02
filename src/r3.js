@@ -4,6 +4,33 @@
    ============================================================ */
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
+/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
+   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
+   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
+const FAR = {
+  NEAR: 45, FADE: 10,
+  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
+  on: false, laptop: false, _lap: null,
+};
+function syncFar() {
+  FAR.on = SETTINGS.quality <= 1; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;
+  NQU.uFar.value.set(FAR.NEAR, FAR.NEAR + FAR.FADE, FAR.on ? 1 : 0);
+  NQU.uFogFar.value.set(FAR.laptop ? FAR.lap.fogStart : 1e5, FAR.laptop ? FAR.lap.fogK : 0);
+}
+// The wet-street mirror and the district env map put distant things onto NEAR pixels (a tower in the puddle at
+// your feet), so those passes render the full scene: far-detail off, Laptop's culled chunks back, normal fog.
+const _farSave = { k: 0, fog: 0, hidden: [] };
+function farSuspend() {
+  _farSave.k = NQU.uFar.value.z; _farSave.fog = NQU.uFogFar.value.y; NQU.uFar.value.z = 0; NQU.uFogFar.value.y = 0;
+  const h = _farSave.hidden; h.length = 0;
+  if (FAR.laptop) for (const m of WORLD_MESHES) if (m.userData.lapHidden) { m.visible = true; h.push(m); }
+}
+function farResume() {
+  NQU.uFar.value.z = _farSave.k; NQU.uFogFar.value.y = _farSave.fog;
+  for (const m of _farSave.hidden) m.visible = false; _farSave.hidden.length = 0;
+}
+// 0 inside the near zone, 1 once fully past the fade (always 0 on Sharp / Ultra)
+function farK(d) { return FAR.on ? clamp((d - FAR.NEAR) / FAR.FADE, 0, 1) : 0; }
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
@@ -89,7 +116,7 @@ const PLANE = new THREE.PlaneGeometry(1, 1);
 // mip chain and anisotropy as the single textures), and the per-sign uniforms become per-instance attributes.
 const SIGN_VS = `attribute vec3 iCol; attribute vec3 iSign; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign;
 void main(){ vec4 w = modelMatrix*(instanceMatrix*vec4(position,1.)); vW = w.xyz; vUV = uv; vCol = iCol; vSign = iSign; gl_Position = projectionMatrix*viewMatrix*w; }`;
-const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
+const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
 ${NOISE_GLSL}
 void main(){
   vec2 uv = vUV; float flick = 1.; float uMode = vSign.y, uSeed = vSign.x;
@@ -97,7 +124,7 @@ void main(){
   else flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
   vec4 t = texture(uTex, vec3(uv, vSign.z));
   vec3 c = t.rgb*vCol*flick;
-  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-d*uFogDen))*0.8, 0., 1.));
+  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*0.8, 0., 1.));
   gl_FragColor = vec4(c, t.a*uA);
 }`;
 const SIGNS = [];          // { s: WORLD.signs entry, b: its batch, layer, vis }
@@ -126,7 +153,7 @@ function buildSigns() {
   }
   for (const g of groups.values()) {
     const n = g.list.length;
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol },
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
     const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -159,11 +186,11 @@ const DECAL_POOL = [];
 function buildDecalPool() {
   const vs = `attribute float iAlpha; varying vec2 vUV; varying vec3 vW; varying float vA;
 void main(){ vec4 w=modelMatrix*instanceMatrix*vec4(position,1.); vW=w.xyz; vUV=uv; vA=iAlpha; gl_Position=projectionMatrix*viewMatrix*w; }`;
-  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec3 uFogCol;
-void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-d*uFogDen))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
+  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
   }
@@ -173,12 +200,14 @@ function syncDecals() {
   if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
   const counts = _decalCounts; counts.fill(0);
   for (const d of DECALS) {
-    if ((d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2 > 150 * 150) continue;
+    const dd2 = (d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2;
+    const fk = FAR.on && dd2 > FAR.NEAR * FAR.NEAR ? farK(Math.sqrt(dd2)) : 0;   // far-detail tiers: blood pools fade out past the near zone
+    if (dd2 > 150 * 150 || fk >= 1) continue;
     const m = DECAL_POOL[d.v], i = counts[d.v]++;
     const fadeAt = DECAL_LIFE - 9;
     const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
     m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
-    m.geometry.attributes.iAlpha.array[i] = a * 0.92;
+    m.geometry.attributes.iAlpha.array[i] = fk > 0 ? a * 0.92 * (1 - fk) : a * 0.92;
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
     const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
@@ -275,6 +304,24 @@ function dynL(p, r, cr, cg, cb) { const e = dynE(); e.p = p; e.r = r; e.c[0] = c
 function dynP(x, y, z, r, cr, cg, cb) { const e = dynE(); e.p = e.own; e.own[0] = x; e.own[1] = y; e.own[2] = z; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
 const byD = (a, b) => a.d - b.d;
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
+// Far-detail tiers: a lamp's shadow map only changes when something that moves is within its reach (the city is
+// static), so while nothing is, its scheduled refresh is skipped: the map it keeps is the one it would redraw.
+// A grace period after the last mover leaves lets that mover's shadow clear on the usual schedule.
+const SHADOW_REACH = 34;   // spot shadow camera far (30 m) + a body's size
+const _movers = { n: 0, xz: new Float32Array(4096) };
+function gatherMovers() {
+  let n = 0; const a = _movers.xz, cap = a.length >> 1;
+  for (const z of ZRIG.live) if (z.rig && z.rig.mesh.visible && n < cap) { a[n * 2] = z.x; a[n * 2 + 1] = z.z; n++; }
+  for (let i = 0; i < WORLD_ITEMS.n && n < cap; i++) { const m = WORLD_ITEMS.a[i].m; a[n * 2] = m[12]; a[n * 2 + 1] = m[14]; n++; }
+  _movers.n = n; _movers.full = n >= cap;
+}
+function spotQuiet(sp, l, cadence) {
+  if (!l) return false;
+  if (_movers.full) { sp.dynT = R3.tick; return false; }
+  const a = _movers.xz, r2 = SHADOW_REACH * SHADOW_REACH;
+  for (let i = 0; i < _movers.n; i++) { const dx = a[i * 2] - l.p[0], dz = a[i * 2 + 1] - l.p[2]; if (dx * dx + dz * dz < r2) { sp.dynT = R3.tick; break; } }
+  return R3.tick - sp.dynT > cadence * 2 + 1;   // quiet once no mover has been in reach for two full turns
+}
 function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
@@ -286,17 +333,18 @@ function updateLights3(cam) {
   _lampsNear.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
   _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   R3.tick = (R3.tick + 1) | 0;
+  if (FAR.on) gatherMovers();
   const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
     sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
   }
   for (let i = 0; i < SPOTS.length; i++) {
     const sp = SPOTS[i], s = sp.s, l = _lampsNear[i];
-    if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; }
+    if (sp.lamp !== l) { sp.lamp = l; s.shadow.needsUpdate = true; sp.dynT = R3.tick; }
     // Ultra keeps shadows fresh (3 of every 4 lamps refresh each frame) without forcing every shadow map to redraw
     // in the same frame every frame — that all-at-once cost was compounding with heavy single-frame spikes (e.g. a
     // multi-kill AOE hit) into visible stalls. Lower tiers keep their coarser alternating refresh.
-    else { const cadence = SETTINGS.quality >= 3 ? 2 : PERF.pressure > 0.55 ? 4 : 3; if ((i + R3.tick) % cadence === 0) s.shadow.needsUpdate = true; }
+    else { const cadence = SETTINGS.quality >= 3 ? 2 : PERF.pressure > 0.55 ? 4 : 3; if ((i + R3.tick) % cadence === 0 && !(FAR.on && spotQuiet(sp, l, cadence))) s.shadow.needsUpdate = true; }
     if (!l) { s.intensity = 0; continue; }
     s.position.set(l.p[0], l.p[1], l.p[2]); s.target.position.set(l.p[0] + 0.01, 0, l.p[2] + 0.01);
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
@@ -440,21 +488,26 @@ function addWorldChunks(geo, castShadow, receiveShadow, name) {
     const mesh = new THREE.Mesh(chunks[i], MAT.static);
     mesh.name = name + '-' + i; mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
     mesh.userData.streamRadius = streamRadius;
+    mesh.userData.streamLap = name === 'far' ? 0 : name === 'near' ? FAR.lap.near : FAR.lap.props;   // 0: the skyline keeps its reach
     mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
   }
 }
 
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
+  if (FAR._lap !== FAR.laptop) { FAR._lap = FAR.laptop; force = true; }   // Laptop toggled: re-resolve every radius now
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
   WORLD_STREAM.x = x; WORLD_STREAM.z = z; let active = 0;
   for (const m of WORLD_MESHES) {
-    const s = m.geometry.boundingSphere; if (!s) { m.visible = true; active++; continue; } const r = m.userData.streamRadius;
-    m.visible = (s.center.x - x) ** 2 + (s.center.z - z) ** 2 <= (r + s.radius) ** 2;
+    const s = m.geometry.boundingSphere; if (!s) { m.visible = true; active++; continue; } const r = FAR.laptop && m.userData.streamLap ? m.userData.streamLap : m.userData.streamRadius;
+    const d2 = (s.center.x - x) ** 2 + (s.center.z - z) ** 2, r0 = m.userData.streamRadius;
+    m.visible = d2 <= (r + s.radius) ** 2;
+    m.userData.lapHidden = !m.visible && d2 <= (r0 + s.radius) ** 2;   // culled only because of Laptop's shorter reach
     if (m.visible) active++;
   }
   WORLD_STREAM.active = active;
-  for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < 260 * 260; }
+  const sr = FAR.laptop ? FAR.lap.signs : 260;
+  for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
 
@@ -477,10 +530,10 @@ function buildGlass() {
   if (!WORLD.glass.length) return;
   const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
   const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
+    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
     transparent: true, depthWrite: false, vertexColors: true,
     vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec2 uFogFar; uniform vec3 uFogCol, uRimCol;
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
@@ -492,12 +545,12 @@ void main(){
   vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
   vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
   float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
-  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-d * uFogDen)) * 0.8, 0., 1.));
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y))) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
-    const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280;
+    const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280; m.userData.streamLap = FAR.lap.glass;
     scene.add(m); WORLD_MESHES.push(m);
   }
 }
@@ -566,41 +619,67 @@ function buildOcclusion() {
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
 let pmrem = null;
-const ENV = { cache: {}, cur: null };
+const ENV = { cache: {}, cur: null, job: null, old: null, vis: true, refl: 0 };
 const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
 const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
-function captureEnv(d) {
-  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
-  scene.environment = null;
-  const vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
-  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = false;
-  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = false;
-  const saveOn = NQU.uReflOn.value; NQU.uReflOn.value = 0;
-  cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
-  renderer.shadowMap.needsUpdate = true;
-  cubeCam.update(renderer, scene);
-  NQU.uReflOn.value = saveOn;
-  partPoints.visible = vis; rainLines.visible = true; snowPts.visible = true;
-  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = true;
-  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = m.n > 0;
+// Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
+function envHide(on) {
+  if (on) { ENV.vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false; ENV.refl = NQU.uReflOn.value; NQU.uReflOn.value = 0; }
+  else { partPoints.visible = ENV.vis; rainLines.visible = true; snowPts.visible = true; NQU.uReflOn.value = ENV.refl; }
+  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = !on;
+  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
+}
+function envFace(face) {   // one cube face, exactly as CubeCamera.update renders it
+  const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
+  if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
+  cubeCam.updateMatrixWorld(true);
+  envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
+  const gm = cubeRT.texture.generateMipmaps; if (face < 5) cubeRT.texture.generateMipmaps = false;   // mips build on the last face
+  renderer.setRenderTarget(cubeRT, face); farSuspend(); renderer.render(scene, cubeCam.children[face]); farResume();
+  envHide(false); cubeRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+}
+function envFinish(d) {
   if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
   ENV.cache[d.id] = pmrem.fromCubemap(cubeRT.texture);
   return ENV.cache[d.id];
 }
+function captureEnv(d) {   // all six faces in one frame: only when nothing else can be shown yet
+  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+  ENV.job = null; cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
+  for (let f = 0; f < 6; f++) envFace(f);
+  return envFinish(d);
+}
+// Crossing into a district not captured yet: keep showing the old map, render one face per frame, then the
+// PMREM on the seventh frame, so a district boundary never pays for 6 scene renders + a convolution at once.
 function updateEnv(cam) {
-  if (ENV_DIRTY) { for (const k in ENV.cache) ENV.cache[k].dispose(); ENV.cache = {}; ENV_DIRTY = false; }
+  if (ENV_DIRTY) {   // new Look: every capture is stale. Keep the one on screen alive until its replacement is ready.
+    for (const k in ENV.cache) if (ENV.cache[k].texture !== scene.environment) ENV.cache[k].dispose(); else ENV.old = ENV.cache[k];
+    ENV.cache = {}; ENV.job = null; ENV_DIRTY = false;
+  }
   const d = districtAt(cam[0], cam[2]);
-  const rt = ENV.cache[d.id] || captureEnv(d);
-  if (scene.environment !== rt.texture) scene.environment = rt.texture;
+  let rt = ENV.cache[d.id];
+  if (!rt) {
+    if (!scene.environment) rt = captureEnv(d);   // nothing to show meanwhile (first frame)
+    else {
+      if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+      if (!ENV.job || ENV.job.d !== d) { ENV.job = { d, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
+      if (ENV.job.face < 6) envFace(ENV.job.face++);
+      else { ENV.job = null; rt = envFinish(d); }
+    }
+  }
+  if (rt && scene.environment !== rt.texture) {
+    scene.environment = rt.texture;
+    if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
+  }
 }
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
 const coneMat = new THREE.ShaderMaterial({
-  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U),
+  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
   transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
+  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW);
@@ -610,7 +689,7 @@ void main(){
   float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x + 1e-5) * 9., vW.y * 1.4 + uTime * 9.));
   float d = length(vW - cameraPosition);
   float near = smoothstep(0.5, 3.0, d);
-  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-d * uFogDen * 0.5);
+  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y) * 0.5);
   gl_FragColor = vec4(c, 0.);
 }` });
 const CONES = [];
@@ -630,12 +709,12 @@ function buildVolumes() {
     scene.add(m); CONES.push(m);
   }
   const mat = new THREE.ShaderMaterial({
-    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen }, VOL_U), transparent: true, depthWrite: false,
+    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U), transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
     vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
-    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
-void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-vD * uFogDen * 0.4), 0.); }` });
+    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen; uniform vec2 uFogFar;
+void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-(vD * uFogDen + max(vD - uFogFar.x, 0.) * uFogFar.y) * 0.4), 0.); }` });
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -676,7 +755,7 @@ function renderReflection(r) {
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
   for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
-  r.render(scene, reflCam);
+  farSuspend(); r.render(scene, reflCam); farResume();
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
@@ -852,11 +931,33 @@ function applyQuality3(q) {
   sun.castShadow = sh; for (const { s, shadow } of SPOTS) s.castShadow = sh && shadow;
 }
 
+/* ---------------- shader warm-up: compile every program at load, not on first use in play ---------------- */
+// Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
+// Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
+function warmShaders() {
+  const t0 = performance.now(), before = renderer.info.programs.length;
+  const g = new THREE.BufferGeometry(), n = 3;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
+  for (const [k, w] of [['iTint', 4], ['iEmit', 3], ['iSkin', 3]]) g.setAttribute(k, new THREE.InstancedBufferAttribute(new Float32Array(w), w));
+  const stand = [new THREE.Mesh(g, MAT.static), new THREE.InstancedMesh(g, MAT.inst, 1), new THREE.InstancedMesh(g, MAT.vm, 1)];
+  stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
+  for (const m of stand) { m.frustumCulled = false; scene.add(m); }
+  const prev = renderer.getRenderTarget();
+  try {
+    renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
+    renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
+  } catch (e) { console.warn('shader warm-up', e); }
+  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); }
+  R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
+}
+
 /* ---------------- per-frame sync + render ---------------- */
 function render3(time, W, H, fov, cam) {
   if (!composer || R3.quality !== SETTINGS.quality) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
   if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); if (msRT) msRT.setSize(W, H); R3.W = W; R3.H = H; }
   if (canvas.width !== W || canvas.height !== H) renderer.setSize(W, H, false);
+  syncFar();
   // cameras
   camera.matrixWorld.fromArray(camM); camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
   camera.fov = fov; camera.aspect = W / H; camera.updateProjectionMatrix();
