@@ -6202,8 +6202,8 @@ const FOG_GLSL = `#ifdef NQ_FOGFAR
 uniform vec2 uFogFar;
 #define NQ_FOGD(d) ((d) * uFogDen + max((d) - uFogFar.x, 0.) * uFogFar.y)
 #else
-#define NQ_FOGD(d) ((d) * uFogDen)
-#endif`;
+#define NQ_FOGD(d) d * uFogDen
+#endif`;   // no parentheses: expands to exactly the original fog expressions
 function fogMat(m) { m.userData.farOK = false; FAR_MATS.push(m); farDefines(m); return m; }
 const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
 ${NOISE_GLSL}
