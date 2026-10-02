@@ -4,18 +4,13 @@
    ============================================================ */
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
-/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
-   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
-   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
-const FAR = {
-  NEAR: 45, FADE: 10,
-  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
-  on: false, laptop: false, _lap: null,
-};
+// FAR (the distant-detail budget and its tuning numbers) lives in engine.js, next to the shaders that read it
 function syncFar() {
   FAR.on = SETTINGS.quality <= 1; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;
   NQU.uFar.value.set(FAR.NEAR, FAR.NEAR + FAR.FADE, FAR.on ? 1 : 0);
   NQU.uFogFar.value.set(FAR.laptop ? FAR.lap.fogStart : 1e5, FAR.laptop ? FAR.lap.fogK : 0);
+  const key = (FAR.on ? 1 : 0) + (FAR.laptop ? 2 : 0);
+  if (key !== FAR._key) { FAR._key = key; for (const m of FAR_MATS) farDefines(m); }   // shaders rebuild, like any quality switch
 }
 // The wet-street mirror and the district env map put distant things onto NEAR pixels (a tower in the puddle at
 // your feet), so those passes render the full scene: far-detail off, Laptop's culled chunks back, normal fog.
@@ -116,15 +111,24 @@ const PLANE = new THREE.PlaneGeometry(1, 1);
 // mip chain and anisotropy as the single textures), and the per-sign uniforms become per-instance attributes.
 const SIGN_VS = `attribute vec3 iCol; attribute vec3 iSign; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign;
 void main(){ vec4 w = modelMatrix*(instanceMatrix*vec4(position,1.)); vW = w.xyz; vUV = uv; vCol = iCol; vSign = iSign; gl_Position = projectionMatrix*viewMatrix*w; }`;
-const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+// fog for the non-uber shaders: Laptop (NQ_FOGFAR) adds density past a start distance; otherwise the original formula
+const FOG_GLSL = `#ifdef NQ_FOGFAR
+uniform vec2 uFogFar;
+#define NQ_FOGD(d) ((d) * uFogDen + max((d) - uFogFar.x, 0.) * uFogFar.y)
+#else
+#define NQ_FOGD(d) ((d) * uFogDen)
+#endif`;
+function fogMat(m) { m.userData.farOK = false; FAR_MATS.push(m); farDefines(m); return m; }
+const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
 ${NOISE_GLSL}
+${FOG_GLSL}
 void main(){
   vec2 uv = vUV; float flick = 1.; float uMode = vSign.y, uSeed = vSign.x;
   if (uMode > 0.5) { float row = floor((1.-uv.y)*24.); float g = step(0.93, h21(vec2(row, floor(uTime*6.)+uSeed))); uv.x += g*(h21(vec2(row,uTime))-0.5)*0.08; flick = 0.8+0.2*sin(uv.y*300.+uTime*20.); }
   else flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
   vec4 t = texture(uTex, vec3(uv, vSign.z));
   vec3 c = t.rgb*vCol*flick;
-  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*0.8, 0., 1.));
+  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-NQ_FOGD(d)))*0.8, 0., 1.));
   gl_FragColor = vec4(c, t.a*uA);
 }`;
 const SIGNS = [];          // { s: WORLD.signs entry, b: its batch, layer, vis }
@@ -155,6 +159,7 @@ function buildSigns() {
     const n = g.list.length;
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
+    fogMat(mat);
     const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
@@ -186,11 +191,13 @@ const DECAL_POOL = [];
 function buildDecalPool() {
   const vs = `attribute float iAlpha; varying vec2 vUV; varying vec3 vW; varying float vA;
 void main(){ vec4 w=modelMatrix*instanceMatrix*vec4(position,1.); vW=w.xyz; vUV=uv; vA=iAlpha; gl_Position=projectionMatrix*viewMatrix*w; }`;
-  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
-void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
+  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec3 uFogCol;
+${FOG_GLSL}
+void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-NQ_FOGD(d)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    fogMat(mat);
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
   }
@@ -506,7 +513,7 @@ function updateWorldStreaming(cam, force = false) {
     if (m.visible) active++;
   }
   WORLD_STREAM.active = active;
-  const sr = FAR.laptop ? FAR.lap.signs : 260;
+  const sr = 260;
   for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
@@ -533,7 +540,9 @@ function buildGlass() {
     uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
     transparent: true, depthWrite: false, vertexColors: true,
     vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec2 uFogFar; uniform vec3 uFogCol, uRimCol;
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+${FOG_GLSL}
+
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
@@ -545,11 +554,12 @@ void main(){
   vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
   vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
   float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
-  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y))) * 0.8, 0., 1.));
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-NQ_FOGD(d))) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
+    if (i === 0) fogMat(mat);
     const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280; m.userData.streamLap = FAR.lap.glass;
     scene.add(m); WORLD_MESHES.push(m);
   }
@@ -679,7 +689,9 @@ const coneMat = new THREE.ShaderMaterial({
   uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
   transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
+${FOG_GLSL}
+
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW);
@@ -689,12 +701,13 @@ void main(){
   float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x + 1e-5) * 9., vW.y * 1.4 + uTime * 9.));
   float d = length(vW - cameraPosition);
   float near = smoothstep(0.5, 3.0, d);
-  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y) * 0.5);
+  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-NQ_FOGD(d) * 0.5);
   gl_FragColor = vec4(c, 0.);
 }` });
 const CONES = [];
 const HALOS = [];
 function buildVolumes() {
+  fogMat(coneMat);
   // every lamp cone in one mesh: they share a material and blend additively (order-free), so one draw (two: back
   // faces, then front) replaces two per cone; the cones are baked in world space, their shading uses no model matrix
   const cones = [];
@@ -713,8 +726,10 @@ function buildVolumes() {
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
     vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
-    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen; uniform vec2 uFogFar;
-void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-(vD * uFogDen + max(vD - uFogFar.x, 0.) * uFogFar.y) * 0.4), 0.); }` });
+    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
+${FOG_GLSL}
+
+void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-NQ_FOGD(vD) * 0.4), 0.); }` });
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -723,6 +738,7 @@ void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. 
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
+    fogMat(mat);
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh); HALOS.push(mesh);
   }
 }

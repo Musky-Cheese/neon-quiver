@@ -160,9 +160,29 @@ const NQ_LIGHTS_FRAG = (() => {
   spot = spot.replace(SP, 'if ( nqLightOn( spotLight.position, spotLight.color, spotLight.distance, geometryPosition ) ) {\n\t\t' + SP + '\n\t\tif ( directLight.visible ) {').replace(RE, RE + ' } }');
   return pre + spot + src.slice(iE);
 })();
+/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
+   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
+   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
+const FAR = {
+  NEAR: 45, FADE: 10,
+  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
+  on: false, laptop: false, _lap: null, _key: -1,
+};
+// every material whose shader has the far-detail / Laptop-fog switches; r3.js syncFar() flips their defines
+const FAR_MATS = [];
+function farDefines(m) {   // NQ_FAR: Fast / Balanced / Laptop, NQ_FOGFAR: Laptop. Returns true if anything changed.
+  const on = FAR.on, fog = FAR.laptop, d = m.defines || (m.defines = {});
+  const far = on && m.userData.farOK !== false;
+  if (!!d.NQ_FAR === far && !!d.NQ_FOGFAR === fog) return false;
+  if (far) d.NQ_FAR = 1; else delete d.NQ_FAR;
+  if (fog) d.NQ_FOGFAR = 1; else delete d.NQ_FOGFAR;
+  m.needsUpdate = true; return true;
+}
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 });
   m.defines = {};
+  m.userData.farOK = kind === 'static' || kind === 'inst';   // detail fade is for the city; bodies and the bow stay as they are
+  FAR_MATS.push(m); farDefines(m);
   if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
   if (kind === 'vm') m.defines.NQ_VM = 1;
   if (kind === 'zombie') m.defines.NQ_Z = 1;
@@ -203,11 +223,18 @@ uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, 
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 uniform float uTexOn, uSnowCov;
 ${NOISE_GLSL}
-uniform vec3 uFar; uniform vec2 uFogFar;
-// 0 everywhere inside the near zone; past it, fine detail fades to its mean (it is under a pixel there anyway)
+#ifdef NQ_FAR
+// Fast / Balanced / Laptop only (r3.js FAR). 0 everywhere inside the near zone; past it, fine detail fades to its
+// mean (it is under a pixel there anyway). Without NQ_FAR the shader compiles exactly as it always did.
+uniform vec3 uFar;
 float nqFar = 0.;
 float vnf(vec2 p) { return nqFar <= 0. ? vn(p) : nqFar >= 1. ? 0.5 : mix(vn(p), 0.5, nqFar); }
-float nqFogD(float d) { return d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y; }
+#else
+#define vnf vn
+#endif
+#ifdef NQ_FOGFAR
+uniform vec2 uFogFar;   // Laptop: extra fog past a start distance
+#endif
 // does a point/spot light (view-space position, colour, range cutoff) reach this fragment at all?
 bool nqLightOn(vec3 p, vec3 c, float r, vec3 g) { vec3 d = p - g; return c != vec3(0.) && (r <= 0. || dot(d, d) < r * r); }
 #if !defined(NQ_Z) && !defined(NQ_VM)
@@ -264,7 +291,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   float dynK = uDyn;
 #endif
   float mat = vNqM.y;
-#if !defined(NQ_Z) && !defined(NQ_VM)
+#if defined(NQ_FAR) && !defined(NQ_Z) && !defined(NQ_VM)
   if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
 #endif
   vec3 base = vNqC.rgb * tint;
@@ -310,8 +337,10 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
       if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+#ifdef NQ_FAR
        float roomFar = 0.5 * (0.55 + 0.45 * h21(id + 1.9));   // far away: the room's average brightness, no trace
        if (nqFar < 1.) {
+#endif
         vec3 V = normalize(vNqW - cameraPosition);
         vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
         vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
@@ -327,8 +356,10 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         else sh = 0.42;        // side walls
         sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
         room = sh * (0.55 + 0.45 * h21(id + 1.9));
+#ifdef NQ_FAR
         if (nqFar > 0.) room = mix(room, roomFar, nqFar);
        } else room = roomFar;
+#endif
       }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
@@ -599,7 +630,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       .replace('#include <lights_fragment_begin>', NQ_LIGHTS_FRAG || '#include <lights_fragment_begin>')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
       .replace('#include <fog_fragment>', `
-  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-nqFogD(d));
+  { float d = length(vNqW - cameraPosition);
+#ifdef NQ_FOGFAR
+    float fog = 1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y));
+#else
+    float fog = 1. - exp(-d*uFogDen);
+#endif
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
 #if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)

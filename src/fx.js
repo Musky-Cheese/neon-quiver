@@ -21,7 +21,7 @@ function updateParticles(dt) {
   let n = 0; const d = PART.data;
   // far-detail tiers: past the near zone, up to half the particles are left out of the draw (all still simulate,
   // so nothing about the near ones changes); which ones is fixed per pool slot, so it never flickers
-  const thin = typeof FAR !== 'undefined' && FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
+  const thin = FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
   for (const p of PART.p) {
     if (!p.alive) continue;
     p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }

@@ -470,9 +470,29 @@ const NQ_LIGHTS_FRAG = (() => {
   spot = spot.replace(SP, 'if ( nqLightOn( spotLight.position, spotLight.color, spotLight.distance, geometryPosition ) ) {\n\t\t' + SP + '\n\t\tif ( directLight.visible ) {').replace(RE, RE + ' } }');
   return pre + spot + src.slice(iE);
 })();
+/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
+   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
+   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
+const FAR = {
+  NEAR: 45, FADE: 10,
+  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
+  on: false, laptop: false, _lap: null, _key: -1,
+};
+// every material whose shader has the far-detail / Laptop-fog switches; r3.js syncFar() flips their defines
+const FAR_MATS = [];
+function farDefines(m) {   // NQ_FAR: Fast / Balanced / Laptop, NQ_FOGFAR: Laptop. Returns true if anything changed.
+  const on = FAR.on, fog = FAR.laptop, d = m.defines || (m.defines = {});
+  const far = on && m.userData.farOK !== false;
+  if (!!d.NQ_FAR === far && !!d.NQ_FOGFAR === fog) return false;
+  if (far) d.NQ_FAR = 1; else delete d.NQ_FAR;
+  if (fog) d.NQ_FOGFAR = 1; else delete d.NQ_FOGFAR;
+  m.needsUpdate = true; return true;
+}
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 });
   m.defines = {};
+  m.userData.farOK = kind === 'static' || kind === 'inst';   // detail fade is for the city; bodies and the bow stay as they are
+  FAR_MATS.push(m); farDefines(m);
   if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
   if (kind === 'vm') m.defines.NQ_VM = 1;
   if (kind === 'zombie') m.defines.NQ_Z = 1;
@@ -513,11 +533,18 @@ uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, 
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
 uniform float uTexOn, uSnowCov;
 ${NOISE_GLSL}
-uniform vec3 uFar; uniform vec2 uFogFar;
-// 0 everywhere inside the near zone; past it, fine detail fades to its mean (it is under a pixel there anyway)
+#ifdef NQ_FAR
+// Fast / Balanced / Laptop only (r3.js FAR). 0 everywhere inside the near zone; past it, fine detail fades to its
+// mean (it is under a pixel there anyway). Without NQ_FAR the shader compiles exactly as it always did.
+uniform vec3 uFar;
 float nqFar = 0.;
 float vnf(vec2 p) { return nqFar <= 0. ? vn(p) : nqFar >= 1. ? 0.5 : mix(vn(p), 0.5, nqFar); }
-float nqFogD(float d) { return d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y; }
+#else
+#define vnf vn
+#endif
+#ifdef NQ_FOGFAR
+uniform vec2 uFogFar;   // Laptop: extra fog past a start distance
+#endif
 // does a point/spot light (view-space position, colour, range cutoff) reach this fragment at all?
 bool nqLightOn(vec3 p, vec3 c, float r, vec3 g) { vec3 d = p - g; return c != vec3(0.) && (r <= 0. || dot(d, d) < r * r); }
 #if !defined(NQ_Z) && !defined(NQ_VM)
@@ -574,7 +601,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   float dynK = uDyn;
 #endif
   float mat = vNqM.y;
-#if !defined(NQ_Z) && !defined(NQ_VM)
+#if defined(NQ_FAR) && !defined(NQ_Z) && !defined(NQ_VM)
   if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
 #endif
   vec3 base = vNqC.rgb * tint;
@@ -620,8 +647,10 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
       float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
       if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
+#ifdef NQ_FAR
        float roomFar = 0.5 * (0.55 + 0.45 * h21(id + 1.9));   // far away: the room's average brightness, no trace
        if (nqFar < 1.) {
+#endif
         vec3 V = normalize(vNqW - cameraPosition);
         vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
         vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
@@ -637,8 +666,10 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
         else sh = 0.42;        // side walls
         sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
         room = sh * (0.55 + 0.45 * h21(id + 1.9));
+#ifdef NQ_FAR
         if (nqFar > 0.) room = mix(room, roomFar, nqFar);
        } else room = roomFar;
+#endif
       }
       float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
       emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
@@ -909,7 +940,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       .replace('#include <lights_fragment_begin>', NQ_LIGHTS_FRAG || '#include <lights_fragment_begin>')
       .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
       .replace('#include <fog_fragment>', `
-  { float d = length(vNqW - cameraPosition); float fog = 1. - exp(-nqFogD(d));
+  { float d = length(vNqW - cameraPosition);
+#ifdef NQ_FOGFAR
+    float fog = 1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y));
+#else
+    float fog = 1. - exp(-d*uFogDen);
+#endif
     fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
     gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
 #if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)
@@ -2789,7 +2825,7 @@ function updateParticles(dt) {
   let n = 0; const d = PART.data;
   // far-detail tiers: past the near zone, up to half the particles are left out of the draw (all still simulate,
   // so nothing about the near ones changes); which ones is fixed per pool slot, so it never flickers
-  const thin = typeof FAR !== 'undefined' && FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
+  const thin = FAR.on, cx = camM[12], cz = camM[14], n2 = thin ? FAR.NEAR * FAR.NEAR : 0;
   for (const p of PART.p) {
     if (!p.alive) continue;
     p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }
@@ -6054,18 +6090,13 @@ function drawZombieRig(z, time) {
    ============================================================ */
 const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
 const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
-/* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
-   any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
-   fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */
-const FAR = {
-  NEAR: 45, FADE: 10,
-  lap: { fogStart: 55, fogK: 0.014, props: 220, near: 340, glass: 220 },
-  on: false, laptop: false, _lap: null,
-};
+// FAR (the distant-detail budget and its tuning numbers) lives in engine.js, next to the shaders that read it
 function syncFar() {
   FAR.on = SETTINGS.quality <= 1; FAR.laptop = FAR.on && SETTINGS.quality === 1 && !!SETTINGS.laptop;
   NQU.uFar.value.set(FAR.NEAR, FAR.NEAR + FAR.FADE, FAR.on ? 1 : 0);
   NQU.uFogFar.value.set(FAR.laptop ? FAR.lap.fogStart : 1e5, FAR.laptop ? FAR.lap.fogK : 0);
+  const key = (FAR.on ? 1 : 0) + (FAR.laptop ? 2 : 0);
+  if (key !== FAR._key) { FAR._key = key; for (const m of FAR_MATS) farDefines(m); }   // shaders rebuild, like any quality switch
 }
 // The wet-street mirror and the district env map put distant things onto NEAR pixels (a tower in the puddle at
 // your feet), so those passes render the full scene: far-detail off, Laptop's culled chunks back, normal fog.
@@ -6166,15 +6197,24 @@ const PLANE = new THREE.PlaneGeometry(1, 1);
 // mip chain and anisotropy as the single textures), and the per-sign uniforms become per-instance attributes.
 const SIGN_VS = `attribute vec3 iCol; attribute vec3 iSign; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign;
 void main(){ vec4 w = modelMatrix*(instanceMatrix*vec4(position,1.)); vW = w.xyz; vUV = uv; vCol = iCol; vSign = iSign; gl_Position = projectionMatrix*viewMatrix*w; }`;
-const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+// fog for the non-uber shaders: Laptop (NQ_FOGFAR) adds density past a start distance; otherwise the original formula
+const FOG_GLSL = `#ifdef NQ_FOGFAR
+uniform vec2 uFogFar;
+#define NQ_FOGD(d) ((d) * uFogDen + max((d) - uFogFar.x, 0.) * uFogFar.y)
+#else
+#define NQ_FOGD(d) ((d) * uFogDen)
+#endif`;
+function fogMat(m) { m.userData.farOK = false; FAR_MATS.push(m); farDefines(m); return m; }
+const SIGN_FS = `precision highp float; varying vec2 vUV; varying vec3 vW; flat varying vec3 vCol; flat varying vec3 vSign; uniform highp sampler2DArray uTex; uniform float uTime, uA, uFogDen; uniform vec3 uFogCol;
 ${NOISE_GLSL}
+${FOG_GLSL}
 void main(){
   vec2 uv = vUV; float flick = 1.; float uMode = vSign.y, uSeed = vSign.x;
   if (uMode > 0.5) { float row = floor((1.-uv.y)*24.); float g = step(0.93, h21(vec2(row, floor(uTime*6.)+uSeed))); uv.x += g*(h21(vec2(row,uTime))-0.5)*0.08; flick = 0.8+0.2*sin(uv.y*300.+uTime*20.); }
   else flick = 1. - step(0.985, h21(vec2(floor(uTime*9.), uSeed)))*0.85;
   vec4 t = texture(uTex, vec3(uv, vSign.z));
   vec3 c = t.rgb*vCol*flick;
-  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*0.8, 0., 1.));
+  float d = length(vW - cameraPosition); c = mix(c, uFogCol, clamp((1.-exp(-NQ_FOGD(d)))*0.8, 0., 1.));
   gl_FragColor = vec4(c, t.a*uA);
 }`;
 const SIGNS = [];          // { s: WORLD.signs entry, b: its batch, layer, vis }
@@ -6205,6 +6245,7 @@ function buildSigns() {
     const n = g.list.length;
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
+    fogMat(mat);
     const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
@@ -6236,11 +6277,13 @@ const DECAL_POOL = [];
 function buildDecalPool() {
   const vs = `attribute float iAlpha; varying vec2 vUV; varying vec3 vW; varying float vA;
 void main(){ vec4 w=modelMatrix*instanceMatrix*vec4(position,1.); vW=w.xyz; vUV=uv; vA=iAlpha; gl_Position=projectionMatrix*viewMatrix*w; }`;
-  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
-void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
+  const fs = `precision highp float; varying vec2 vUV; varying vec3 vW; varying float vA; uniform sampler2D uTex; uniform float uFogDen; uniform vec3 uFogCol;
+${FOG_GLSL}
+void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-NQ_FOGD(d)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    fogMat(mat);
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
   }
@@ -6556,7 +6599,7 @@ function updateWorldStreaming(cam, force = false) {
     if (m.visible) active++;
   }
   WORLD_STREAM.active = active;
-  const sr = FAR.laptop ? FAR.lap.signs : 260;
+  const sr = 260;
   for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
@@ -6583,7 +6626,9 @@ function buildGlass() {
     uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
     transparent: true, depthWrite: false, vertexColors: true,
     vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec2 uFogFar; uniform vec3 uFogCol, uRimCol;
+    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
+${FOG_GLSL}
+
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
@@ -6595,11 +6640,12 @@ void main(){
   vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
   vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
   float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
-  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y))) * 0.8, 0., 1.));
+  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-NQ_FOGD(d))) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
+    if (i === 0) fogMat(mat);
     const m = new THREE.Mesh(chunks[i], mat); m.name = 'glass-' + i; m.matrixAutoUpdate = false; m.renderOrder = 3; m.frustumCulled = true; m.userData.streamRadius = 280; m.userData.streamLap = FAR.lap.glass;
     scene.add(m); WORLD_MESHES.push(m);
   }
@@ -6729,7 +6775,9 @@ const coneMat = new THREE.ShaderMaterial({
   uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
   transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
   vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec2 uFogFar; uniform vec3 uFogCol;
+  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
+${FOG_GLSL}
+
 ${NOISE_GLSL}
 void main(){
   vec3 V = normalize(cameraPosition - vW);
@@ -6739,12 +6787,13 @@ void main(){
   float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x + 1e-5) * 9., vW.y * 1.4 + uTime * 9.));
   float d = length(vW - cameraPosition);
   float near = smoothstep(0.5, 3.0, d);
-  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y) * 0.5);
+  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-NQ_FOGD(d) * 0.5);
   gl_FragColor = vec4(c, 0.);
 }` });
 const CONES = [];
 const HALOS = [];
 function buildVolumes() {
+  fogMat(coneMat);
   // every lamp cone in one mesh: they share a material and blend additively (order-free), so one draw (two: back
   // faces, then front) replaces two per cone; the cones are baked in world space, their shading uses no model matrix
   const cones = [];
@@ -6763,8 +6812,10 @@ function buildVolumes() {
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
     vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
 void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
-    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen; uniform vec2 uFogFar;
-void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-(vD * uFogDen + max(vD - uFogFar.x, 0.) * uFogFar.y) * 0.4), 0.); }` });
+    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
+${FOG_GLSL}
+
+void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-NQ_FOGD(vD) * 0.4), 0.); }` });
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -6773,6 +6824,7 @@ void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. 
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
+    fogMat(mat);
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh); HALOS.push(mesh);
   }
 }
@@ -7857,7 +7909,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, GPU, gpuCheck, R3, FAR, warmShaders, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, camera, vmCamera, GPU, gpuCheck, R3, FAR, warmShaders, FAR_MATS_N: () => FAR_MATS.length, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,

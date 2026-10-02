@@ -50,7 +50,9 @@ DEPTH_JS = """() => { const N = window.NQ, T = N.THREE, r = N.renderer, W = r.do
 httpd, url = serve(); t0 = time.time()
 with sync_playwright() as pw:
     b, pg, errs = open_game(pw, url, W, H, loop=False, query='?nowarn=1')
-    pg.evaluate("() => { const N = window.NQ; N.noLoop(true); N.play(); N.clear(); N.freeze(true); N.DBG.noVM = false; }")
+    # one title frame first, as the real game always draws: the title infected get their rigs, so the rig pool the
+    # test zombies draw from is in the same state on every build
+    pg.evaluate("() => { const N = window.NQ; N.noLoop(true); N.renderOnce(); N.play(); N.clear(); N.freeze(true); N.DBG.noVM = false; }")
     poses = [p for p in POSES if not a.only or p[0] in a.only.split(',')]
     for qs in a.q.split(','):
         q = 1 if qs == 'L' else int(qs); lap = qs == 'L'
