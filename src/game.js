@@ -780,7 +780,7 @@ function gpuCheck() {
   const soft = /swiftshader|llvmpipe|softpipe|microsoft basic render|software/i.test(g);
   if (soft && !q.has('nowarn') && !window.__NQ_CAPTURE) { $('swWarn').hidden = false; $('swWarnX').addEventListener('click', () => { $('swWarn').hidden = true; }); }
   // first run only: integrated GPUs start on Laptop. A saved choice is never overridden.
-  const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc a|rx|rtx|gtx|radeon pro)\b/i.test(g);
+  const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc(\(tm\))? a\d+|rx|rtx|gtx|radeon pro)\b/i.test(g);
   if (!('quality' in SAVED_SETTINGS) && integrated && !soft) { SETTINGS.quality = 1; SETTINGS.laptop = true; }
   GPU.name = g; GPU.soft = soft; GPU.integrated = integrated;
 }
