@@ -20,9 +20,9 @@ EVENTS = [
 ] + [(f'spawn {t}', f"N.spawnZombie('{t}', N.PLAYER.x + 1, N.PLAYER.z - 12, 5).speed = 0;", 4)
      for t in ['walker', 'runner', 'brute', 'spitter', 'screamer', 'climber']] + [
   ('boss', "N.GAME.spawnBoss();", 6),
-] + [(f'arrow {k}', f"N.shootAt(N.PLAYER.x + 1, 1.2, N.PLAYER.z - 12, {i}, 1);", 20)
+] + [(f'arrow {k}', f"N.shootAt(N.PLAYER.x + 1, 1.2, N.PLAYER.z - 12, {i}, 1);", 10)
      for i, k in enumerate(['std', 'fire', 'boom', 'rail', 'frost', 'tether', 'scatter'])] + [
-  ('arrow frost again', "N.shootAt(N.PLAYER.x + 1, 1.2, N.PLAYER.z - 12, 4, 1);", 20),
+  ('arrow frost again', "N.shootAt(N.PLAYER.x + 1, 1.2, N.PLAYER.z - 12, 4, 1);", 10),
 ] + [(f'enter {d}', f"N.pose({{ x: {x}, z: {z} }});", 10) for d, x, z in
      [('market', 106, 0), ('warrens', -84, 0), ('suburbs', 0, 125), ('docks', 196, -4), ('metro', -113, -96), ('hub again', 0, 14)]]
 httpd, url = serve(); out = []
