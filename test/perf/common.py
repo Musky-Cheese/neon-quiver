@@ -26,7 +26,7 @@ def open_game(pw, url, w, h, capture=True, query='', loop=True):
     pg.on('console', lambda m: m.type == 'error' and errs.append('CONSOLE ' + m.text[:300]))
     # loop=False: the game's own rAF loop never runs, so nothing steps (or draws random numbers) on wall-clock time
     pg.add_init_script(SEED_JS + ('' if loop else 'window.requestAnimationFrame = () => 0;') + ('window.__NQ_CAPTURE = true; window.__NQ_CAPTURE_DPR = 1;' if capture else ''))
-    pg.goto(url + query); pg.wait_for_function('window.NQ_READY === true', timeout=900000)
+    pg.goto(url + query); pg.wait_for_function('window.NQ_READY === true', timeout=900000, polling=500)   # timer, not rAF: headless frames can stall
     return b, pg, errs
 
 # camera spots: every district's environment-capture point (so a bigger map adds spots automatically),
