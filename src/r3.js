@@ -659,8 +659,10 @@ function captureEnv(d) {   // all six faces in one frame: only when nothing else
   for (let f = 0; f < 6; f++) envFace(f);
   return envFinish(d);
 }
-// Crossing into a district not captured yet: keep showing the old map, render one face per frame, then the
-// PMREM on the seventh frame, so a district boundary never pays for 6 scene renders + a convolution at once.
+// Crossing into a district not captured yet (Fast / Balanced / Laptop): keep showing the old map, render one face
+// per frame, then the PMREM on the seventh frame, so a district boundary never pays for 6 scene renders + a
+// convolution at once. Faces after the first see the shadow maps of later frames, so a nearby zombie's shadow can
+// fade into the ambient light a little; Sharp and Ultra keep the one-frame capture untouched.
 function updateEnv(cam) {
   if (ENV_DIRTY) {   // new Look: every capture is stale. Keep the one on screen alive until its replacement is ready.
     for (const k in ENV.cache) if (ENV.cache[k].texture !== scene.environment) ENV.cache[k].dispose(); else ENV.old = ENV.cache[k];
@@ -669,7 +671,7 @@ function updateEnv(cam) {
   const d = districtAt(cam[0], cam[2]);
   let rt = ENV.cache[d.id];
   if (!rt) {
-    if (!scene.environment) rt = captureEnv(d);   // nothing to show meanwhile (first frame)
+    if (!scene.environment || !FAR.on) rt = captureEnv(d);   // first frame, or Sharp / Ultra: one frame, exactly as before
     else {
       if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
       if (!ENV.job || ENV.job.d !== d) { ENV.job = { d, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
