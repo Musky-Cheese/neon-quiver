@@ -111,7 +111,7 @@ function padPlay(dt, mx, mz, lm, lx, ly) {
   if (BOW.state === 'drawing') { PAD.rumbleT -= dt; if (PAD.rumbleT <= 0) { PAD.rumbleT = 0.1; padRumble(0.04 + 0.22 * BOW.draw, 0, 130); } } else PAD.rumbleT = 0;
 }
 /* menus: spatial focus navigation over whichever .screen is showing */
-const PAD_DEFAULT_FOCUS = { title: 'playBtn', pause: 'resumeBtn', over: 'againBtn', shop: 'nextWaveBtn', controls: 'ctrlBack' };
+const PAD_DEFAULT_FOCUS = { title: 'playBtn', pause: 'resumeBtn', over: 'againBtn', shop: 'nextWaveBtn', controls: 'ctrlBack', custom: 'customStart' };
 function padVisible(el) { return !el.disabled && el.offsetParent !== null; }
 function padNavigable(scr) { return Array.prototype.filter.call(scr.querySelectorAll('button, input, select'), padVisible); }
 function padMove(scr, dx, dy) {

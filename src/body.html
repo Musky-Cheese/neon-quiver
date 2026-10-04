@@ -21,7 +21,10 @@
       <p class="tagline">One bow. One sealed plaza. <b>The whole infected city</b> is coming through the streets. Hold the line for as many waves as you can.</p>
       <div class="row">
         <button class="btn primary" id="playBtn" type="button">Enter the plaza</button>
+        <button class="btn ghost" id="dailyBtn" type="button">Daily run</button>
+        <button class="btn ghost" id="customBtn" type="button">Custom run</button>
       </div>
+      <div class="daily-note" id="dailyNote"></div>
       <div class="touch-note">Neon Quiver needs a keyboard and mouse. Open it on a desktop browser to play.</div>
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
@@ -121,6 +124,19 @@
     </div>
   </section>
 
+  <section id="scr-custom" class="screen" hidden>
+    <div class="center-panel">
+      <h2>Custom run</h2>
+      <p class="muted">Pick any mutators. Each one multiplies your final score. Custom runs don't touch your saved bests.</p>
+      <div id="customList" class="mut-list"></div>
+      <div class="muted" id="customMult"></div>
+      <div class="row" style="justify-content:center">
+        <button class="btn ghost" id="customBack" type="button">Back</button>
+        <button class="btn primary" id="customStart" type="button">Start</button>
+      </div>
+    </div>
+  </section>
+
   <section id="scr-shop" class="screen" hidden>
     <div class="terminal">
       <div class="term-head">
@@ -139,9 +155,11 @@
     <div class="center-panel">
       <canvas id="goLogo" class="big-canvas"></canvas>
       <div class="newbest" id="goBest" hidden>NEW BEST SCORE</div>
+      <div class="daily-note" id="goRun" hidden></div>
       <div class="stats" id="goStats"></div>
       <div class="row" style="justify-content:center">
         <button class="btn primary" id="againBtn" type="button">Run it back</button>
+        <button class="btn ghost" id="copyBtn" type="button" hidden>Copy result</button>
         <button class="btn ghost" id="menuBtn" type="button">Title screen</button>
       </div>
     </div>

@@ -155,7 +155,7 @@ function updateSupplies(dt) {
     if (GAME.state !== 'playing' || PLAYER.dead) continue;
     const d = Math.hypot(s.x - PLAYER.x, s.z - PLAYER.z);
     if (s.kind === 'cache' && s.cd <= 0 && d < 1.9) {
-      PLAYER.ammo[1] += 2; PLAYER.ammo[2] += 1; PLAYER.ammo[3] += 2; PLAYER.ammo[4] += 1; PLAYER.ammo[5] += 1; PLAYER.ammo[6] += 2; PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + 15);
+      PLAYER.ammo[1] += ammoGain(2); PLAYER.ammo[2] += ammoGain(1); PLAYER.ammo[3] += ammoGain(2); PLAYER.ammo[4] += ammoGain(1); PLAYER.ammo[5] += ammoGain(1); PLAYER.ammo[6] += ammoGain(2); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + 15);
       s.cd = 70; AUD.pickup(); updateQuiverHUD();
       GAME.toast('SUPPLY CACHE  +SPECIAL ARROWS  +15 HP', '#ffb52e');
       burst(s.x, 1, s.z, 36, [2.4, 1.6, 0.5], 4, 0.6, 0.08, 0, 2);

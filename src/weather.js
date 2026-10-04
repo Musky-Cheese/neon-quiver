@@ -23,11 +23,11 @@ const WX = {
 function wxPick() {
   const keys = Object.keys(WX_STATES).filter(k => k !== WX.state && !(WX.state === 'snow' && k === 'downpour'));
   let tot = 0; for (const k of keys) tot += WX_STATES[k].wt;
-  let r = Math.random() * tot; for (const k of keys) { r -= WX_STATES[k].wt; if (r <= 0) return k; }
+  let r = dr('wx') * tot; for (const k of keys) { r -= WX_STATES[k].wt; if (r <= 0) return k; }
   return 'rain';
 }
 function wxSet(k) {
-  const S = WX_STATES[k]; const prev = WX.state; WX.state = k; WX.t = 0; WX.dur = rand(S.d[0], S.d[1]);
+  const S = WX_STATES[k]; const prev = WX.state; WX.state = k; WX.t = 0; WX.dur = S.d[0] + dr('wx') * (S.d[1] - S.d[0]);
   if (GAME.state === 'playing' && prev !== k) { const msg = { downpour: 'STORM ROLLING IN', snow: 'THE RAIN IS TURNING TO SNOW', dry: 'THE RAIN EASES OFF' }[k]; if (msg) GAME.toast(msg, '#bfe4ff'); }
 }
 function wxReset() { wxSet('rain'); WX.precip = 0.68; WX.snow = 0; WX.wind = 0.4; WX.storm = 0; WX.wet = 0.8; WX.cover = 0; WX.flash = 0; WX.thunder.length = 0; }

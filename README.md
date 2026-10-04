@@ -51,6 +51,7 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - **Gamepad support:** plug in any standard-mapping controller (Xbox, PlayStation, Switch Pro in standard mode) and the game picks it up. Left stick moves (`L3` toggles sprint), right stick aims, `RT` draws and looses, `B` lets the string down (or cuts the grapple rope), `LT` is the grappling hook (hold to preview, release to fire), `A` jumps, `LB`/`RB` cycle arrows, `Y` returns to the last arrow, `X` uses an armory terminal, D-pad up starts the next wave early and `Start` pauses. The menus, shop and pause screen work from the pad too (d-pad or left stick to move, `A` to select, `B` to go back). Prompts switch to button names while you're on the pad, rumble marks drawing, firing, damage and explosions, and the pause menu gains Pad aim, Deadzone and Vibration settings once a controller is connected. Browsers only expose a pad after you press a button on it.
+- **Daily run and mutators:** *Daily run* on the title screen gives everyone the same night: the enemy mix wave by wave (including elites and runner packs), which field objectives appear, the weather schedule, and two mutators picked from the date (UTC). Where the infected spawn and what they do still depends on how you play, so it is the same waves, not the same fight. Mutators are Blackout, No Regen, Glass Cannon, Elite Night, Swarm, Snowbound and Scarce Arrows, and each one multiplies your final score. *Custom run* lets you pick any combination for an unseeded run. Results are kept on this device only (a top 10 per day, plus a *Copy result* button to share your score); there is no online leaderboard. Daily and custom runs never change your saved best score or wave. Add a mutator by appending to `MUTATORS` in `src/daily.js`.
 - **Settings and accessibility:** FOV slider (60–100), Invert Y, a screen-shake slider (0 turns it off), *Reduce flashing* (softens lightning, flashes and the draw aberration; on by default if your system asks for reduced motion) and a **Controls** screen where every key can be rebound (Esc, 1–7 and the arrow keys are fixed). Everything is saved in the browser.
 - Best score and best wave are saved in the browser.
 - **Surface textures on Balanced and up:** photo-scanned PBR textures (half resolution on Balanced, full on Sharp/Ultra, none on Fast) and real stone sills, lintels, ledges and cornices on street-facing buildings at every quality level.
@@ -101,8 +102,11 @@ The readable source is in `src/`:
 - `audio.js`: synthesized sound effects and music
 - `seg.js`: the 16-segment neon lettering
 - `input.js`: the Controls (rebinding) screen and gamepad support
+- `daily.js`: daily and custom runs, the seeded random streams and the mutators
 
 After editing, run `python3 build.py`. It rebuilds `index.html`.
+
+Tests live in `test/`. Serve the repo (`python3 -m http.server 8765`) for the older scripts; `a11y.py`, `pad.py` and `daily.py` serve it themselves. `daily.py` checks normal-run spawning against `daily_baseline.json`, recorded from the build before daily runs existed; regenerate it only if you change normal-run balance on purpose.
 
 Balance numbers you will probably want to tune live near the top of their files: `ZTYPES` in `zombies.js` (health, speed and damage per enemy), `SHOP` in `game.js` (upgrade prices), and `GAME.startWave` / `GAME.spawnOne` in `game.js` (wave sizes and the enemy mix).
 

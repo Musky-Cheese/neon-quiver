@@ -56,7 +56,7 @@ function spawnZombie(type, x, z, wave) {
   const T = ZTYPES[type];
   // difficulty keeps climbing past wave 10: extra HP %, harder hits, faster feet (the Warden scales per encounter instead)
   const late = Math.max(0, wave - 10);
-  const hp = (T.hp + T.hpW * Math.max(0, wave - 1)) * (type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.7 : 1 + late * 0.03);
+  const hp = (T.hp + T.hpW * Math.max(0, wave - 1)) * (type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.7 : 1 + late * 0.03) * (type === 'boss' ? 1 : RUN.zhpK);
   const dmgK = type === 'boss' ? 1 + Math.max(0, GAME.bossCount - 1) * 0.15 : 1 + Math.min(0.9, Math.max(0, wave - 1) * 0.035);
   const zz = {
     type, T, x, y: 0, z, yaw: Math.atan2(-x, -z), hp, maxHp: hp, speed: rand(T.speed[0], T.speed[1]) * (1 + Math.min(0.5, wave * 0.022)), dmgK, elite: false, eyes: null, scale: T.scale * rand(0.95, 1.06),

@@ -10,7 +10,7 @@ const OBJ_COL = { uplink: '#a6ff3a', nest: '#ff3df0' };
 function objReset() { OBJ.cur = null; OBJ.armed = false; OBJ.delay = 0; }
 // called when a wave starts
 function objWaveStart(wave) {
-  OBJ.cur = null; OBJ.armed = wave >= 3 && wave % 5 !== 0 && Math.random() < 0.75; OBJ.delay = rand(8, 18);
+  OBJ.cur = null; OBJ.armed = wave >= 3 && wave % 5 !== 0 && dr('obj') < 0.75; OBJ.delay = 8 + dr('obj') * 10;
 }
 function objOpenSpot() {
   for (let t = 0; t < 30; t++) {
@@ -49,7 +49,7 @@ function updateObjectives(dt) {
   if (GAME.state !== 'playing') return;
   if (!OBJ.cur && OBJ.armed && !GAME.intermission && GAME.wave > 0) {
     OBJ.delay -= dt;
-    if (OBJ.delay <= 0) { OBJ.armed = false; objStart(Math.random() < 0.5 ? 'uplink' : 'nest'); }
+    if (OBJ.delay <= 0) { OBJ.armed = false; objStart(dr('obj') < 0.5 ? 'uplink' : 'nest'); }
   }
   const o = OBJ.cur; if (!o) return;
   o.t += dt;

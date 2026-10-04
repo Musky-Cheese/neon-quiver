@@ -24,6 +24,8 @@ setTheme(SETTINGS.look);
 
 /* ---------------- player ---------------- */
 const REGEN = { delay: 6, rate: 2.5, cap: 0.5 };
+// per-run knobs (daily.js sets them from the active mutators; the neutral values change nothing)
+const RUN = { mode: 'normal', date: '', seed: 0, ids: [], hpK: 1, dmgK: 1, ammoK: 1, spawnK: 1, zhpK: 1, regenK: 1, expo: 1, amb: 1, eliteNight: false, snow: false, scoreMult: 1, _snow: false };
 const INTERMISSION = 25;   // seconds between waves (visible countdown; N starts the next wave early)
 const PLAYER = {
   x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0, roll: 0, grounded: true,
@@ -41,8 +43,8 @@ const PLAYER = {
 function applyUpgrades() {
   const u = PLAYER.up;
   PLAYER.drawTime = 0.62 * Math.pow(0.86, u.draw);
-  PLAYER.dmgMult = 1 + 0.16 * u.dmg;
-  PLAYER.maxHp = 100 + 25 * u.hp;
+  PLAYER.dmgMult = (1 + 0.16 * u.dmg) * RUN.dmgK;
+  PLAYER.maxHp = 100 * RUN.hpK + 25 * u.hp;
   PLAYER.reloadTime = 0.62 * Math.pow(0.84, u.reload);
   PLAYER.speedMult = 1 + 0.08 * u.speed;
 }
@@ -310,7 +312,7 @@ function updatePickups(dt) {
     if (p.t > 25) { PICKUPS.splice(i, 1); continue; }
     if (GAME.state === 'playing' && Math.hypot(p.x - PLAYER.x, p.z - PLAYER.z) < 1.7) {
       if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; const h = Math.round(Math.max(25, PLAYER.maxHp * 0.25)); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + h); AUD.heal(); GAME.toast(`+${h} HEALTH`, '#6dff9a'); }
-      else { const n = p.at === 2 || p.at === AT.FROST || p.at === AT.TETHER ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
+      else { const n = ammoGain(p.at === 2 || p.at === AT.FROST || p.at === AT.TETHER ? 2 : 3); PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
       burst(p.x, 1, p.z, 30, p.kind === 'health' ? [0.4, 2.4, 0.9] : ARROWS[p.at].glow, 4, 0.5, 0.08, 0, 2);
       PICKUPS.splice(i, 1);
     }
@@ -352,15 +354,16 @@ const GAME = {
     PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
-    objReset(); wxReset(); hazReset(); PLAYER.sink = 0;
-    this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS ' + hint('next') + ' TO START NOW', '#29e7ff');
+    runSeed(); objReset(); wxReset(); runWeather(); hazReset(); PLAYER.sink = 0; this.lastResult = null;
+    this.intermission = true; this.interT = 8; this.showBanner(runLabel() || 'GET READY', (RUN.ids.length ? runBanner() + ' · ' : '') + 'FIRST WAVE INBOUND · PRESS ' + hint('next') + ' TO START NOW', '#29e7ff');
   },
   startWave() {
     if (this.state !== 'playing') return;
     this.intermission = false; this.clearedShown = false;
     this.wave++;
     const boss = this.wave % 5 === 0;
-    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1));
+    runSeedWave(this.wave);
+    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * RUN.spawnK);
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
@@ -370,12 +373,12 @@ const GAME = {
   },
   spawnOne() {
     const w = this.wave;
-    const r = Math.random();
+    const r = dr('wave');
     // the mix keeps shifting toward runners and brutes well past wave 10, and elites start showing up from wave 8
     const pRun = w >= 2 ? Math.min(0.45, 0.1 + (w - 2) * 0.045) : 0, pBrute = w >= 3 ? Math.min(0.3, 0.06 + (w - 3) * 0.022) : 0;
     // spitters and screamers start from wave 4, climbers from wave 5 — all stay a rare mix-in
     const pSpit = w >= 4 ? Math.min(0.14, (w - 4) * 0.012) : 0, pScream = w >= 5 ? Math.min(0.1, (w - 5) * 0.01) : 0, pClimb = w >= 5 ? Math.min(0.14, (w - 5) * 0.013) : 0;
-    const pElite = w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0;
+    const pElite = RUN.eliteNight ? (w >= 3 ? Math.min(0.6, 0.12 + (w - 3) * 0.04) : 0) : w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0;
     let type;
     if (r < pBrute) type = 'brute';
     else if (r < pBrute + pSpit) type = 'spitter';
@@ -386,9 +389,9 @@ const GAME = {
     // pick a spawn not right next to the player
     const s = navSpawnPoint();
     const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
-    if (Math.random() < pElite) makeElite(z);
+    if (dr('wave') < pElite) makeElite(z);
     // from wave 6, runners sometimes come as a pack from the same spot
-    if (type === 'runner' && w >= 6 && this.toSpawn > 2 && Math.random() < Math.min(0.35, 0.1 + (w - 6) * 0.03)) {
+    if (type === 'runner' && w >= 6 && this.toSpawn > 2 && dr('wave') < Math.min(0.35, 0.1 + (w - 6) * 0.03)) {
       const extra = Math.min(this.toSpawn - 1, w >= 14 ? 3 : 2);
       for (let k = 0; k < extra; k++) { spawnZombie('runner', s[0] + rand(-1.2, 1.2), s[1] + rand(-1.2, 1.2), w); this.toSpawn--; }
     }
@@ -446,13 +449,16 @@ const GAME = {
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
     this.state = 'over'; PLAYER.dead = true; AUD.drawStop(); AUD.gameOver(); AUD.intensity = 0.2; INPUT.mouseDown = false;
-    const newBest = this.score > this.best; if (newBest) { this.best = this.score; saveLS('nq_best', this.best); }
-    if (this.wave > this.bestWave) { this.bestWave = this.wave; saveLS('nq_bestwave', this.bestWave); }
+    const normal = RUN.mode === 'normal', res = normal ? null : runFinish(); this.lastResult = res;   // daily and custom runs never touch the saved bests
+    const newBest = normal && this.score > this.best; if (newBest) { this.best = this.score; saveLS('nq_best', this.best); }
+    if (normal && this.wave > this.bestWave) { this.bestWave = this.wave; saveLS('nq_bestwave', this.bestWave); }
     setTimeout(() => {
       if (document.exitPointerLock) document.exitPointerLock();
-      document.getElementById('goStats').innerHTML = [['Wave reached', this.wave], ['Score', this.score.toLocaleString()], ['Kills', this.kills], ['Headshots', this.headshots], ['Accuracy', this.shots ? Math.round(this.hits / this.shots * 100) + '%' : '—'], ['Best', this.best.toLocaleString()]]
+      document.getElementById('goStats').innerHTML = [['Wave reached', this.wave], ['Score', this.score.toLocaleString()], ['Kills', this.kills], ['Headshots', this.headshots], ['Accuracy', this.shots ? Math.round(this.hits / this.shots * 100) + '%' : '—'], res ? ['Final (×' + RUN.scoreMult + ')', res.final.toLocaleString()] : ['Best', this.best.toLocaleString()]]
         .map(([k, v]) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`).join('');
       document.getElementById('goBest').hidden = !newBest;
+      $('goRun').hidden = !res; $('copyBtn').hidden = !(res && res.mode === 'daily'); $('copyBtn').textContent = 'Copy result';
+      if (res) $('goRun').innerHTML = `<b>${runLabel()}${res.date ? ' · ' + res.date : ''}</b>${res.ids.length ? '<br>' + runBanner() : ''}${res.mode === 'daily' ? `<br>Today's best: ${res.best.toLocaleString('en-US')} (this run: #${res.rank} on this device)` : ''}`;
       setScreen('over'); drawLogo(document.getElementById('goLogo'), 'OVERRUN', '#ff3040');
     }, 1600);
   },
@@ -519,7 +525,7 @@ function hudFrame() {
 }
 function setScreen(name) {
   if (name === null && document.activeElement && document.activeElement.blur) document.activeElement.blur();
-  for (const s of ['title', 'pause', 'shop', 'over', 'controls']) $('scr-' + s).hidden = s !== name;
+  for (const s of ['title', 'pause', 'shop', 'over', 'controls', 'custom']) $('scr-' + s).hidden = s !== name;
   $('hud').hidden = !(name === null && GAME.state !== 'title');
   document.body.classList.toggle('ingame', name === null && GAME.state === 'playing');
 }
@@ -770,7 +776,7 @@ function render(time) {
 /* ---------------- UI wiring ---------------- */
 function syncMusicBtn() { const b = $('musicBtn'); if (b) b.textContent = 'Title music: ' + (SETTINGS.music ? 'On' : 'Off'); }
 function wireUI() {
-  $('playBtn').addEventListener('click', () => { AUD.init(); AUD.setMusic(SETTINGS.music); AUD.click(); ZOMBIES.length = 0; GAME.newGame(); requestLock(); });
+  $('playBtn').addEventListener('click', () => startRun('normal'));
   $('resumeBtn').addEventListener('click', () => { AUD.click(); GAME.resume(); });
   $('quitBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
   $('againBtn').addEventListener('click', () => { AUD.click(); ZOMBIES.length = 0; GAME.newGame(); requestLock(); });
@@ -794,7 +800,7 @@ function wireUI() {
     $('padzone' + n).addEventListener('input', (e) => upd('padZone', +e.target.value));
     $('padvib' + n).addEventListener('change', (e) => upd('vibration', e.target.checked));
   }
-  syncSettingsUI(); wireControls();
+  syncSettingsUI(); wireControls(); wireRun();
   syncMusicBtn();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
@@ -803,7 +809,7 @@ function toTitle() {
   for (let i = 0; i < 9; i++) { const zz = spawnZombie(pick(['walker', 'walker', 'walker', 'runner', 'brute']), rand(-30, 30), rand(-30, 30), 1); zz.speed *= 0.5; }
   setScreen('title'); updateTitleStats(); drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); AUD.intensity = 0.35; AUD.setMusicScreen(true);
 }
-function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best.toLocaleString() : '—'; $('bestWave').textContent = GAME.bestWave || '—'; }
+function updateTitleStats() { refreshDailyUI(); $('bestScore').textContent = GAME.best ? GAME.best.toLocaleString() : '—'; $('bestWave').textContent = GAME.bestWave || '—'; }
 
 /* ---------------- GPU check: software-rendering warning, first-run quality pick ---------------- */
 function gpuName() {
