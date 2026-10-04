@@ -106,7 +106,7 @@ button, select, input { font-family: var(--f); }
 
 /* pause / over */
 .center-panel { place-self: center; width: min(560px, calc(100% - 32px)); display: grid; gap: 18px; justify-items: center; text-align: center; padding: 28px clamp(16px, 4vw, 36px); }
-#scr-pause, #scr-over { background: radial-gradient(ellipse at center, rgba(7, 6, 15, 0.65), rgba(7, 6, 15, 0.92)); }
+#scr-pause, #scr-over, #scr-controls { background: radial-gradient(ellipse at center, rgba(7, 6, 15, 0.65), rgba(7, 6, 15, 0.92)); }
 .big-canvas { width: 100%; height: 130px; display: block; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; width: 100%; background: var(--line); border: 1px solid var(--line); }
 .stat { background: rgba(9, 7, 18, 0.95); padding: 12px 8px; display: grid; gap: 4px; }
@@ -157,3 +157,13 @@ button, select, input { font-family: var(--f); }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+.settings input[type=checkbox] { accent-color: var(--mag); width: 15px; height: 15px; }
+.settings output { min-width: 2.2em; color: var(--ink); }
+.ctrl-list { display: grid; grid-template-columns: auto minmax(110px, auto); gap: 8px 20px; justify-content: center; align-items: center; margin: 14px 0 18px; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); text-align: left; }
+.ctrl-list .linkbtn { min-width: 120px; text-align: center; }
+.ctrl-list .linkbtn.listening { border-color: var(--mag); color: var(--mag); }
+.ctrl-list .linkbtn.clash { border-color: #ffd23a; color: #ffd23a; }
+.ctrl-clash { grid-column: 1 / -1; color: #ffd23a; font-size: 12px; min-height: 1.2em; text-align: center; }
+body:not(.haspad) .padonly { display: none; }
+body.padnav button:focus, body.padnav select:focus, body.padnav input:focus { outline: 2px solid var(--cyan); outline-offset: 2px; box-shadow: 0 0 14px rgba(41, 231, 255, 0.55); }

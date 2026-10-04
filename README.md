@@ -50,6 +50,8 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **Weather that changes:** every minute or two the sky shifts between dry spells, drizzle, steady rain, wind-driven downpours with lightning and thunder, and snow that settles white on the streets and melts when the rain returns. Streets soak and dry gradually.
 - **Headshots, combos and credits.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
+- **Gamepad support:** plug in any standard-mapping controller (Xbox, PlayStation, Switch Pro in standard mode) and the game picks it up. Left stick moves (`L3` toggles sprint), right stick aims, `RT` draws and looses, `B` lets the string down (or cuts the grapple rope), `LT` is the grappling hook (hold to preview, release to fire), `A` jumps, `LB`/`RB` cycle arrows, `Y` returns to the last arrow, `X` uses an armory terminal, D-pad up starts the next wave early and `Start` pauses. The menus, shop and pause screen work from the pad too (d-pad or left stick to move, `A` to select, `B` to go back). Prompts switch to button names while you're on the pad, rumble marks drawing, firing, damage and explosions, and the pause menu gains Pad aim, Deadzone and Vibration settings once a controller is connected. Browsers only expose a pad after you press a button on it.
+- **Settings and accessibility:** FOV slider (60–100), Invert Y, a screen-shake slider (0 turns it off), *Reduce flashing* (softens lightning, flashes and the draw aberration; on by default if your system asks for reduced motion) and a **Controls** screen where every key can be rebound (Esc, 1–7 and the arrow keys are fixed). Everything is saved in the browser.
 - Best score and best wave are saved in the browser.
 - **Surface textures on Balanced and up:** photo-scanned PBR textures (half resolution on Balanced, full on Sharp/Ultra, none on Fast) and real stone sills, lintels, ledges and cornices on street-facing buildings at every quality level.
 - **Ultra quality** (Settings → Quality → Ultra) is for strong desktop GPUs: full-resolution photo-scanned PBR surface textures (asphalt, concrete, brick, rusted and corrugated steel, pavers, plaster) projected triplanar in world space on top of the city's own shading, real-time GTAO contact shadows, 1.5x supersampling, 4x-resolution moon/sun shadows over a wider area, and full-rate 2x-resolution shadows on all six nearby lamps. It never lowers resolution automatically. Textures download on demand: about 0.8 MB on Balanced, 3.7 MB on Sharp/Ultra.
@@ -98,6 +100,7 @@ The readable source is in `src/`:
 - `game.js`: player, arrows, waves, shop, HUD and the main loop
 - `audio.js`: synthesized sound effects and music
 - `seg.js`: the 16-segment neon lettering
+- `input.js`: the Controls (rebinding) screen and gamepad support
 
 After editing, run `python3 build.py`. It rebuilds `index.html`.
 

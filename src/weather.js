@@ -49,9 +49,9 @@ function updateWeather(dt) {
   if (WX.storm > 0.5) {
     WX.flashT -= dt;
     if (WX.flashT <= 0) {
-      WX.flashT = rand(6, 16); WX.flash = 1; const dist = rand(0.6, 5);
+      WX.flashT = rand(6, 16); const fk = SETTINGS.reduceFlash ? 0.25 : 1; WX.flash = fk; const dist = rand(0.6, 5);
       WX.thunder.push({ t: dist, k: 1.2 - dist / 6 });
-      setTimeout(() => { WX.flash = Math.max(WX.flash, 0.7); }, 120);
+      setTimeout(() => { WX.flash = Math.max(WX.flash, 0.7 * fk); }, 120);
     }
   }
   for (let i = WX.thunder.length - 1; i >= 0; i--) { const th = WX.thunder[i]; th.t -= dt; if (th.t <= 0) { AUD.thunder(th.k); WX.thunder.splice(i, 1); } }

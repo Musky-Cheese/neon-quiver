@@ -380,7 +380,7 @@ function updateLights3(cam) {
   _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
   _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   _dyn.length = 0; _dynN = 0;
-  for (const d of DLIGHTS) { const k = d.life / d.max; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
+  const dlk = SETTINGS.reduceFlash ? 0.4 : 1; for (const d of DLIGHTS) { const k = d.life / d.max * dlk; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) { const g = ARROWS[a.type].glow; dynP(a.x, a.y, a.z, 7, g[0] * 0.5, g[1] * 0.5, g[2] * 0.5); }
   for (const f of FIRES) dynP(f.x, 0.6, f.z, 6, 2.2, 0.9, 0.2);
   for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if ((f.x - cam[0]) * (f.x - cam[0]) + (f.z - cam[2]) * (f.z - cam[2]) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); dynP(f.x, f.y + 0.6, f.z, 9, 2.2 * fl, 0.95 * fl, 0.25 * fl); }
@@ -1029,7 +1029,7 @@ function render3(time, W, H, fov, cam) {
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' && !SETTINGS.reduceFlash ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too

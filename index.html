@@ -125,7 +125,7 @@ button, select, input { font-family: var(--f); }
 
 /* pause / over */
 .center-panel { place-self: center; width: min(560px, calc(100% - 32px)); display: grid; gap: 18px; justify-items: center; text-align: center; padding: 28px clamp(16px, 4vw, 36px); }
-#scr-pause, #scr-over { background: radial-gradient(ellipse at center, rgba(7, 6, 15, 0.65), rgba(7, 6, 15, 0.92)); }
+#scr-pause, #scr-over, #scr-controls { background: radial-gradient(ellipse at center, rgba(7, 6, 15, 0.65), rgba(7, 6, 15, 0.92)); }
 .big-canvas { width: 100%; height: 130px; display: block; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; width: 100%; background: var(--line); border: 1px solid var(--line); }
 .stat { background: rgba(9, 7, 18, 0.95); padding: 12px 8px; display: grid; gap: 4px; }
@@ -177,6 +177,16 @@ button, select, input { font-family: var(--f); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
+.settings input[type=checkbox] { accent-color: var(--mag); width: 15px; height: 15px; }
+.settings output { min-width: 2.2em; color: var(--ink); }
+.ctrl-list { display: grid; grid-template-columns: auto minmax(110px, auto); gap: 8px 20px; justify-content: center; align-items: center; margin: 14px 0 18px; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); text-align: left; }
+.ctrl-list .linkbtn { min-width: 120px; text-align: center; }
+.ctrl-list .linkbtn.listening { border-color: var(--mag); color: var(--mag); }
+.ctrl-list .linkbtn.clash { border-color: #ffd23a; color: #ffd23a; }
+.ctrl-clash { grid-column: 1 / -1; color: #ffd23a; font-size: 12px; min-height: 1.2em; text-align: center; }
+body:not(.haspad) .padonly { display: none; }
+body.padnav button:focus, body.padnav select:focus, body.padnav input:focus { outline: 2px solid var(--cyan); outline-offset: 2px; box-shadow: 0 0 14px rgba(41, 231, 255, 0.55); }
+
 </style>
 </head>
 <body>
@@ -208,6 +218,14 @@ button, select, input { font-family: var(--f); }
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
+        <label for="fov">FOV <input id="fov" type="range" min="60" max="100" step="1" value="78"><output id="fovv">78</output></label>
+        <label for="shake">Shake <input id="shake" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="invy"><input id="invy" type="checkbox"> Invert Y</label>
+        <label for="rf"><input id="rf" type="checkbox"> Reduce flashing</label>
+        <button class="linkbtn" id="ctrlBtn" type="button">Controls…</button>
+        <label class="padonly" for="padsens">Pad aim <input id="padsens" type="range" min="0.4" max="2.5" step="0.05" value="1"></label>
+        <label class="padonly" for="padzone">Deadzone <input id="padzone" type="range" min="0.05" max="0.4" step="0.01" value="0.15"></label>
+        <label class="padonly" for="padvib"><input id="padvib" type="checkbox"> Vibration</label>
         <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
@@ -224,11 +242,24 @@ button, select, input { font-family: var(--f); }
           <kbd>Hold left click</kbd><span>Draw the bow</span>
           <kbd>Release</kbd><span>Loose the arrow</span>
           <kbd>Right click</kbd><span>Let the string down</span>
-          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
-          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
-          <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
-          <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
-          <kbd>P / Esc</kbd><span>Pause</span>
+          <kbd data-k="fwd left back right">W A S D</kbd><span>Move · <kbd data-k="sprint">Shift</kbd> sprint · <kbd data-k="jump">Space</kbd> jump</span>
+          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd data-k="last">X</kbd> last arrow</span>
+          <kbd data-k="hook">Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
+          <kbd data-k="use">E</kbd><span>Use an armory terminal · <kbd data-k="next">N</kbd> start the next wave early</span>
+          <kbd data-k="pause" data-esc="1">P / Esc</kbd><span>Pause</span>
+        </div>
+      </div>
+      <div class="card-p padonly">
+        <h3>Gamepad</h3>
+        <div class="keys">
+          <kbd>L stick</kbd><span>Move · <kbd>L3</kbd> sprint</span>
+          <kbd>R stick</kbd><span>Aim</span>
+          <kbd>RT</kbd><span>Hold to draw, release to loose · <kbd>B</kbd> let the string down</span>
+          <kbd>A</kbd><span>Jump</span>
+          <kbd>LB / RB</kbd><span>Switch arrows · <kbd>Y</kbd> last arrow</span>
+          <kbd>LT</kbd><span>Grappling hook: hold to preview, release to fire · <kbd>B</kbd> cuts the rope</span>
+          <kbd>X</kbd><span>Use an armory terminal · <kbd>D-pad ↑</kbd> start the next wave early</span>
+          <kbd>Start</kbd><span>Pause</span>
         </div>
       </div>
       <div class="card-p">
@@ -257,7 +288,27 @@ button, select, input { font-family: var(--f); }
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
+        <label for="fov2">FOV <input id="fov2" type="range" min="60" max="100" step="1" value="78"><output id="fovv2">78</output></label>
+        <label for="shake2">Shake <input id="shake2" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="invy2"><input id="invy2" type="checkbox"> Invert Y</label>
+        <label for="rf2"><input id="rf2" type="checkbox"> Reduce flashing</label>
+        <button class="linkbtn" id="ctrlBtn2" type="button">Controls…</button>
+        <label class="padonly" for="padsens2">Pad aim <input id="padsens2" type="range" min="0.4" max="2.5" step="0.05" value="1"></label>
+        <label class="padonly" for="padzone2">Deadzone <input id="padzone2" type="range" min="0.05" max="0.4" step="0.01" value="0.15"></label>
+        <label class="padonly" for="padvib2"><input id="padvib2" type="checkbox"> Vibration</label>
         <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-controls" class="screen" hidden>
+    <div class="center-panel">
+      <h2>Controls</h2>
+      <p class="muted" id="ctrlNote">Click a key, then press the new one. Esc cancels. Esc (pause), 1–7 (arrows) and the arrow keys can't be changed.</p>
+      <div id="ctrlList" class="ctrl-list"></div>
+      <div class="row" style="justify-content:center">
+        <button class="btn ghost" id="ctrlReset" type="button">Reset to defaults</button>
+        <button class="btn primary" id="ctrlBack" type="button">Back</button>
       </div>
     </div>
   </section>
@@ -2790,9 +2841,9 @@ function updateWeather(dt) {
   if (WX.storm > 0.5) {
     WX.flashT -= dt;
     if (WX.flashT <= 0) {
-      WX.flashT = rand(6, 16); WX.flash = 1; const dist = rand(0.6, 5);
+      WX.flashT = rand(6, 16); const fk = SETTINGS.reduceFlash ? 0.25 : 1; WX.flash = fk; const dist = rand(0.6, 5);
       WX.thunder.push({ t: dist, k: 1.2 - dist / 6 });
-      setTimeout(() => { WX.flash = Math.max(WX.flash, 0.7); }, 120);
+      setTimeout(() => { WX.flash = Math.max(WX.flash, 0.7 * fk); }, 120);
     }
   }
   for (let i = WX.thunder.length - 1; i >= 0; i--) { const th = WX.thunder[i]; th.t -= dt; if (th.t <= 0) { AUD.thunder(th.k); WX.thunder.splice(i, 1); } }
@@ -4357,7 +4408,7 @@ function drawObjective(hx, W, H) {
   hx.font = '700 13px "Quiver Cn", sans-serif'; hx.textAlign = 'center'; hx.fillStyle = '#bff6ff';
   hx.fillText(`ARMORY ${Math.round(t.d)} m`, x, y + 24);
   hx.font = '700 15px "Quiver Cn", sans-serif'; hx.fillStyle = '#e9ecff';
-  hx.fillText(GAME.nearTerminal ? 'PRESS E TO OPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  REACH AN ARMORY TERMINAL`, cx, H - 64);
+  hx.fillText(GAME.nearTerminal ? `PRESS ${hint('use')} TO OPEN THE ARMORY` : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  REACH AN ARMORY TERMINAL`, cx, H - 64);
 }
 
 /* ============================================================
@@ -6466,7 +6517,7 @@ function updateLights3(cam) {
   _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
   _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   _dyn.length = 0; _dynN = 0;
-  for (const d of DLIGHTS) { const k = d.life / d.max; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
+  const dlk = SETTINGS.reduceFlash ? 0.4 : 1; for (const d of DLIGHTS) { const k = d.life / d.max * dlk; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) { const g = ARROWS[a.type].glow; dynP(a.x, a.y, a.z, 7, g[0] * 0.5, g[1] * 0.5, g[2] * 0.5); }
   for (const f of FIRES) dynP(f.x, 0.6, f.z, 6, 2.2, 0.9, 0.2);
   for (const f of nearbyWorld('fires', cam[0], cam[2], 42)) if ((f.x - cam[0]) * (f.x - cam[0]) + (f.z - cam[2]) * (f.z - cam[2]) < 40 * 40) { const tt = NQU.uTime.value, fl = 0.72 + 0.18 * Math.sin(tt * 17 + f.x) * Math.sin(tt * 7.3 + f.z) + 0.1 * Math.sin(tt * 31 + f.z * 3); dynP(f.x, f.y + 0.6, f.z, 9, 2.2 * fl, 0.95 * fl, 0.25 * fl); }
@@ -7115,7 +7166,7 @@ function render3(time, W, H, fov, cam) {
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
-  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' && !SETTINGS.reduceFlash ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
@@ -7141,12 +7192,14 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir' };
+const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir', fov: 78, invertY: false, shake: 1, reduceFlash: false, padSens: 1, padZone: 0.15, vibration: true };
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const SAVED_SETTINGS = loadLS('nq_settings', {});
 Object.assign(SETTINGS, SAVED_SETTINGS);
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
+SETTINGS.fov = clamp(+SETTINGS.fov || 78, 60, 100); SETTINGS.shake = clamp(+SETTINGS.shake, 0, 1); if (!(SETTINGS.shake >= 0)) SETTINGS.shake = 1; SETTINGS.padSens = clamp(+SETTINGS.padSens || 1, 0.4, 2.5); SETTINGS.padZone = clamp(+SETTINGS.padZone || 0.15, 0.05, 0.4);   // saved values from older builds, or hand-edited
+try { if (!('reduceFlash' in SAVED_SETTINGS) && matchMedia('(prefers-reduced-motion: reduce)').matches) SETTINGS.reduceFlash = true; } catch (e) { }   // first run only; a saved choice wins
 setTheme(SETTINGS.look);
 
 /* ---------------- player ---------------- */
@@ -7160,7 +7213,7 @@ const PLAYER = {
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
-    this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
+    this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt(); padRumble(0.3, clamp(0.5 + d / 40, 0.5, 1), 180);
     const ang = Math.atan2(fx - this.x, fz - this.z); this.hurtDirs.push({ ang, t: 1.2 });
     if (this.hp <= 0) { this.hp = 0; GAME.gameOver(); }
   },
@@ -7176,33 +7229,49 @@ function applyUpgrades() {
 
 /* ---------------- input ---------------- */
 const INPUT = { keys: {}, mouseDown: false, dx: 0, dy: 0, locked: false, freeLook: false };
+// rebindable actions -> KeyboardEvent.code. Esc (pause), 1-7 (arrows), the arrow keys and Right Shift stay fixed.
+const BIND_DEFAULTS = { fwd: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', sprint: 'ShiftLeft', jump: 'Space', hook: 'KeyQ', use: 'KeyE', next: 'KeyN', last: 'KeyX', pause: 'KeyP' };
+const BINDS = Object.assign({}, BIND_DEFAULTS);
+{ const sv = loadLS('nq_binds', {}); if (sv && typeof sv === 'object') for (const a in BIND_DEFAULTS) if (typeof sv[a] === 'string' && sv[a] && sv[a] !== 'Escape') BINDS[a] = sv[a]; }
+function keyLabel(code) {
+  const m = /^(Shift|Control|Alt)(Left|Right)$/.exec(code); if (m) return (m[2] === 'Right' ? 'R ' : '') + (m[1] === 'Control' ? 'CTRL' : m[1].toUpperCase());
+  return code === 'Space' ? 'SPACE' : code.replace(/^(Key|Digit)/, '').replace(/^Numpad/, 'NUM ').replace(/^Arrow/, '').toUpperCase();
+}
+function hint(act) { return PAD.last === 'pad' ? padGlyph(act) : keyLabel(BINDS[act]); }   // what to tell the player to press (the pad build swaps in a button glyph)
 const gameEl = document.getElementById('game');
+// player actions, shared by keyboard, mouse and gamepad (input.js)
+function actDrawStart() { INPUT.mouseDown = true; bowStartDraw(); }
+function actDrawEnd() { INPUT.mouseDown = false; if (GAME.state === 'playing') { const p = bowRelease(); if (p) fireArrow(p); } }
+function actHookDown() { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }   // hold to preview the anchor, release to fire; again while reeling cuts the rope
+function actHookUp() { if (HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } }
+function actCycleArrow(dir) { let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; const NA = ARROWS.length; for (let i = 0; i < NA; i++) { t = (t + dir + NA) % NA; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }
 addEventListener('keydown', (e) => {
-  const k = e.code; INPUT.keys[k] = true;
+  const k = e.code; INPUT.keys[k] = true; PAD.last = 'kbm';
   if (GAME.state === 'playing') {
     const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
-    if (k === 'KeyX') selectArrow(GAME.lastType);
+    if (k === BINDS.last) selectArrow(GAME.lastType);
     // grapple: hold Q to preview the anchor and fall risk, release to fire; Q while reeling cuts the rope
-    if (k === 'KeyQ' && !e.repeat) { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }
-    if (k === 'KeyP' || k === 'Escape') GAME.pause();
-    if (k === 'Space') e.preventDefault();
-    if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
-    if (k === 'KeyN' && GAME.intermission) { GAME.interT = 0; }
-  } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
+    if (k === BINDS.hook && !e.repeat) actHookDown();
+    if (k === BINDS.pause || k === 'Escape') GAME.pause();
+    if (k === 'Space' || k === BINDS.jump) e.preventDefault();
+    if (k === BINDS.use && GAME.nearTerminal) GAME.openShop();
+    if (k === BINDS.next && GAME.intermission) { GAME.interT = 0; }
+  } else if (GAME.state === 'paused' && k === BINDS.pause && $('scr-controls').hidden) GAME.resume();
 });
-addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
+addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === BINDS.hook) actHookUp(); });
 addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
-addEventListener('mousemove', (e) => { if (GAME.state !== 'playing') return; if (INPUT.locked || INPUT.freeLook) { INPUT.dx += e.movementX || 0; INPUT.dy += e.movementY || 0; } });
+addEventListener('mousemove', (e) => { if (e.movementX || e.movementY) PAD.last = 'kbm'; if (GAME.state !== 'playing') return; if (INPUT.locked || INPUT.freeLook) { INPUT.dx += e.movementX || 0; INPUT.dy += e.movementY || 0; } });
 gameEl.addEventListener('mousedown', (e) => {
+  PAD.last = 'kbm';
   if (GAME.state !== 'playing') return;
   if (!INPUT.locked && !INPUT.freeLook) { requestLock(); return; }
   if (INPUT.freeLook && !INPUT.locked) requestLock(true);
-  if (e.button === 0) { INPUT.mouseDown = true; bowStartDraw(); }
+  if (e.button === 0) actDrawStart();
   if (e.button === 2) { bowCancel(); }
 });
-addEventListener('mouseup', (e) => { if (e.button === 0) { INPUT.mouseDown = false; if (GAME.state === 'playing') { const p = bowRelease(); if (p) fireArrow(p); } } });
+addEventListener('mouseup', (e) => { if (e.button === 0) actDrawEnd(); });
 gameEl.addEventListener('contextmenu', (e) => e.preventDefault());
-addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; const NA = ARROWS.length; for (let i = 0; i < NA; i++) { t = (t + dir + NA) % NA; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
+addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; actCycleArrow(e.deltaY > 0 ? 1 : -1); }, { passive: true });
 function requestLock(quiet) {
   try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { INPUT.freeLook = true; }); } catch (e) { INPUT.freeLook = true; }
   if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 1500);
@@ -7210,7 +7279,7 @@ function requestLock(quiet) {
 document.addEventListener('pointerlockchange', () => {
   INPUT.locked = document.pointerLockElement === canvas;
   if (INPUT.locked) INPUT.freeLook = false;
-  if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
+  if (!INPUT.locked && GAME.state === 'playing' && PAD.last !== 'pad') GAME.pause();   // Esc (or alt-tab) always pauses; a pad player never had the lock to lose
 });
 function selectArrow(t) {
   if (t < 0 || t >= ARROWS.length) return;
@@ -7228,7 +7297,7 @@ function camBasis() {
   _cf[0] = -sy * cp; _cf[1] = sp; _cf[2] = -cy * cp; _cr[0] = cy; _cr[1] = 0; _cr[2] = -sy; _cu[0] = sy * sp; _cu[1] = cp; _cu[2] = cy * sp;
 }
 function fireArrow(power) {
-  const type = BOW.type, A = ARROWS[type];
+  const type = BOW.type, A = ARROWS[type]; padRumble(0.15 + power * 0.3, 0.1, 90);
   if (type !== 0) { PLAYER.ammo[type]--; }
   camBasis();
   const eye = [PLAYER.x, PLAYER.y + 1.62 - (PLAYER.sink || 0), PLAYER.z];
@@ -7392,7 +7461,7 @@ function updateFires(dt) {
 function explode(x, y, z) {
   const R = 6;
   objBlast(x, y, z, R, 160 * PLAYER.dmgMult);
-  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z)); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9));
+  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z)); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9)); padRumble(0.5, clamp(1.1 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 25, 0, 1), 220);
   flashLight(x, y + 1, z, [6, 1.2, 5.5], 26, 0.55);
   burst(x, y, z, 120, [2.8, 0.5, 2.6], 14, 0.7, 0.3, 2, 2.5);
   burst(x, y, z, 60, [3, 2.2, 3], 8, 0.35, 0.45, 0, 4);
@@ -7464,7 +7533,7 @@ const GAME = {
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     objReset(); wxReset(); hazReset(); PLAYER.sink = 0;
-    this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS N TO START NOW', '#29e7ff');
+    this.intermission = true; this.interT = 8; this.showBanner('GET READY', 'FIRST WAVE INBOUND · PRESS ' + hint('next') + ' TO START NOW', '#29e7ff');
   },
   startWave() {
     if (this.state !== 'playing') return;
@@ -7622,7 +7691,7 @@ function hudFrame() {
   hudSet('hpFill', 's', `scaleX(${clamp(hpK, 0, 1)})`); hudSet('hpText', 't', String(Math.ceil(PLAYER.hp))); hudSet('hpMax', 't', '/ ' + PLAYER.maxHp);
   hudCls('hp', 'low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · ${hint('next')} TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
   else { hudSet('remain', 't', GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''); hudCls('remain', 'soon', false); hudCls('remain', 'count', false); }
   hudCls('hp', 'regen', !!PLAYER.regen);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
@@ -7630,7 +7699,7 @@ function hudFrame() {
 }
 function setScreen(name) {
   if (name === null && document.activeElement && document.activeElement.blur) document.activeElement.blur();
-  for (const s of ['title', 'pause', 'shop', 'over']) $('scr-' + s).hidden = s !== name;
+  for (const s of ['title', 'pause', 'shop', 'over', 'controls']) $('scr-' + s).hidden = s !== name;
   $('hud').hidden = !(name === null && GAME.state !== 'title');
   document.body.classList.toggle('ingame', name === null && GAME.state === 'playing');
 }
@@ -7727,19 +7796,21 @@ function drawLogo(cv, text = 'NEON QUIVER', color = '#ff2e88', sub = true, left 
 function updatePlayer(dt) {
   const P = PLAYER;
   // look
+  padLook(dt);   // right stick feeds the same dx/dy the mouse does, so sensitivity, draw-slow and invert Y apply to both
   const drawSlow = BOW.state === 'drawing' && BOW.draw >= 1 ? 0.7 : 1;
   const sens = 0.0022 * SETTINGS.sens * drawSlow;
-  P.yaw -= INPUT.dx * sens; P.pitch = clamp(P.pitch - INPUT.dy * sens, -1.45, 1.45);
+  P.yaw -= INPUT.dx * sens; P.pitch = clamp(P.pitch - INPUT.dy * sens * (SETTINGS.invertY ? -1 : 1), -1.45, 1.45);
   BOW.lagX = clamp(BOW.lagX + INPUT.dx * 0.00005, -0.03, 0.03); BOW.lagY = clamp(BOW.lagY - INPUT.dy * 0.00005, -0.03, 0.03);
   BOW.lagX *= Math.max(0, 1 - dt * 8); BOW.lagY *= Math.max(0, 1 - dt * 8);
   INPUT.dx = 0; INPUT.dy = 0;
   // move
   const K = INPUT.keys;
   let fx = 0, fz = 0;
-  if (K.KeyW || K.ArrowUp) fz -= 1; if (K.KeyS || K.ArrowDown) fz += 1; if (K.KeyA || K.ArrowLeft) fx -= 1; if (K.KeyD || K.ArrowRight) fx += 1;
+  if (K[BINDS.fwd] || K.ArrowUp) fz -= 1; if (K[BINDS.back] || K.ArrowDown) fz += 1; if (K[BINDS.left] || K.ArrowLeft) fx -= 1; if (K[BINDS.right] || K.ArrowRight) fx += 1;
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
+  if (PAD.mx || PAD.mz) { fx = PAD.mx; fz = PAD.mz; }   // a deflected stick wins over the keys, and keeps its analog magnitude
   const drawing = BOW.state === 'drawing';
-  const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
+  const sprint = (K[BINDS.sprint] || (BINDS.sprint === 'ShiftLeft' && K.ShiftRight) || PAD.sprint) && fz < 0 && !drawing;
   const water = P.y < 0.05 ? waterAt(P.x, P.z) : 0; P.wading = water > 0;   // knee-deep in the koi pond, or the Metro's flooded track beds
   P.sink = lerp(P.sink || 0, P.wading ? 0.26 : 0, Math.min(1, dt * 6));
   const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
@@ -7750,7 +7821,7 @@ function updatePlayer(dt) {
     const acc = P.grounded ? 12 : P.fling ? 0.8 : 3;   // flung off the hook: keep the momentum
     P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
     P.x += P.vx * dt; P.z += P.vz * dt;
-    if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
+    if ((K[BINDS.jump] || PAD.jump) && P.grounded) { P.vy = 6.6; P.grounded = false; }
     P.vy -= 20 * dt; P.y += P.vy * dt;
   }
   if (!P.grounded) P.peakY = Math.max(P.peakY ?? P.y, P.y);
@@ -7773,7 +7844,7 @@ function updatePlayer(dt) {
   const ph0 = BOW.walkPhase; BOW.walkPhase += dt * hs * 1.6 * (1 + BOW.sprintAmt * 0.35);
   if (P.grounded && hs > 1.5 && Math.floor(ph0 / Math.PI) !== Math.floor(BOW.walkPhase / Math.PI)) AUD.step(0.5 + BOW.sprintAmt * 0.7);   // footsteps
   P.roll = lerp(P.roll, -fx * 0.012 + Math.sin(BOW.walkPhase) * 0.014 * BOW.sprintAmt, Math.min(1, dt * 6));
-  P.fov = lerp(P.fov, 78 - (BOW.state === 'drawing' ? easeOut(BOW.draw) * 14 : 0) + BOW.sprintAmt * 6, Math.min(1, dt * 10));
+  P.fov = lerp(P.fov, SETTINGS.fov - (BOW.state === 'drawing' ? easeOut(BOW.draw) * 14 : 0) + BOW.sprintAmt * 6, Math.min(1, dt * 10));
   P.dmgFlash = Math.max(0, P.dmgFlash - dt * 1.4);
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }
   P.vmIn = Math.min(1, P.vmIn + dt * 2.5);
@@ -7788,6 +7859,7 @@ function updatePlayer(dt) {
 let lastT = performance.now() / 1000, acc = 0;
 const camM = M4.create();
 function step(dt) {
+  padPoll(dt);
   GAME.time += dt; STEPN.n++;
   const t = GAME.time;
   if (GAME.state === 'playing') { updatePlayer(dt); updateBow(dt, INPUT); }
@@ -7850,7 +7922,7 @@ function setCamera(time) {
     const k = easeOut(Math.min(1, P.deathT / 1.2)); y = lerp(P.y + 1.62, 0.35, k); roll = k * 1.2; pitch = lerp(P.pitch, 0.3, k);
   }
   const bob = Math.sin(BOW.walkPhase * 2) * 0.03 * BOW.walkAmt * (1 + BOW.sprintAmt);
-  const sh = SHAKE.amt * SHAKE.amt * 0.06;
+  const sh = SHAKE.amt * SHAKE.amt * 0.06 * SETTINGS.shake;
   M4.trs(camM, x + (Math.random() - 0.5) * sh, y + bob + (Math.random() - 0.5) * sh, z, pitch + (Math.random() - 0.5) * sh * 0.5, yaw + (Math.random() - 0.5) * sh * 0.5, roll, 1, 1, 1);
   return [x, y, z];
 }
@@ -7890,6 +7962,19 @@ function wireUI() {
   // 'L' is the Laptop level: Balanced's pipeline, plus lighter detail on distant things (r3.js FAR)
   const qv = () => SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality);
   for (const id of ['quality', 'quality2']) { const s = $(id); s.value = qv(); s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
+  // both settings panels (title and pause) carry the same extra controls; any change redraws both
+  const syncSettingsUI = () => { for (const n of ['', '2']) { $('fov' + n).value = SETTINGS.fov; $('fovv' + n).textContent = SETTINGS.fov + '°'; $('shake' + n).value = SETTINGS.shake; $('invy' + n).checked = SETTINGS.invertY; $('rf' + n).checked = SETTINGS.reduceFlash; $('padsens' + n).value = SETTINGS.padSens; $('padzone' + n).value = SETTINGS.padZone; $('padvib' + n).checked = SETTINGS.vibration; } };
+  for (const n of ['', '2']) {
+    const upd = (k, v) => { SETTINGS[k] = v; syncSettingsUI(); saveLS('nq_settings', SETTINGS); };
+    $('fov' + n).addEventListener('input', (e) => upd('fov', +e.target.value));
+    $('shake' + n).addEventListener('input', (e) => upd('shake', +e.target.value));
+    $('invy' + n).addEventListener('change', (e) => upd('invertY', e.target.checked));
+    $('rf' + n).addEventListener('change', (e) => upd('reduceFlash', e.target.checked));
+    $('padsens' + n).addEventListener('input', (e) => upd('padSens', +e.target.value));
+    $('padzone' + n).addEventListener('input', (e) => upd('padZone', +e.target.value));
+    $('padvib' + n).addEventListener('change', (e) => upd('vibration', e.target.checked));
+  }
+  syncSettingsUI(); wireControls();
   syncMusicBtn();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
@@ -7931,7 +8016,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, FAR, warmShaders, FAR_MATS_N: () => FAR_MATS.length, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  BINDS, BIND_DEFAULTS, INPUT, SHAKE, shake, camM, DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, FAR, warmShaders, FAR_MATS_N: () => FAR_MATS.length, ZRIG, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
@@ -7953,6 +8038,169 @@ window.NQ = {
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + 1.62), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };
 boot();
+
+/* ---------------- controls screen: rebinding. (Gamepad support lives further down.) ---------------- */
+const BIND_NAMES = { fwd: 'Move forward', back: 'Move back', left: 'Strafe left', right: 'Strafe right', sprint: 'Sprint', jump: 'Jump', hook: 'Grappling hook', use: 'Use terminal', next: 'Start next wave', last: 'Last arrow', pause: 'Pause' };
+const CTRL = { from: 'title', listen: null, clash: '' };
+function refreshKeyLabels() {
+  for (const el of document.querySelectorAll('[data-k]')) el.textContent = el.dataset.k.split(' ').map(hint).join(' ') + (el.dataset.esc ? ' / Esc' : '');
+}
+function renderControls() {
+  const list = $('ctrlList'); list.textContent = '';
+  for (const a in BIND_DEFAULTS) {
+    const l = document.createElement('span'); l.textContent = BIND_NAMES[a];
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'linkbtn' + (CTRL.listen === a ? ' listening' : ''); b.dataset.act = a;
+    b.textContent = CTRL.listen === a ? 'Press a key…' : hint(a); b.addEventListener('click', () => { CTRL.listen = CTRL.listen === a ? null : a; CTRL.clash = ''; renderControls(); });
+    list.append(l, b);
+  }
+  const c = document.createElement('div'); c.className = 'ctrl-clash'; c.textContent = CTRL.clash; list.append(c);
+}
+function openControls() { CTRL.from = GAME.state === 'paused' ? 'pause' : 'title'; CTRL.listen = null; CTRL.clash = ''; renderControls(); setScreen('controls'); }
+function closeControls() { CTRL.listen = null; setScreen(CTRL.from); refreshKeyLabels(); }
+function rebind(a, code) {
+  if (/^Digit[1-7]$/.test(code) || /^Arrow/.test(code) || code === 'ShiftRight') { CTRL.clash = `${keyLabel(code)} is reserved`; return; }
+  if (code === 'Escape') { CTRL.listen = null; CTRL.clash = ''; return; }
+  const other = Object.keys(BINDS).find(o => o !== a && BINDS[o] === code);
+  CTRL.clash = other ? `${keyLabel(code)} was ${BIND_NAMES[other].toLowerCase()}: swapped` : '';
+  if (other) BINDS[other] = BINDS[a];
+  BINDS[a] = code; CTRL.listen = null; saveLS('nq_binds', BINDS);
+}
+function wireControls() {
+  for (const n of ['', '2']) $('ctrlBtn' + n).addEventListener('click', () => { AUD.click(); openControls(); });
+  $('ctrlBack').addEventListener('click', () => { AUD.click(); closeControls(); });
+  $('ctrlReset').addEventListener('click', () => { AUD.click(); Object.assign(BINDS, BIND_DEFAULTS); saveLS('nq_binds', BINDS); CTRL.listen = null; CTRL.clash = ''; renderControls(); });
+  // capture phase: while the screen is open, keys belong to it and never reach the game's handlers
+  addEventListener('keydown', (e) => {
+    if ($('scr-controls').hidden) return;
+    e.stopImmediatePropagation(); e.preventDefault();
+    if (CTRL.listen) { if (e.code === 'Escape' && !e.repeat) { CTRL.listen = null; CTRL.clash = ''; } else if (!e.repeat) { if (/^(Shift|Control|Alt|Meta)/.test(e.code) && !/^Shift/.test(e.code)) return; rebind(CTRL.listen, e.code); } renderControls(); }
+    else if (e.code === 'Escape' && !e.repeat) closeControls();
+  }, true);
+  refreshKeyLabels();
+}
+
+/* ---------------- gamepad (standard mapping) ----------------
+   padPoll(dt) runs once per step. In play it feeds the same actions the keyboard and mouse call (actDrawStart, actHookDown,
+   selectArrow ...), the sticks feed INPUT.dx/dy and PAD.mx/mz. Outside play it moves focus around the DOM menus. */
+const PAD = { idx: -1, gp: null, ps: false, last: 'kbm', mx: 0, mz: 0, lx: 0, ly: 0, jump: false, sprint: false, sprintOn: false,
+  cur: new Uint8Array(20), prev: new Uint8Array(20), mask: new Uint8Array(20), rumbleT: 0, scr: '', navT: 0, navDir: 0 };
+const PAD_LOOK_RATE = 1500;   // px/s at full deflection, the same units as mouse dx; PAD.lx/ly are already curved
+const PAD_GLYPH = { use: 'X', next: 'D-PAD UP', hook: 'LT', last: 'Y', pause: 'START', jump: 'A', sprint: 'L3', fwd: 'L STICK', back: 'L STICK', left: 'L STICK', right: 'L STICK' };
+const PAD_GLYPH_PS = { use: 'SQUARE', next: 'D-PAD UP', hook: 'L2', last: 'TRIANGLE', pause: 'OPTIONS', jump: 'CROSS', sprint: 'L3', fwd: 'L STICK', back: 'L STICK', left: 'L STICK', right: 'L STICK' };
+function padGlyph(act) { return '[' + ((PAD.ps ? PAD_GLYPH_PS : PAD_GLYPH)[act] || keyLabel(BINDS[act])) + ']'; }
+function padRumble(weak, strong, ms) {
+  if (!PAD.gp || PAD.last !== 'pad' || !SETTINGS.vibration) return;
+  const a = PAD.gp.vibrationActuator; if (!a || !a.playEffect) return;
+  try { const r = a.playEffect('dual-rumble', { startDelay: 0, duration: ms, weakMagnitude: weak, strongMagnitude: strong }); if (r && r.catch) r.catch(() => { }); } catch (e) { }
+}
+function padSetLast(v) { if (PAD.last === v) return; PAD.last = v; document.body.classList.toggle('padnav', v === 'pad'); if (v === 'pad') PAD.scr = ''; }
+function padConnect(gp) {
+  PAD.gp = gp; PAD.idx = gp ? gp.index : -1; PAD.cur.fill(0); PAD.prev.fill(0); PAD.mask.fill(0); PAD.sprintOn = false;
+  if (gp) { PAD.ps = /054c|playstation|dualshock|dualsense/i.test(gp.id); document.body.classList.add('haspad'); if (GAME.toast) GAME.toast('CONTROLLER CONNECTED', '#bff6ff'); }
+  else { PAD.mx = PAD.mz = PAD.lx = PAD.ly = 0; PAD.jump = PAD.sprint = false; if (GAME.state === 'playing' && PAD.last === 'pad') GAME.pause(); if (GAME.toast) GAME.toast('CONTROLLER DISCONNECTED', '#ffb52e'); }
+}
+const _st = [0, 0];
+// radial deadzone: out = direction * rescaled magnitude (0 inside the zone); returns the magnitude
+function padStick(x, y, dz, curve, out) {
+  const m = Math.hypot(x, y); if (m <= dz) { out[0] = 0; out[1] = 0; return 0; }
+  const k = Math.min(1, (m - dz) / (1 - dz)), c = curve === 1 ? k : Math.pow(k, curve); out[0] = x / m * c; out[1] = y / m * c; return k;
+}
+function padLook(dt) { if (PAD.lx || PAD.ly) { const r = PAD_LOOK_RATE * SETTINGS.padSens * dt; INPUT.dx += PAD.lx * r; INPUT.dy += PAD.ly * r; } }
+function padPoll(dt) {
+  const list = navigator.getGamepads ? navigator.getGamepads() : null; let gp = null;
+  if (list) for (let i = 0; i < list.length; i++) { const g = list[i]; if (g && g.connected !== false && g.mapping === 'standard') { gp = g; break; } }
+  if ((gp ? gp.index : -1) !== PAD.idx) padConnect(gp);
+  if (!gp) return;
+  PAD.gp = gp;
+  const B = gp.buttons, A = gp.axes, cur = PAD.cur, prev = PAD.prev, n = Math.min(B.length, 17);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    prev[i] = cur[i]; const b = B[i];
+    cur[i] = (i === 6 || i === 7 ? b.value > (prev[i] ? 0.2 : 0.35) : b.pressed) ? 1 : 0;
+    if (cur[i] && !prev[i]) any = true;
+  }
+  const dz = SETTINGS.padZone;
+  padStick(A[0] || 0, A[1] || 0, dz, 1, _st); const mx = _st[0], mz = _st[1], lm = Math.hypot(mx, mz);
+  padStick(A[2] || 0, A[3] || 0, dz, 1.7, _st); const lx = _st[0], ly = _st[1];
+  if (lm > 0 || lx || ly) any = true;
+  if (any) padSetLast('pad');
+  const wasPlaying = GAME.state === 'playing';
+  if (wasPlaying) padPlay(dt, mx, mz, lm, lx, ly); else padMenu(dt, mx, mz);
+  if (!wasPlaying) {   // whatever the menus did (even starting the run), buttons held now stay dead once play begins
+    PAD.mx = PAD.mz = PAD.lx = PAD.ly = 0; PAD.jump = PAD.sprint = false; PAD.sprintOn = false; for (let i = 0; i < 20; i++) PAD.mask[i] = cur[i];
+  }
+}
+function padPlay(dt, mx, mz, lm, lx, ly) {
+  const cur = PAD.cur, prev = PAD.prev, mask = PAD.mask;
+  // a button still held from a menu (the A that started the run) stays dead until it's let go
+  for (let i = 0; i < 20; i++) if (mask[i]) { if (!cur[i]) mask[i] = 0; else { cur[i] = 0; prev[i] = 0; } }
+  const down = (i) => cur[i] && !prev[i], up = (i) => !cur[i] && prev[i];
+  PAD.mx = mx; PAD.mz = mz; PAD.lx = lx; PAD.ly = ly;
+  PAD.jump = !!cur[0];
+  if (down(10)) PAD.sprintOn = !PAD.sprintOn;
+  if (lm < 0.1) PAD.sprintOn = false;
+  PAD.sprint = PAD.sprintOn;
+  if (down(7)) actDrawStart(); if (up(7)) actDrawEnd();
+  if (down(6)) actHookDown(); if (up(6)) actHookUp();
+  if (down(1)) { if (HOOK.state === 'reel') hookFire(); else bowCancel(); }
+  if (down(2) && GAME.nearTerminal) { GAME.openShop(); return; }
+  if (down(3)) selectArrow(GAME.lastType);
+  if (down(4)) actCycleArrow(-1);
+  if (down(5)) actCycleArrow(1);
+  if (down(12) && GAME.intermission) GAME.interT = 0;
+  if (down(9)) { GAME.pause(); return; }
+  if (BOW.state === 'drawing') { PAD.rumbleT -= dt; if (PAD.rumbleT <= 0) { PAD.rumbleT = 0.1; padRumble(0.04 + 0.22 * BOW.draw, 0, 130); } } else PAD.rumbleT = 0;
+}
+/* menus: spatial focus navigation over whichever .screen is showing */
+const PAD_DEFAULT_FOCUS = { title: 'playBtn', pause: 'resumeBtn', over: 'againBtn', shop: 'nextWaveBtn', controls: 'ctrlBack' };
+function padVisible(el) { return !el.disabled && el.offsetParent !== null; }
+function padNavigable(scr) { return Array.prototype.filter.call(scr.querySelectorAll('button, input, select'), padVisible); }
+function padMove(scr, dx, dy) {
+  const cur = document.activeElement && scr.contains(document.activeElement) && padVisible(document.activeElement) ? document.activeElement : null;
+  if (cur && dx && cur.type === 'range') { const st = +cur.step || 1; cur.value = clamp(+cur.value + dx * st * (cur.max - cur.min > 20 ? 2 : 1), +cur.min, +cur.max); cur.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  if (cur && dx && cur.tagName === 'SELECT') { const i = clamp(cur.selectedIndex + dx, 0, cur.options.length - 1); if (i !== cur.selectedIndex) { cur.selectedIndex = i; cur.dispatchEvent(new Event('change', { bubbles: true })); } return; }
+  const list = padNavigable(scr); if (!list.length) return;
+  if (!cur) { padFocus(list[0]); return; }
+  const r0 = cur.getBoundingClientRect(), cx = r0.left + r0.width / 2, cy = r0.top + r0.height / 2; let best = null, bs = 1e9;
+  for (const el of list) {
+    if (el === cur) continue;
+    const r = el.getBoundingClientRect(), ex = r.left + r.width / 2 - cx, ey = r.top + r.height / 2 - cy, along = ex * dx + ey * dy;
+    if (along < 2) continue;
+    const sc = along + Math.abs(ex * dy - ey * dx) * 2; if (sc < bs) { bs = sc; best = el; }
+  }
+  if (best) padFocus(best);
+}
+function padFocus(el) { el.focus({ preventScroll: true }); if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); AUD.tick && AUD.ctx && AUD.tick(); }
+function padActivate(el) {
+  if (el.tagName === 'SELECT') { el.selectedIndex = (el.selectedIndex + 1) % el.options.length; el.dispatchEvent(new Event('change', { bubbles: true })); }
+  else if (el.type !== 'range') el.click();
+}
+function padMenu(dt, mx, mz) {
+  const cur = PAD.cur, prev = PAD.prev;
+  if (PAD.last !== 'pad') return;
+  const scr = Array.prototype.find.call(document.querySelectorAll('.screen'), (e) => !e.hidden); if (!scr) return;
+  if (CTRL.listen) return;   // rebinding wants the keyboard
+  const id = scr.id.slice(4);
+  if (PAD.scr !== id) {   // a new screen: start on its main button
+    PAD.scr = id; PAD.navT = 0; PAD.navDir = 0;
+    let el = $(PAD_DEFAULT_FOCUS[id]); if (id === 'shop') el = scr.querySelector('#shopGrid button:not(.off)') || el;
+    if (el && padVisible(el)) padFocus(el); return;
+  }
+  const down = (i) => cur[i] && !prev[i];
+  // direction: d-pad or left stick, once on press then repeating
+  let dx = 0, dy = 0;
+  if (cur[14] || mx < -0.5) dx = -1; else if (cur[15] || mx > 0.5) dx = 1; else if (cur[12] || mz < -0.5) dy = -1; else if (cur[13] || mz > 0.5) dy = 1;
+  const dir = dx ? dx * 2 : dy;   // distinct non-zero id per direction
+  if (!dir) PAD.navDir = 0;
+  else if (dir !== PAD.navDir) { PAD.navDir = dir; PAD.navT = 0.38; padMove(scr, dx, dy); }
+  else { PAD.navT -= dt; if (PAD.navT <= 0) { PAD.navT = 0.11; padMove(scr, dx, dy); } }
+  if (down(0)) { const el = document.activeElement; if (el && scr.contains(el) && padVisible(el)) padActivate(el); }
+  if (down(1)) {
+    if (id === 'controls') closeControls(); else if (id === 'pause') GAME.resume(); else if (id === 'shop') $('nextWaveBtn').click();
+  }
+  if (down(9)) { if (id === 'pause') GAME.resume(); else if (id === 'title') $('playBtn').click(); }
+}
+window.NQ.PAD = PAD; window.NQ.padPoll = padPoll; window.NQ.CTRL = CTRL; window.NQ.hint = hint;
 
 </script>
 </body>

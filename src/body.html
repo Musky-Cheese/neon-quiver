@@ -26,6 +26,14 @@
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
+        <label for="fov">FOV <input id="fov" type="range" min="60" max="100" step="1" value="78"><output id="fovv">78</output></label>
+        <label for="shake">Shake <input id="shake" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="invy"><input id="invy" type="checkbox"> Invert Y</label>
+        <label for="rf"><input id="rf" type="checkbox"> Reduce flashing</label>
+        <button class="linkbtn" id="ctrlBtn" type="button">Controls…</button>
+        <label class="padonly" for="padsens">Pad aim <input id="padsens" type="range" min="0.4" max="2.5" step="0.05" value="1"></label>
+        <label class="padonly" for="padzone">Deadzone <input id="padzone" type="range" min="0.05" max="0.4" step="0.01" value="0.15"></label>
+        <label class="padonly" for="padvib"><input id="padvib" type="checkbox"> Vibration</label>
         <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
@@ -42,11 +50,24 @@
           <kbd>Hold left click</kbd><span>Draw the bow</span>
           <kbd>Release</kbd><span>Loose the arrow</span>
           <kbd>Right click</kbd><span>Let the string down</span>
-          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
-          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
-          <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
-          <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
-          <kbd>P / Esc</kbd><span>Pause</span>
+          <kbd data-k="fwd left back right">W A S D</kbd><span>Move · <kbd data-k="sprint">Shift</kbd> sprint · <kbd data-k="jump">Space</kbd> jump</span>
+          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd data-k="last">X</kbd> last arrow</span>
+          <kbd data-k="hook">Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
+          <kbd data-k="use">E</kbd><span>Use an armory terminal · <kbd data-k="next">N</kbd> start the next wave early</span>
+          <kbd data-k="pause" data-esc="1">P / Esc</kbd><span>Pause</span>
+        </div>
+      </div>
+      <div class="card-p padonly">
+        <h3>Gamepad</h3>
+        <div class="keys">
+          <kbd>L stick</kbd><span>Move · <kbd>L3</kbd> sprint</span>
+          <kbd>R stick</kbd><span>Aim</span>
+          <kbd>RT</kbd><span>Hold to draw, release to loose · <kbd>B</kbd> let the string down</span>
+          <kbd>A</kbd><span>Jump</span>
+          <kbd>LB / RB</kbd><span>Switch arrows · <kbd>Y</kbd> last arrow</span>
+          <kbd>LT</kbd><span>Grappling hook: hold to preview, release to fire · <kbd>B</kbd> cuts the rope</span>
+          <kbd>X</kbd><span>Use an armory terminal · <kbd>D-pad ↑</kbd> start the next wave early</span>
+          <kbd>Start</kbd><span>Pause</span>
         </div>
       </div>
       <div class="card-p">
@@ -75,7 +96,27 @@
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
+        <label for="fov2">FOV <input id="fov2" type="range" min="60" max="100" step="1" value="78"><output id="fovv2">78</output></label>
+        <label for="shake2">Shake <input id="shake2" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="invy2"><input id="invy2" type="checkbox"> Invert Y</label>
+        <label for="rf2"><input id="rf2" type="checkbox"> Reduce flashing</label>
+        <button class="linkbtn" id="ctrlBtn2" type="button">Controls…</button>
+        <label class="padonly" for="padsens2">Pad aim <input id="padsens2" type="range" min="0.4" max="2.5" step="0.05" value="1"></label>
+        <label class="padonly" for="padzone2">Deadzone <input id="padzone2" type="range" min="0.05" max="0.4" step="0.01" value="0.15"></label>
+        <label class="padonly" for="padvib2"><input id="padvib2" type="checkbox"> Vibration</label>
         <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+      </div>
+    </div>
+  </section>
+
+  <section id="scr-controls" class="screen" hidden>
+    <div class="center-panel">
+      <h2>Controls</h2>
+      <p class="muted" id="ctrlNote">Click a key, then press the new one. Esc cancels. Esc (pause), 1–7 (arrows) and the arrow keys can't be changed.</p>
+      <div id="ctrlList" class="ctrl-list"></div>
+      <div class="row" style="justify-content:center">
+        <button class="btn ghost" id="ctrlReset" type="button">Reset to defaults</button>
+        <button class="btn primary" id="ctrlBack" type="button">Back</button>
       </div>
     </div>
   </section>
