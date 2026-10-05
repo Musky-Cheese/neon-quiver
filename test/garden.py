@@ -3,16 +3,15 @@ import sys, json, base64, io
 from playwright.sync_api import sync_playwright
 from PIL import Image
 out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/garden.jpg'; Q = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-POSES = [(0, 158, 0, 0.05), (-4, 178, 0.6, 0.12), (8, 190, -0.9, 0.1), (0, 186, 3.14, 0.08), (-14, 206, 0.9, 0.15), (0, 195, 0, 0.1)]
+POSES = [(-11, 178, 0.2, 0.12), (16, 200, 0.3, 0.1), (-4, 178, 0.6, 0.12), (0, 186, 3.14, 0.08), (0, 192, 0, 0.05), (0, 210, 0, 0.05)]
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
     pg = b.new_page(viewport={'width': 800, 'height': 450}); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e))); pg.on('console', lambda m: m.type in ('error', 'warning') and errs.append(m.text))
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
     pg.goto('http://localhost:8765/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=180000, polling=500)
-    pg.wait_for_function('!!window.NQ.scene.getObjectByName("meshy-hero-sakuras")', timeout=60000, polling=500)
     info = pg.evaluate(f"""() => {{ const N = window.NQ; N.SETTINGS.quality = {Q}; N.play(); N.clear(); N.noLoop(true);
-      const t = N.scene.getObjectByName('meshy-hero-sakuras'); return {{ count: t.count, tris: t.geometry.index.count / 3, textured: !!t.material.map, trees: N.WORLD.heroTrees.length }}; }}""")
+      return {{ petals: N.WORLD.petals.length }}; }}""")
     print(json.dumps(info))
     tiles = []
     for (x, z, yaw, pitch) in POSES:
