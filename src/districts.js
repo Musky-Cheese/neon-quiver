@@ -387,7 +387,8 @@ function buildDistricts(C) {
   propPath(G, R, loop, 1.3);
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
-  for (const [x, z, s] of [[-24, 80, 1.1], [-12, 79.5, 0.95], [12, 81, 1.05], [25, 84, 1.2], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
+  // Three showcase positions are reserved for the Meshy hero model; the procedural trees fill out the grove cheaply.
+  for (const [x, z, s] of [[-12, 79.5, 0.95], [12, 81, 1.05], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
     [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 109, 0.95], [10, 109.5, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-17, 134, 1.3], [17.5, 134.5, 1.25]])
     propSakura(G, R, x, z + OZ, s, false);
   for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);

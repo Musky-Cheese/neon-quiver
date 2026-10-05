@@ -970,12 +970,16 @@ async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await loadModels(); makeDecalTextures();
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
-  await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
+  await Promise.all([
+    loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
+    loadHeroSakuras(),
+  ]);
   gpuCheck();
   wireUI();
   // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
   try { for (const f of ['400 20px "Chakra Petch"', '500 20px "Chakra Petch"', '600 20px "Chakra Petch"', '700 20px "Chakra Petch"', '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 20px "IBM Plex Mono"']) document.fonts.load(f).catch(() => { }); } catch (e) { }
   toTitle();
+  if (new URLSearchParams(location.search).has('tree')) { GAME.newGame(); PLAYER.x = -18; PLAYER.z = 166; PLAYER.yaw = -2.2; PLAYER.pitch = 0.02; }
   render(GAME.time); warmShaders();   // build the post chain, then compile everything before the first real frame
   $('loading').hidden = true;
   requestAnimationFrame(frame);

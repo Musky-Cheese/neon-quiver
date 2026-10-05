@@ -522,6 +522,37 @@ function addWorldChunks(geo, castShadow, receiveShadow, name) {
   }
 }
 
+/* ---------------- Meshy hero sakuras ----------------
+   The downloaded model is intentionally geometry-only. Split its disconnected pieces once at load time:
+   the largest connected component is the trunk, and the smaller clusters become varied blossoms. Three
+   instances share one geometry and one draw call; the procedural grove remains the laptop-friendly LOD. */
+const HERO_SAKURA_POS = [[-24, 170, 3.55, 0.2], [25, 174, 3.8, 2.35], [17, 194, 3.7, 4.45]];
+async function loadHeroSakuras() {
+  try {
+    const gltf = await new GLTFLoader().loadAsync('models/sakura.glb?v=' + (typeof SAKURA_VER === 'string' ? SAKURA_VER : '0'));
+    let src = null; gltf.scene.traverse(o => { if (!src && o.isMesh) src = o.geometry; });
+    if (!src || !src.attributes.position || !src.index) throw new Error('missing indexed geometry');
+    const geo = src.clone(); geo.computeVertexNormals();
+    const pos = geo.attributes.position, idx = geo.index.array, n = pos.count;
+    const parent = new Int32Array(n), size = new Int32Array(n); for (let i = 0; i < n; i++) { parent[i] = i; size[i] = 1; }
+    const root = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+    const join = (a, b) => { a = root(a); b = root(b); if (a === b) return; if (size[a] < size[b]) { const t = a; a = b; b = t; } parent[b] = a; size[a] += size[b]; };
+    for (let i = 0; i < idx.length; i += 3) { join(idx[i], idx[i + 1]); join(idx[i], idx[i + 2]); }
+    let trunk = 0; for (let i = 1; i < n; i++) if (size[root(i)] > size[root(trunk)]) trunk = i; trunk = root(trunk);
+    const col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const r = root(i), bark = r === trunk, v = ((r * 16807) & 255) / 255, k = bark ? 0.75 + 0.18 * v : 0.78 + 0.22 * v;
+      col[i * 3] = bark ? 0.12 * k : 1.0 * k; col[i * 3 + 1] = bark ? 0.065 * k : (0.38 + 0.3 * v) * k; col[i * 3 + 2] = bark ? 0.055 * k : (0.58 + 0.26 * v) * k;
+      nqm[i * 2] = bark ? 0.02 : 0.42; nqm[i * 2 + 1] = bark ? 13 : 0;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2)); geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const trees = new THREE.InstancedMesh(geo, MAT.static, HERO_SAKURA_POS.length), m = new THREE.Matrix4();
+    for (let i = 0; i < HERO_SAKURA_POS.length; i++) { const [x, z, s, ry] = HERO_SAKURA_POS[i]; m.compose(new THREE.Vector3(x, s * 0.953, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry), new THREE.Vector3(s, s, s)); trees.setMatrixAt(i, m); }
+    trees.name = 'meshy-hero-sakuras'; trees.castShadow = true; trees.receiveShadow = true; trees.userData.streamRadius = 300; trees.userData.streamLap = FAR.lap.props; trees.instanceMatrix.needsUpdate = true;
+    scene.add(trees); WORLD_MESHES.push(trees); updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+  } catch (e) { console.warn('hero sakura load failed', e); }
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (FAR._lap !== FAR.laptop) { FAR._lap = FAR.laptop; force = true; }   // Laptop toggled: re-resolve every radius now
