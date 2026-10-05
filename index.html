@@ -241,6 +241,14 @@ button, select, input { font-family: var(--f); }
 #swWarn b { color: var(--amber); }
 #swWarn code { font-size: 13px; color: var(--cyan); }
 #swWarn .btn { padding: 8px 16px; font-size: 13px; flex: none; }
+#sysErr { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(7, 8, 15, 0.92); font-family: "Chakra Petch", var(--f); color: #EEF1F8; }
+.sys-panel { width: min(560px, 100%); box-sizing: border-box; padding: 32px; display: grid; gap: 14px; border: 1px solid rgba(255, 255, 255, 0.14); background: #0E1020; }
+.sys-eyebrow { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; letter-spacing: 0.28em; color: #FF6FB4; }
+.sys-panel h2 { margin: 0; font-size: 34px; line-height: 1.05; font-weight: 700; text-transform: uppercase; }
+.sys-panel p { margin: 0; font-size: 17px; line-height: 1.45; color: #C3C8D8; }
+.sys-panel code { display: block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.4; color: #A3AAC2; padding: 10px 12px; background: #07080F; border: 1px solid rgba(255, 255, 255, 0.12); white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; user-select: text; }
+.sys-btn { justify-self: start; height: 52px; padding: 0 28px; border: 0; background: #38E1F2; color: #05060C; font: 700 18px "Chakra Petch", var(--f); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
 #loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
 #nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
 
@@ -284,7 +292,7 @@ button, select, input { font-family: var(--f); }
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="bests">
@@ -328,7 +336,7 @@ button, select, input { font-family: var(--f); }
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
       </div>
     </div>
   </section>
@@ -380,6 +388,35 @@ button, select, input { font-family: var(--f); }
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
+  <!-- crash / GPU-reset screen: plain script, so it still works if the game module never loads -->
+  <div id="sysErr" role="alert" hidden>
+    <div class="sys-panel">
+      <div class="sys-eyebrow" id="sysErrE">SYSTEM</div>
+      <h2 id="sysErrT">Something went wrong</h2>
+      <p id="sysErrM"></p>
+      <code id="sysErrC"></code>
+      <button type="button" class="sys-btn" id="sysErrBtn">Reload</button>
+    </div>
+  </div>
+  <script>
+  (function () {
+    function show(eyebrow, title, msg, code) {
+      if (window.__NQ_CAPTURE) return;
+      var e = document.getElementById('sysErr'), ng = document.getElementById('nogl'); if (!e || (ng && !ng.hidden)) return;
+      document.getElementById('sysErrE').textContent = eyebrow; document.getElementById('sysErrT').textContent = title;
+      document.getElementById('sysErrM').textContent = msg; var c = document.getElementById('sysErrC'); c.textContent = code || ''; c.hidden = !code;
+      e.hidden = false;
+    }
+    window.NQ_SYS = { show: show, hide: function () { var e = document.getElementById('sysErr'); if (e) e.hidden = true; } };
+    window.NQ_FATAL = function (err) {
+      var s = err && (err.stack || err.message) || String(err);
+      show('ERROR', 'Something went wrong', 'The game hit an error and stopped. Reloading usually fixes it, and your best score is saved. If it keeps happening, send the line below to the developer.', String(s).slice(0, 360));
+    };
+    window.addEventListener('error', function (ev) { if (!window.NQ_READY) window.NQ_FATAL(ev.error || ev.message); });
+    window.addEventListener('unhandledrejection', function (ev) { if (!window.NQ_READY) window.NQ_FATAL(ev.reason); });
+    document.addEventListener('click', function (ev) { if (ev.target && ev.target.id === 'sysErrBtn') location.reload(); });
+  })();
+  </script>
   <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>
@@ -522,6 +559,8 @@ const NQU = {
   uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
+  // release look pass: soft camera-side fill + two-tone neon rim on the infected, and wind for the foliage (weather.js)
+  uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
@@ -601,6 +640,16 @@ attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 v
 attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart; varying vec3 vNqL;
 #else
 attribute vec2 nqm;
+#endif
+uniform float uTime, uWind;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+#if !defined(NQ_Z) && !defined(NQ_VM) && !defined(NQ_INST)
+  if (nqm.y > 13.5 && nqm.y < 14.5) {   // foliage: a slow lean downwind (+x, like the rain) plus a quick leaf flutter, both from the weather
+    vec3 wp = transformed; float hk = smoothstep(1.2, 4.5, wp.y);
+    float lean = uWind * (0.55 + 0.45 * sin(uTime * 0.8 + wp.x * 0.11 + wp.z * 0.09));
+    transformed.x += lean * 0.16 * hk;
+    transformed += vec3(sin(uTime * 6.3 + wp.y * 4.1 + wp.x * 2.7), sin(uTime * 5.1 + wp.z * 3.3) * 0.5, cos(uTime * 5.7 + wp.x * 3.9)) * 0.014 * (0.35 + uWind) * hk;
+  }
 #endif`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
 { vec4 w = vec4(transformed, 1.0); vec3 wn = objectNormal;
@@ -622,7 +671,7 @@ attribute vec2 nqm;
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
-uniform float uTexOn, uSnowCov;
+uniform float uTexOn, uSnowCov, uZFill, uZRim;
 ${NOISE_GLSL}
 #ifdef NQ_FAR
 // Fast / Balanced / Laptop only (r3.js FAR). 0 everywhere inside the near zone; past it, fine detail fades to its
@@ -729,10 +778,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
       float bseed = h21(floor(vNqW.xz/37.) + N0.xz*3.1);
       float seed = h21(id*1.37 + bseed*91.);
-      float lit = step(0.86 - bseed*0.1, seed) * step(1.2, vNqW.y);   // dead city: most rooms dark
+      float floorLit = step(0.968, h21(vec2(id.y * 1.7 + 0.3, bseed * 53.1))) * step(4.5, vNqW.y);   // an office floor someone left on
+      float lit = max(step(0.82 - bseed*0.1, seed), floorLit) * step(1.2, vNqW.y);   // dead city: most rooms still dark
       float flick = step(0.997, h21(id + floor(uTime*4.)));
       vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
       wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
+      float tv = step(0.78, h21(id + 8.8)) * (1. - floorLit);   // a TV still playing to an empty room
+      wc = mix(wc, vec3(0.36, 0.6, 1.0) * (0.45 + 0.55 * vn(vec2(uTime * 4.7 + seed * 40., seed * 9.))), tv);
+      wc = mix(wc, vec3(0.8, 0.9, 1.0), floorLit);
       // inside the glass: a room gradient, mullions, and some blinds half drawn
       float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
@@ -861,7 +914,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     else base *= mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv) * (0.55 + 0.6 * clump);                           // dark to sunlit, yellowing leaves
     base *= mix(0.62 + 0.3 * clump, 1.0, edgeL) * (0.8 + 0.3 * dome);
     if (pinkF) { base *= vec3(1.12, 0.95, 1.02); emis += base * (0.1 + 0.16 * dome) * (0.6 + 0.4 * clump); }   // petals glow softly, as if lit through
-    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4; bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
+    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4;
+    emis += base * (1. - ndv) * (1. - ndv) * (0.25 + 0.6 * uNeon) * (pinkF ? 1.3 : 0.8);   // thin leaves and petals let the city light through at the edges
+    bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
   } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
@@ -942,13 +997,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       rough = mix(rough, 0.12, max(wound, bl * (1. - dry)));
       float soak = clamp(wetK, 0., 1.);                                   // rain: skin takes a thin sheen, cloth goes dark and heavy
       rough = mix(rough, rough * 0.72, soak * skinM);
+      rough = mix(rough, 0.16, soak * skinM * smoothstep(0.35, 0.9, N0.y));   // rain beads on the crown and shoulders
       base *= 1. - 0.2 * soak * clm * (1. - armour);
       bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.008 + vein * 0.003 + (vn(q.xy * 6.) - 0.5) * 0.0015 * clm;   // weave
       // eyes (full-emissive verts on the head): milky, clouded, wet, with only a faint infected glint
       float eye = step(0.97, vNqM.x) * step(4.5, vPart) * step(vPart, 5.5);
       base = mix(base, vec3(0.3, 0.1, 0.07) * mix(1., vn(q.xy * 9.) * 0.4 + 0.7, 0.5), eye);   // bloodshot
       rough = mix(rough, 0.08, eye); rimK = mix(rimK, 0.0, eye);
-      emis += iemit * eye * 2.3;                                              // burning pupils: readable at night from across the street
+      emis += iemit * eye * 3.2;                                              // burning pupils: readable at night from across the street
       // teeth (tagged 0.9 in the sculpt, 0.27 after the vein softening): stained, cracked enamel, never glowing
       float tooth = step(0.2, vNqM.x) * step(vNqM.x, 0.35) * step(4.5, vPart) * step(vPart, 6.5);
       base = mix(base, vec3(0.3, 0.25, 0.15) * ao * (0.75 + 0.25 * vn(q.xy * 20.)), tooth); rough = mix(rough, 0.3, tooth); emis *= 1. - tooth;
@@ -973,6 +1029,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
     base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
     rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
+  } else if (mat > 23.5 && mat < 24.5) {    // beacons and hazard lights: a short flash on each light's own beat
+    float ph = h21(floor(vNqW.xz * 0.5) + floor(vNqW.y * 0.25)), cyc = fract(uTime * (0.5 + 0.35 * ph) + ph);
+    emis *= 0.06 + 1.7 * smoothstep(0., 0.04, cyc) * (1. - smoothstep(0.16, 0.34, cyc)); rimK = 0.;
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
@@ -1014,6 +1073,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     rim *= 0.25;
 #endif
     totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK;
+#ifdef NQ_Z
+    {   // readability: a soft fill from the camera side that fades with distance, and the city's neon edging the silhouette
+      float ndv = clamp(dot(normal, normalize(vViewPosition)), 0., 1.), zd = length(vNqW - cameraPosition);
+      totalEmissiveRadiance += base * uZFill * (0.3 + 0.7 * ndv) * (1. - smoothstep(8., 38., zd));
+      float rz = pow(1. - ndv, 2.6) * smoothstep(-0.2, 0.4, normal.y + 0.3);
+      totalEmissiveRadiance += mix(vec3(1.0, 0.31, 0.64), vec3(0.22, 0.88, 0.95), step(0., normal.x)) * rz * uZRim;
+    }
+#endif
 #ifndef NQ_VM
     // planar reflection of the street (rendered mirrored by r3.js), rippled by the bumped normal
     if (wetRefl > 0.0 && uReflOn > 0.5) {
@@ -1363,6 +1430,10 @@ function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
     part(sx * 0.62, 0.86, -2.36, 0.52, 0.12, 0.12, 0.05, [1, 0.95, 0.85], variant === 1 && sx < 0 ? 0 : 3.2, 0);
   }
   part(0, 1.07, 2.43, 1.75, 0.07, 0.08, 0.03, NEON.red, 4, 0);
+  // still half powered: a dash display glowing at the base of the canopy, a plate, and amber hazards blinking out of step (material 24)
+  part(0, 1.02, -0.98, 1.45, 0.035, 0.07, 0.012, NEON.cyan, 1.5, 0, 0, 0.5);
+  part(0, 0.8, 2.47, 0.52, 0.15, 0.025, 0.01, [0.62, 0.66, 0.7], 0.12, 15);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) part(sx * 0.98, sz < 0 ? 0.84 : 1.0, sz * 2.36, 0.16, 0.07, 0.06, 0.02, NEON.amber, 6, 24);
   // spoiler on two struts
   for (const sx of [-0.6, 0.6]) part(sx, 1.28, 2.2, 0.06, 0.26, 0.12, 0.02, trim, 0, 4, 0, 0.3);
   part(0, 1.42, 2.28, 1.95, 0.05, 0.36, 0.02, paint, 0, 11, 0, 0.1);
@@ -1372,6 +1443,7 @@ function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
     const dead = variant > 0 && k === variant + 1; k++;
     if (variant === 2 && k === 4) continue;   // this one was torn off (lies nearby)
     g.lathe(pChild(W, sx, 0.3, sz), [[0.24, -0.16, dead ? DARK : NEON.cyan, dead ? 0 : 2.8], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
+    if (!dead) { const q = pPt(W, sx, 0.3, sz); WORLD.halos.push({ p: [q[0], 0.18, q[2]], s: 1.5, c: [0.06, 0.32, 0.38] }); }   // working pods light the street underneath
   }
   // damage: a door hanging open, a crumpled panel
   if (variant === 1) part(1.35, 1.0, -0.35, 0.07, 0.58, 1.15, 0.03, paint, 0, 11, 0.95, 0, 0.12);
@@ -2463,6 +2535,10 @@ function applyThemeUniforms() {
   NQU.uNeon.value = T.neon; NQU.uWin.value = T.win; NQU.uWinWarm.value = T.winWarm; NQU.uGrid.value = T.grid; NQU.uWet.value = T.wet;
   NQU.uDyn.value = T.dyn; NQU.uDynVM.value = 0.5 + 0.5 * Math.max(T.neon, 0.2);
   NQU.uRimCol.value.setRGB(T.rim[0], T.rim[1], T.rim[2]);
+  // the infected stay readable in every look: more fill and neon rim the darker and more neon the look is
+  const amb = T.ambHi[0] * 0.3 + T.ambHi[1] * 0.55 + T.ambHi[2] * 0.15;
+  NQU.uZFill.value = T.zFill ?? clamp(0.14 - amb * 0.5, 0.03, 0.14);
+  NQU.uZRim.value = T.zRim ?? (0.12 + 0.3 * T.neon) * (1 - clamp(amb * 2, 0, 0.8));
 }
 
 /* ============================================================
@@ -2884,6 +2960,7 @@ function updateWeather(dt) {
   WX.cover = snowNow > 0.1 ? ease(WX.cover, Math.min(1, snowNow * 1.5), 55) : ease(WX.cover, 0, rainNow > 0.1 ? 25 : 140);
   // gusts: the slant swings; heavier in storms
   WX.gust = Math.max(0, Math.sin(GAME.time * 0.37) * Math.sin(GAME.time * 0.113 + 2)) * WX.wind;
+  NQU.uWind.value = WX.wind * 0.7 + WX.gust * 1.2;   // foliage sway (engine.js)
   // lightning in storms: a double flicker, thunder a few seconds later (sound travels)
   WX.flash = Math.max(0, WX.flash - dt * 3.2);
   if (WX.storm > 0.5) {
@@ -3171,7 +3248,7 @@ function buildCity() {
     // roof bits
     B(cx, h + 0.6, cz, w, 1.2, d, [0.05, 0.05, 0.06]);
     for (let i = 0; i < 3; i++) B(cx + r(-w / 3, w / 3), h + 1.8, cz + r(-d / 3, d / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
-    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3); }
+    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
     // facade orientation
     let fx, fz, ry, tx, tz, span; // facade point & normal toward plaza
     if (face === '-z') { fz = z0 - 0.02; fx = cx; ry = Math.PI; tx = 1; tz = 0; span = w; }
@@ -3318,7 +3395,7 @@ function buildCity() {
     if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, 1); h += h2; }
     if (R() < 0.5) { B(x, h + 0.5, z, w + 0.4, 0.5, d + 0.4, neonPick(), 1.6); }
     if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); B(x - w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); }
-    if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4);
+    if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4, 24);
     if (mx < 130) solid(x - w / 2, x + w / 2, 0, h, z - d / 2, z + d / 2);
   }
   // the Spire — megatower at the end of the north avenue
@@ -3543,7 +3620,7 @@ function buildDistricts(C) {
   for (const lx of [-29.5, 29.5]) { B(lx, 8.5, -126, 1.2, 17, 1.2, [0.3, 0.22, 0.04], 0, 4); B(lx, 8.5, -132, 1.2, 17, 1.2, [0.3, 0.22, 0.04], 0, 4); solid(lx - 0.6, lx + 0.6, 0, 17, -126.6, -125.4); solid(lx - 0.6, lx + 0.6, 0, 17, -132.6, -131.4); }
   B(0, 17.3, -126, 61, 1.2, 1.0, [0.3, 0.22, 0.04], 0, 4); B(0, 17.3, -132, 61, 1.2, 1.0, [0.3, 0.22, 0.04], 0, 4);
   B(6, 16.3, -129, 3, 1.6, 7, [0.12, 0.12, 0.13], 0, 4); B(6, 11, -129, 0.06, 9, 0.06, [0.05, 0.05, 0.05]); B(6, 6.4, -129, 0.9, 0.5, 0.4, [0.3, 0.22, 0.04], 0, 4);
-  B(-29.5, 17.4, -129, 0.5, 0.5, 0.5, NEON.red, 4); B(29.5, 17.4, -129, 0.5, 0.5, 0.5, NEON.red, 4);
+  B(-29.5, 17.4, -129, 0.5, 0.5, 0.5, NEON.red, 4, 24); B(29.5, 17.4, -129, 0.5, 0.5, 0.5, NEON.red, 4, 24);
   flood(-20, -95); flood(20, -122); flood(20, -80);
   barrier(-4, -90, 0); barrier(12, -104, 1); barrier(-18, -122, 0);
   crates(14, -97); crates(-24, -110);
@@ -3620,7 +3697,7 @@ function buildDistricts(C) {
   B(242, 14, 22, 15, 14, 9, [0.52, 0.52, 0.5], 0, 8); B(242, 21.3, 22, 16, 0.6, 10, [0.1, 0.1, 0.1], 0, 4);
   for (let i = 0; i < 5; i++) B(242, 9.5 + i * 2.6, 17.4, 12, 0.7, 0.1, [0.9, 0.75, 0.5], 1.4);   // lit bridge windows
   B(245, 25.5, 24, 2.4, 8, 2.4, [0.15, 0.03, 0.03], 0, 4); B(245, 29.7, 24, 2.5, 0.5, 2.5, [0.05, 0.05, 0.05]);
-  B(242, 22.5, 22, 0.2, 5, 0.2, [0.1, 0.1, 0.1]); B(242, 25, 22, 0.5, 0.5, 0.5, NEON.red, 4);
+  B(242, 22.5, 22, 0.2, 5, 0.2, [0.1, 0.1, 0.1]); B(242, 25, 22, 0.5, 0.5, 0.5, NEON.red, 4, 24);
   for (let bz = -40; bz <= 10; bz += 6.4) for (let bx = -1; bx <= 1; bx++) {
     const h = 1 + Math.floor(R() * 3);
     for (let k = 0; k < h; k++) B(242 + bx * 5.2, 8.5 + k * 2.62, bz, 5, 2.6, 6.1, CONT[Math.floor(R() * CONT.length)], 0, 8);
@@ -3640,7 +3717,7 @@ function buildDistricts(C) {
     B(213, 36.5, cz, 4, 6, 12, [0.2, 0.2, 0.21], 0, 8);                                         // machinery house
     B(232, 30.5, cz, 3.2, 2.6, 3.2, [0.45, 0.45, 0.43], 0, 8); B(232, 30.5, cz - 1.62, 2.6, 1.2, 0.05, [0.9, 0.8, 0.5], 1.6);   // cab
     B(240, 25.5, cz, 0.08, 14, 0.08, [0.05, 0.05, 0.05]); B(240, 18, cz, 2.6, 0.6, 6.1, CONT[Math.floor(R() * CONT.length)], 0, 8);   // spreader with a box still hanging
-    B(267.5, 33.8, cz, 0.6, 0.6, 0.6, NEON.red, 5); B(211.2, 38.5, cz, 0.5, 0.5, 0.5, NEON.red, 5);
+    B(267.5, 33.8, cz, 0.6, 0.6, 0.6, NEON.red, 5, 24); B(211.2, 38.5, cz, 0.5, 0.5, 0.5, NEON.red, 5, 24);
     for (const lx of [211.2, 224.6]) { B(lx, 0.6, cz, 1.6, 1.2, 13, [0.3, 0.14, 0.03], 0, 8); solid(lx - 0.8, lx + 0.8, 0, 1.2, cz - 6.5, cz + 6.5); }   // bogies on the rails
     WORLD.lights.push({ p: [218, 8, cz], r: 18, c: [1.6, 1.4, 1.1], kind: 'lamp' });
   }
@@ -4383,7 +4460,7 @@ function updateAmbient(dt) {
   for (const t of nearbyWorld('petals', px, pz, 48)) {
     const dx = t[0] - px, dz = t[2] - pz; if (dx * dx + dz * dz > 45 * 45) continue;
     if (Math.random() < dt * 7) { const a = Math.random() * TAU, r = Math.random() * t[3];
-      emit(t[0] + Math.cos(a) * r, t[1] + rand(-0.4, 0.3), t[2] + Math.sin(a) * r, rand(0.2, 0.7), rand(-0.5, -0.2), rand(-0.3, 0.3), rand(5, 8), [1.0, 0.5 + Math.random() * 0.15, 0.68], rand(0.04, 0.07), 0.25, 0.9, 0, 0.95); }
+      emit(t[0] + Math.cos(a) * r, t[1] + rand(-0.4, 0.3), t[2] + Math.sin(a) * r, rand(0.2, 0.7) + WX.wind * 1.4 + WX.gust * 2.6, rand(-0.5, -0.2), rand(-0.3, 0.3), rand(5, 8), [1.0, 0.5 + Math.random() * 0.15, 0.68], rand(0.04, 0.07), 0.25, 0.9, 0, 0.95); }
   }
   // wading through a pond: little splashes round the ankles
   if (PLAYER.y < 0.05 && inPond(px, pz) && Math.hypot(PLAYER.vx, PLAYER.vz) > 1 && Math.random() < dt * 24)
@@ -6349,7 +6426,8 @@ void main(){
   vec2 uv = d.xz/max(h+0.08,0.02);
   float cl = vn(uv*0.9+vec2(uTime*0.01,0.)) * vn(uv*2.3-vec2(uTime*0.02,uTime*0.01));
   cl = smoothstep(0.15,0.6,cl)*smoothstep(0.02,0.25,h)*(1.-smoothstep(0.5,0.9,h));
-  c = mix(c, uCloud, cl*0.7);
+  // cloud undersides catch the city's glow: warmest low over the horizon, fading up into the dark
+  c = mix(c, uCloud + uGlow * (0.25 + 0.95 * (1. - smoothstep(0.03, 0.45, h))), cl*0.75);
   vec2 sp = floor(vec2(atan(d.z,d.x)*180., h*180.));
   float st = step(0.9975, h21(sp)) * smoothstep(0.25,0.6,h) * (1.-cl);
   c += vec3(0.8,0.85,1.)*st*uStars*(0.5+0.5*sin(uTime*3.+sp.x));
@@ -7181,6 +7259,9 @@ function buildComposer(W, H, q) {
   }
   vmPass = new ScenePass(vmCamera, false); composer.addPass(vmPass);
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
+  if (SETTINGS.laptop) {   // Laptop keeps the glow, at a quarter of the pixels: the bloom chain runs at half width and height
+    const ss = bloomPass.setSize.bind(bloomPass); bloomPass.setSize = (w, h) => ss(Math.max(8, w >> 1), Math.max(8, h >> 1));
+  }
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);
   composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.laptop = !!SETTINGS.laptop; R3.W = W; R3.H = H;
@@ -7290,8 +7371,8 @@ function render3(time, W, H, fov, cam) {
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
-  bloomPass.enabled = !SETTINGS.laptop;
-  bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
+  bloomPass.enabled = true;
+  bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
   vmPass.enabled = vmOn && !worldPass.withVM;
@@ -7535,11 +7616,12 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir' };
+const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const SAVED_SETTINGS = loadLS('nq_settings', {});
 Object.assign(SETTINGS, SAVED_SETTINGS);
+if ('quality' in SAVED_SETTINGS && !('auto' in SAVED_SETTINGS)) SETTINGS.auto = false;   // players who picked a quality before Auto existed keep their pick
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
@@ -7902,11 +7984,11 @@ function explode(x, y, z, R = 6, knock = true) {
 
 /* ---------------- pickups ---------------- */
 const PICKUPS = [];
-function dropPickup(x, z, forceType) {
+function dropPickup(x, z, forceType, std = false) {
   const r = Math.random();
   const kind = forceType || (r < 0.55 ? 'ammo' : 'health');
   // arrow drops: standard arrows, or one of the specials you have equipped
-  const sp = availTypes().slice(1), at = kind === 'ammo' && sp.length && Math.random() < 0.45 ? pick(sp) : 0;
+  const sp = availTypes().slice(1), at = kind === 'ammo' && !std && sp.length && Math.random() < 0.45 ? pick(sp) : 0;
   PICKUPS.push({ x, z, kind, at, t: 0 });
 }
 function updatePickups(dt) {
@@ -8050,6 +8132,7 @@ const GAME = {
     const r = Math.random();
     if (z.type === 'boss') { for (let k = 0; k < 6; k++) dropPickup(z.x + rand(-3, 3), z.z + rand(-3, 3), k < 4 ? 'ammo' : 'health'); explode(z.x, 2, z.z); this.showBanner('WARDEN DOWN', `+${pts}`, '#ffd23a'); this.boss = null; document.getElementById('bossbar').hidden = true; shake(1.2); }
     else if (z.type === 'brute' ? r < 0.75 : r < 0.16) dropPickup(z.x, z.z);
+    else if (PLAYER.ammo[0] < PLAYER.quiverMax * 0.3 && Math.random() < 0.3) dropPickup(z.x, z.z, 'ammo', true);   // running dry: the dead give back arrows
     hudScore();
   },
   hitMarker(head, kill) { this.hm.t = 0.18; this.hm.head = !!head; this.hm.kill = !!kill; },
@@ -8332,6 +8415,37 @@ function step(dt) {
 }
 
 const PERF = { scale: 1, acc: 0, n: 0, pressure: 0, fAcc: 0, fN: 0, fSlow: 0 };
+const FRAME_ERR = { n: 0 };
+/* ---------------- Auto quality ----------------
+   The ladder, cheapest first. First visit: a few seconds of the title screen are timed and the tier steps down until it
+   holds about 40 fps (and a strong desktop GPU steps up to Sharp). In a run, if resolution scaling has already hit its
+   floor and frames still miss ~30 fps for 4 s, it drops one more tier and says so. Ultra is only ever picked by hand. */
+const TIERS = [{ q: 0, lap: false, name: 'Fast' }, { q: 1, lap: true, name: 'Laptop' }, { q: 1, lap: false, name: 'Balanced' }, { q: 2, lap: false, name: 'Sharp' }];
+const AUTOQ = { phase: 'off', t: 0, acc: 0, n: 0, slowT: 0, done: false };
+function tierIndex() { return SETTINGS.quality >= 2 ? 3 : SETTINGS.quality === 0 ? 0 : SETTINGS.laptop ? 1 : 2; }
+function setTier(i, why) {
+  const T = TIERS[clamp(i, 0, TIERS.length - 1)]; if (tierIndex() === TIERS.indexOf(T) && SETTINGS.quality < 3) return false;
+  SETTINGS.quality = T.q; SETTINGS.laptop = T.lap; PERF.scale = 1; PERF.acc = 0; PERF.n = 0; saveLS('nq_settings', SETTINGS); syncQualityUI();
+  if (why && GAME.state === 'playing') GAME.toast(`GRAPHICS ${T.name.toUpperCase()} · AUTO`, '#38e1f2');
+  return true;
+}
+function autoQuality(raw) {
+  if (!SETTINGS.auto || SETTINGS.quality >= 3 || document.hidden) return;
+  const A = AUTOQ;
+  if (GAME.state === 'title' && !A.done) {   // benchmark on the title screen: 1 s to settle, then 2.5 s of frames per tier
+    A.t += raw; if (A.t < 1) return;
+    A.acc += raw; A.n++;
+    if (A.t < 3.5) return;
+    const avg = A.acc / A.n, i = tierIndex(); A.t = 0; A.acc = 0; A.n = 0;
+    if (avg > 0.025 && i > 0) { setTier(i - 1); return; }                                          // under ~40 fps: one tier cheaper, measure again
+    if (avg < 0.0095 && i === 2 && !GPU.integrated && !A.up) { A.up = true; setTier(3); return; }   // over ~105 fps on a desktop GPU: try Sharp
+    if (A.up && avg > 0.014 && i === 3) setTier(2);                                                 // Sharp didn't hold: back to Balanced
+    A.done = true; return;
+  }
+  if (GAME.state !== 'playing') { A.slowT = 0; return; }
+  if (PERF.scale <= 0.42 && raw > 0.033) A.slowT += raw; else A.slowT = Math.max(0, A.slowT - raw * 0.5);
+  if (A.slowT > 4) { A.slowT = 0; const i = tierIndex(); if (i > 0) setTier(i - 1, true); }
+}
 function frame(now) {
   requestAnimationFrame(frame);
   now /= 1000; const raw = now - lastT; let dt = Math.min(0.05, raw); lastT = now;
@@ -8350,9 +8464,16 @@ function frame(now) {
   }
   if (GAME.noLoop) return;
   const c0 = performance.now();
-  if (!GAME.frozen) step(dt);
-  // the Armory is an opaque full-screen board: skip the 3D frame and the HUD entirely while it's up (no GPU work at all)
-  if (GAME.state !== 'shop') { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
+  try {
+    if (!GAME.frozen) step(dt);
+    // the Armory is an opaque full-screen board, and a lost GPU context can't draw: skip the 3D frame and the HUD
+    if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
+    if (!window.__NQ_CAPTURE && raw < 0.5) autoQuality(raw);
+    FRAME_ERR.n = 0;
+  } catch (e) {
+    // one bad frame is survivable; three in a row means the game is wedged: stop and say so instead of freezing silently
+    console.error(e); if (++FRAME_ERR.n >= 3) { GAME.noLoop = true; if (window.NQ_FATAL) window.NQ_FATAL(e); }
+  }
   profFrame(performance.now() - c0);
 }
 
@@ -8393,6 +8514,11 @@ function render(time) {
   render3(time, W, H, fov, cam);
 }
 /* ---------------- UI wiring ---------------- */
+// quality dropdowns: 'A' is Auto (the tier it settled on is shown next to it)
+function syncQualityUI() {
+  const v = SETTINGS.auto ? 'A' : SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality), cur = TIERS[tierIndex()];
+  for (const id of ['quality', 'quality2']) { const s = $(id); if (!s) continue; s.value = v; const o = s.querySelector('option[value="A"]'); if (o) o.textContent = SETTINGS.auto && SETTINGS.quality < 3 ? `Auto (${cur.name})` : 'Auto'; }
+}
 function syncMusicBtn() { const b = $('musicBtn'); if (b) b.textContent = 'Title music: ' + (SETTINGS.music ? 'On' : 'Off'); }
 function wireUI() {
   $('playBtn').addEventListener('click', () => { AUD.init(); AUD.setMusic(SETTINGS.music); AUD.click(); ZOMBIES.length = 0; GAME.newGame(); requestLock(); });
@@ -8405,8 +8531,12 @@ function wireUI() {
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   // 'L' is the Laptop level: a deliberately cheaper pipeline for integrated graphics (r3.js).
-  const qv = () => SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality);
-  for (const id of ['quality', 'quality2']) { const s = $(id); s.value = qv(); s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
+  for (const id of ['quality', 'quality2']) { const s = $(id); s.addEventListener('change', () => {
+    PERF.scale = 1;
+    if (s.value === 'A') { SETTINGS.auto = true; AUTOQ.done = false; AUTOQ.t = 0; AUTOQ.acc = 0; AUTOQ.n = 0; AUTOQ.up = false; }
+    else { SETTINGS.auto = false; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; }
+    saveLS('nq_settings', SETTINGS); syncQualityUI(); }); }
+  syncQualityUI();
   syncMusicBtn();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
@@ -8428,9 +8558,16 @@ function gpuCheck() {
   // first run only: integrated GPUs start on Laptop. A saved choice is never overridden.
   const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc(\(tm\))? a\d+|rx|rtx|gtx|radeon pro)\b/i.test(g);
   if (!('quality' in SAVED_SETTINGS) && integrated && !soft) { SETTINGS.quality = 1; SETTINGS.laptop = true; }
+  if (!('quality' in SAVED_SETTINGS) && soft) { SETTINGS.quality = 0; SETTINGS.laptop = false; }   // software rendering: start at the bottom of the ladder
   GPU.name = g; GPU.soft = soft; GPU.integrated = integrated;
+  // the browser can take the GPU away (sleep, driver reset, another tab hogging it): pause, explain, and pick up again when it's back
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault(); GPU.lost = true; if (GAME.state === 'playing') GAME.pause();
+    if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. Waiting for it to come back. If the picture doesn\'t return in a few seconds, reload: your best score is saved.');
+  });
+  canvas.addEventListener('webglcontextrestored', () => { GPU.lost = false; R3.quality = -1; if (window.NQ_SYS) window.NQ_SYS.hide(); });
 }
-const GPU = { name: '', soft: false, integrated: false };
+const GPU = { name: '', soft: false, integrated: false, lost: false };
 
 /* ---------------- boot ---------------- */
 async function boot() {
@@ -8462,7 +8599,7 @@ window.NQ = {
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   AUD,
-  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
+  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, AUTOQ, autoQuality, setTier, tierIndex, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },

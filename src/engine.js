@@ -121,6 +121,8 @@ const NQU = {
   uTime: { value: 0 }, uFogCol: { value: new THREE.Color() }, uFogDen: { value: 0.01 },
   uNeon: { value: 1 }, uWin: { value: 1 }, uWinWarm: { value: 0 }, uGrid: { value: 0 }, uDyn: { value: 1 }, uDynVM: { value: 1 }, uWet: { value: 1 },
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
+  // release look pass: soft camera-side fill + two-tone neon rim on the infected, and wind for the foliage (weather.js)
+  uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
   uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
@@ -200,6 +202,16 @@ attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 v
 attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart; varying vec3 vNqL;
 #else
 attribute vec2 nqm;
+#endif
+uniform float uTime, uWind;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+#if !defined(NQ_Z) && !defined(NQ_VM) && !defined(NQ_INST)
+  if (nqm.y > 13.5 && nqm.y < 14.5) {   // foliage: a slow lean downwind (+x, like the rain) plus a quick leaf flutter, both from the weather
+    vec3 wp = transformed; float hk = smoothstep(1.2, 4.5, wp.y);
+    float lean = uWind * (0.55 + 0.45 * sin(uTime * 0.8 + wp.x * 0.11 + wp.z * 0.09));
+    transformed.x += lean * 0.16 * hk;
+    transformed += vec3(sin(uTime * 6.3 + wp.y * 4.1 + wp.x * 2.7), sin(uTime * 5.1 + wp.z * 3.3) * 0.5, cos(uTime * 5.7 + wp.x * 3.9)) * 0.014 * (0.35 + uWind) * hk;
+  }
 #endif`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
 { vec4 w = vec4(transformed, 1.0); vec3 wn = objectNormal;
@@ -221,7 +233,7 @@ attribute vec2 nqm;
 varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
 uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
 uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
-uniform float uTexOn, uSnowCov;
+uniform float uTexOn, uSnowCov, uZFill, uZRim;
 ${NOISE_GLSL}
 #ifdef NQ_FAR
 // Fast / Balanced / Laptop only (r3.js FAR). 0 everywhere inside the near zone; past it, fine detail fades to its
@@ -328,10 +340,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
       float bseed = h21(floor(vNqW.xz/37.) + N0.xz*3.1);
       float seed = h21(id*1.37 + bseed*91.);
-      float lit = step(0.86 - bseed*0.1, seed) * step(1.2, vNqW.y);   // dead city: most rooms dark
+      float floorLit = step(0.968, h21(vec2(id.y * 1.7 + 0.3, bseed * 53.1))) * step(4.5, vNqW.y);   // an office floor someone left on
+      float lit = max(step(0.82 - bseed*0.1, seed), floorLit) * step(1.2, vNqW.y);   // dead city: most rooms still dark
       float flick = step(0.997, h21(id + floor(uTime*4.)));
       vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
       wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
+      float tv = step(0.78, h21(id + 8.8)) * (1. - floorLit);   // a TV still playing to an empty room
+      wc = mix(wc, vec3(0.36, 0.6, 1.0) * (0.45 + 0.55 * vn(vec2(uTime * 4.7 + seed * 40., seed * 9.))), tv);
+      wc = mix(wc, vec3(0.8, 0.9, 1.0), floorLit);
       // inside the glass: a room gradient, mullions, and some blinds half drawn
       float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
       float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
@@ -460,7 +476,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     else base *= mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv) * (0.55 + 0.6 * clump);                           // dark to sunlit, yellowing leaves
     base *= mix(0.62 + 0.3 * clump, 1.0, edgeL) * (0.8 + 0.3 * dome);
     if (pinkF) { base *= vec3(1.12, 0.95, 1.02); emis += base * (0.1 + 0.16 * dome) * (0.6 + 0.4 * clump); }   // petals glow softly, as if lit through
-    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4; bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
+    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4;
+    emis += base * (1. - ndv) * (1. - ndv) * (0.25 + 0.6 * uNeon) * (pinkF ? 1.3 : 0.8);   // thin leaves and petals let the city light through at the edges
+    bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
   } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
     base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
   } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
@@ -541,13 +559,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
       rough = mix(rough, 0.12, max(wound, bl * (1. - dry)));
       float soak = clamp(wetK, 0., 1.);                                   // rain: skin takes a thin sheen, cloth goes dark and heavy
       rough = mix(rough, rough * 0.72, soak * skinM);
+      rough = mix(rough, 0.16, soak * skinM * smoothstep(0.35, 0.9, N0.y));   // rain beads on the crown and shoulders
       base *= 1. - 0.2 * soak * clm * (1. - armour);
       bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.008 + vein * 0.003 + (vn(q.xy * 6.) - 0.5) * 0.0015 * clm;   // weave
       // eyes (full-emissive verts on the head): milky, clouded, wet, with only a faint infected glint
       float eye = step(0.97, vNqM.x) * step(4.5, vPart) * step(vPart, 5.5);
       base = mix(base, vec3(0.3, 0.1, 0.07) * mix(1., vn(q.xy * 9.) * 0.4 + 0.7, 0.5), eye);   // bloodshot
       rough = mix(rough, 0.08, eye); rimK = mix(rimK, 0.0, eye);
-      emis += iemit * eye * 2.3;                                              // burning pupils: readable at night from across the street
+      emis += iemit * eye * 3.2;                                              // burning pupils: readable at night from across the street
       // teeth (tagged 0.9 in the sculpt, 0.27 after the vein softening): stained, cracked enamel, never glowing
       float tooth = step(0.2, vNqM.x) * step(vNqM.x, 0.35) * step(4.5, vPart) * step(vPart, 6.5);
       base = mix(base, vec3(0.3, 0.25, 0.15) * ao * (0.75 + 0.25 * vn(q.xy * 20.)), tooth); rough = mix(rough, 0.3, tooth); emis *= 1. - tooth;
@@ -572,6 +591,9 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
     base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
     rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
+  } else if (mat > 23.5 && mat < 24.5) {    // beacons and hazard lights: a short flash on each light's own beat
+    float ph = h21(floor(vNqW.xz * 0.5) + floor(vNqW.y * 0.25)), cyc = fract(uTime * (0.5 + 0.35 * ph) + ph);
+    emis *= 0.06 + 1.7 * smoothstep(0., 0.04, cyc) * (1. - smoothstep(0.16, 0.34, cyc)); rimK = 0.;
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;
@@ -613,6 +635,14 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     rim *= 0.25;
 #endif
     totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK;
+#ifdef NQ_Z
+    {   // readability: a soft fill from the camera side that fades with distance, and the city's neon edging the silhouette
+      float ndv = clamp(dot(normal, normalize(vViewPosition)), 0., 1.), zd = length(vNqW - cameraPosition);
+      totalEmissiveRadiance += base * uZFill * (0.3 + 0.7 * ndv) * (1. - smoothstep(8., 38., zd));
+      float rz = pow(1. - ndv, 2.6) * smoothstep(-0.2, 0.4, normal.y + 0.3);
+      totalEmissiveRadiance += mix(vec3(1.0, 0.31, 0.64), vec3(0.22, 0.88, 0.95), step(0., normal.x)) * rz * uZRim;
+    }
+#endif
 #ifndef NQ_VM
     // planar reflection of the street (rendered mirrored by r3.js), rippled by the bumped normal
     if (wetRefl > 0.0 && uReflOn > 0.5) {

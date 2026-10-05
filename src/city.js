@@ -160,7 +160,7 @@ function buildCity() {
     // roof bits
     B(cx, h + 0.6, cz, w, 1.2, d, [0.05, 0.05, 0.06]);
     for (let i = 0; i < 3; i++) B(cx + r(-w / 3, w / 3), h + 1.8, cz + r(-d / 3, d / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
-    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3); }
+    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
     // facade orientation
     let fx, fz, ry, tx, tz, span; // facade point & normal toward plaza
     if (face === '-z') { fz = z0 - 0.02; fx = cx; ry = Math.PI; tx = 1; tz = 0; span = w; }
@@ -307,7 +307,7 @@ function buildCity() {
     if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, 1); h += h2; }
     if (R() < 0.5) { B(x, h + 0.5, z, w + 0.4, 0.5, d + 0.4, neonPick(), 1.6); }
     if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); B(x - w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); }
-    if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4);
+    if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4, 24);
     if (mx < 130) solid(x - w / 2, x + w / 2, 0, h, z - d / 2, z + d / 2);
   }
   // the Spire — megatower at the end of the north avenue

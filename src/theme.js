@@ -68,4 +68,8 @@ function applyThemeUniforms() {
   NQU.uNeon.value = T.neon; NQU.uWin.value = T.win; NQU.uWinWarm.value = T.winWarm; NQU.uGrid.value = T.grid; NQU.uWet.value = T.wet;
   NQU.uDyn.value = T.dyn; NQU.uDynVM.value = 0.5 + 0.5 * Math.max(T.neon, 0.2);
   NQU.uRimCol.value.setRGB(T.rim[0], T.rim[1], T.rim[2]);
+  // the infected stay readable in every look: more fill and neon rim the darker and more neon the look is
+  const amb = T.ambHi[0] * 0.3 + T.ambHi[1] * 0.55 + T.ambHi[2] * 0.15;
+  NQU.uZFill.value = T.zFill ?? clamp(0.14 - amb * 0.5, 0.03, 0.14);
+  NQU.uZRim.value = T.zRim ?? (0.12 + 0.3 * T.neon) * (1 - clamp(amb * 2, 0, 0.8));
 }

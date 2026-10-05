@@ -92,7 +92,8 @@ void main(){
   vec2 uv = d.xz/max(h+0.08,0.02);
   float cl = vn(uv*0.9+vec2(uTime*0.01,0.)) * vn(uv*2.3-vec2(uTime*0.02,uTime*0.01));
   cl = smoothstep(0.15,0.6,cl)*smoothstep(0.02,0.25,h)*(1.-smoothstep(0.5,0.9,h));
-  c = mix(c, uCloud, cl*0.7);
+  // cloud undersides catch the city's glow: warmest low over the horizon, fading up into the dark
+  c = mix(c, uCloud + uGlow * (0.25 + 0.95 * (1. - smoothstep(0.03, 0.45, h))), cl*0.75);
   vec2 sp = floor(vec2(atan(d.z,d.x)*180., h*180.));
   float st = step(0.9975, h21(sp)) * smoothstep(0.25,0.6,h) * (1.-cl);
   c += vec3(0.8,0.85,1.)*st*uStars*(0.5+0.5*sin(uTime*3.+sp.x));
@@ -924,6 +925,9 @@ function buildComposer(W, H, q) {
   }
   vmPass = new ScenePass(vmCamera, false); composer.addPass(vmPass);
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
+  if (SETTINGS.laptop) {   // Laptop keeps the glow, at a quarter of the pixels: the bloom chain runs at half width and height
+    const ss = bloomPass.setSize.bind(bloomPass); bloomPass.setSize = (w, h) => ss(Math.max(8, w >> 1), Math.max(8, h >> 1));
+  }
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);
   composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.laptop = !!SETTINGS.laptop; R3.W = W; R3.H = H;
@@ -1033,8 +1037,8 @@ function render3(time, W, H, fov, cam) {
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
-  bloomPass.enabled = !SETTINGS.laptop;
-  bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
+  bloomPass.enabled = true;
+  bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too
   vmPass.enabled = vmOn && !worldPass.withVM;

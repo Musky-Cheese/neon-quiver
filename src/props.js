@@ -41,6 +41,10 @@ function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
     part(sx * 0.62, 0.86, -2.36, 0.52, 0.12, 0.12, 0.05, [1, 0.95, 0.85], variant === 1 && sx < 0 ? 0 : 3.2, 0);
   }
   part(0, 1.07, 2.43, 1.75, 0.07, 0.08, 0.03, NEON.red, 4, 0);
+  // still half powered: a dash display glowing at the base of the canopy, a plate, and amber hazards blinking out of step (material 24)
+  part(0, 1.02, -0.98, 1.45, 0.035, 0.07, 0.012, NEON.cyan, 1.5, 0, 0, 0.5);
+  part(0, 0.8, 2.47, 0.52, 0.15, 0.025, 0.01, [0.62, 0.66, 0.7], 0.12, 15);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) part(sx * 0.98, sz < 0 ? 0.84 : 1.0, sz * 2.36, 0.16, 0.07, 0.06, 0.02, NEON.amber, 6, 24);
   // spoiler on two struts
   for (const sx of [-0.6, 0.6]) part(sx, 1.28, 2.2, 0.06, 0.26, 0.12, 0.02, trim, 0, 4, 0, 0.3);
   part(0, 1.42, 2.28, 1.95, 0.05, 0.36, 0.02, paint, 0, 11, 0, 0.1);
@@ -50,6 +54,7 @@ function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
     const dead = variant > 0 && k === variant + 1; k++;
     if (variant === 2 && k === 4) continue;   // this one was torn off (lies nearby)
     g.lathe(pChild(W, sx, 0.3, sz), [[0.24, -0.16, dead ? DARK : NEON.cyan, dead ? 0 : 2.8], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
+    if (!dead) { const q = pPt(W, sx, 0.3, sz); WORLD.halos.push({ p: [q[0], 0.18, q[2]], s: 1.5, c: [0.06, 0.32, 0.38] }); }   // working pods light the street underneath
   }
   // damage: a door hanging open, a crumpled panel
   if (variant === 1) part(1.35, 1.0, -0.35, 0.07, 0.58, 1.15, 0.03, paint, 0, 11, 0.95, 0, 0.12);

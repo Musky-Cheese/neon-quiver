@@ -26,7 +26,7 @@
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="bests">
@@ -70,7 +70,7 @@
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
       </div>
     </div>
   </section>
@@ -122,6 +122,35 @@
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
+  <!-- crash / GPU-reset screen: plain script, so it still works if the game module never loads -->
+  <div id="sysErr" role="alert" hidden>
+    <div class="sys-panel">
+      <div class="sys-eyebrow" id="sysErrE">SYSTEM</div>
+      <h2 id="sysErrT">Something went wrong</h2>
+      <p id="sysErrM"></p>
+      <code id="sysErrC"></code>
+      <button type="button" class="sys-btn" id="sysErrBtn">Reload</button>
+    </div>
+  </div>
+  <script>
+  (function () {
+    function show(eyebrow, title, msg, code) {
+      if (window.__NQ_CAPTURE) return;
+      var e = document.getElementById('sysErr'), ng = document.getElementById('nogl'); if (!e || (ng && !ng.hidden)) return;
+      document.getElementById('sysErrE').textContent = eyebrow; document.getElementById('sysErrT').textContent = title;
+      document.getElementById('sysErrM').textContent = msg; var c = document.getElementById('sysErrC'); c.textContent = code || ''; c.hidden = !code;
+      e.hidden = false;
+    }
+    window.NQ_SYS = { show: show, hide: function () { var e = document.getElementById('sysErr'); if (e) e.hidden = true; } };
+    window.NQ_FATAL = function (err) {
+      var s = err && (err.stack || err.message) || String(err);
+      show('ERROR', 'Something went wrong', 'The game hit an error and stopped. Reloading usually fixes it, and your best score is saved. If it keeps happening, send the line below to the developer.', String(s).slice(0, 360));
+    };
+    window.addEventListener('error', function (ev) { if (!window.NQ_READY) window.NQ_FATAL(ev.error || ev.message); });
+    window.addEventListener('unhandledrejection', function (ev) { if (!window.NQ_READY) window.NQ_FATAL(ev.reason); });
+    document.addEventListener('click', function (ev) { if (ev.target && ev.target.id === 'sysErrBtn') location.reload(); });
+  })();
+  </script>
   <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>

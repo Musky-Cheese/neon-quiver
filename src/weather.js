@@ -44,6 +44,7 @@ function updateWeather(dt) {
   WX.cover = snowNow > 0.1 ? ease(WX.cover, Math.min(1, snowNow * 1.5), 55) : ease(WX.cover, 0, rainNow > 0.1 ? 25 : 140);
   // gusts: the slant swings; heavier in storms
   WX.gust = Math.max(0, Math.sin(GAME.time * 0.37) * Math.sin(GAME.time * 0.113 + 2)) * WX.wind;
+  NQU.uWind.value = WX.wind * 0.7 + WX.gust * 1.2;   // foliage sway (engine.js)
   // lightning in storms: a double flicker, thunder a few seconds later (sound travels)
   WX.flash = Math.max(0, WX.flash - dt * 3.2);
   if (WX.storm > 0.5) {

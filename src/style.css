@@ -215,6 +215,14 @@ button, select, input { font-family: var(--f); }
 #swWarn b { color: var(--amber); }
 #swWarn code { font-size: 13px; color: var(--cyan); }
 #swWarn .btn { padding: 8px 16px; font-size: 13px; flex: none; }
+#sysErr { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(7, 8, 15, 0.92); font-family: "Chakra Petch", var(--f); color: #EEF1F8; }
+.sys-panel { width: min(560px, 100%); box-sizing: border-box; padding: 32px; display: grid; gap: 14px; border: 1px solid rgba(255, 255, 255, 0.14); background: #0E1020; }
+.sys-eyebrow { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; letter-spacing: 0.28em; color: #FF6FB4; }
+.sys-panel h2 { margin: 0; font-size: 34px; line-height: 1.05; font-weight: 700; text-transform: uppercase; }
+.sys-panel p { margin: 0; font-size: 17px; line-height: 1.45; color: #C3C8D8; }
+.sys-panel code { display: block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.4; color: #A3AAC2; padding: 10px 12px; background: #07080F; border: 1px solid rgba(255, 255, 255, 0.12); white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; user-select: text; }
+.sys-btn { justify-self: start; height: 52px; padding: 0 28px; border: 0; background: #38E1F2; color: #05060C; font: 700 18px "Chakra Petch", var(--f); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
 #loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
 #nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
 
