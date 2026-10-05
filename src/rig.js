@@ -8,7 +8,7 @@
 const ZRIG = { ready: false, clips: {}, geos: {}, parts: {}, boneNames: [], inverses: null, rootTemplate: null, bindMatrix: null, pool: {}, live: new Set() };
 const CLIP_RANGES = { walk: [0, 36, 1], run: [42, 60, 1], heavy: [66, 110, 1], boss_walk: [116, 172, 1], idle: [178, 238, 1], attack: [244, 274, 0], crawl: [280, 320, 1], crawl_attack: [326, 350, 0], slam: [356, 404, 0], roar: [410, 452, 0],
   walk_b: [458, 498, 1], walk_c: [504, 540, 1], run_b: [546, 564, 1], idle_b: [570, 642, 1] };
-const PARTMAP = [['torso_', 0], ['uarm_', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_', 5], ['jaw', 6], ['brute_helmet', 8], ['brute_', 7], ['boss_hump', 9]];
+const PARTMAP = [['torso_', 0], ['uarm_', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_', 5], ['jaw', 6], ['brute_helmet', 8], ['brute_', 7], ['boss_hump', 9], ['boss_arm', 9], ['walker_ribs', 9], ['runner_tendons', 9], ['brute_breach', 9]];
 const LOGICAL = ['root', 'pelvis', 'spine', 'neck', 'jaw', 'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'hipL', 'hipR', 'kneeL', 'kneeR'];
 
 async function loadZombieRig(url = 'models/zombie.glb') {
@@ -50,7 +50,7 @@ async function loadZombieRig(url = 'models/zombie.glb') {
 }
 
 function zVariant(z) {
-  const kind = z.type === 'brute' ? 'brute' : z.type === 'boss' ? 'boss' : 'n';
+  const kind = ['walker', 'runner', 'brute', 'boss'].includes(z.type) ? z.type : 'walker';
   const top = ZRIG.parts['torso_' + z.top] ? z.top : z.bare ? 'bare' : 'shirt';
   const arm = top === 'jacket' || kind === 'brute' ? 'jacket' : z.sleeve && !z.bare && top !== 'bloat' ? 'sleeve' : 'bare';
   const head = ZRIG.parts['head_' + z.headVar] ? z.headVar : 'a';
@@ -62,7 +62,10 @@ function zGeometry(key) {
   const fa = arm === 'jacket' && ZRIG.parts.farm_jacketL ? 'farm_jacket' : 'farm';
   const names = [torso, head, 'jaw', 'uarm_' + arm + 'L', 'uarm_' + arm + 'R', fa + 'L', fa + 'R', 'pelvis', 'thighL', 'thighR', 'shinL', 'shinR'];
   if (kind === 'brute') names.push('brute_vest', 'brute_padL', 'brute_padR', 'brute_helmet', 'brute_kneeL', 'brute_kneeR', 'brute_guardL', 'brute_guardR');
-  if (kind === 'boss') names.push('brute_padL', 'brute_padR', 'boss_hump');
+  if (kind === 'boss') names.push('brute_padL', 'brute_padR', 'boss_hump', 'boss_arm');
+  if (kind === 'walker') names.push('walker_ribs');
+  if (kind === 'runner') names.push('runner_tendonsL', 'runner_tendonsR');
+  if (kind === 'brute') names.push('brute_breach');
   const list = names.map(n => ZRIG.parts[n]).filter(Boolean);
   const g = mergeGeometries(list, false); g.computeBoundingSphere();
   return (ZRIG.geos[key] = g);
@@ -170,10 +173,10 @@ function poseZombieRig(z, dt, time) {
   // ---------- procedural layers ----------
   const R = z.R;
   // body shape per breed (the mixer rewrites scale every update)
-  B.pelvis.scale.setScalar(1); B.spine.scale.setScalar(1); B.neck.scale.setScalar(1); B.shoulderL.scale.setScalar(1); B.shoulderR.scale.setScalar(1); B.elbowR.scale.setScalar(1);
-  if (z.type === 'brute') { B.pelvis.scale.set(1.22, 1, 1.22); B.neck.scale.set(1 / 1.22, 1, 1 / 1.22); }
-  else if (z.type === 'boss') { B.pelvis.scale.set(1.2, 1, 1.2); B.neck.scale.set(0.85 / 1.2, 0.85, 0.85 / 1.2); B.elbowR.scale.setScalar(1.35); }
-  else if (z.type === 'runner') { B.spine.scale.set(0.88, 1, 1); B.neck.scale.set(1 / 0.88, 1, 1); B.shoulderL.scale.set(0.9, 1, 0.9); B.shoulderR.scale.set(0.9, 1, 0.9); }
+  B.pelvis.scale.setScalar(1); B.spine.scale.setScalar(1); B.neck.scale.setScalar(1); B.shoulderL.scale.setScalar(1); B.shoulderR.scale.setScalar(1); B.elbowL.scale.setScalar(1); B.elbowR.scale.setScalar(1);
+  if (z.type === 'brute') { B.pelvis.scale.set(1.28, 1, 1.28); B.spine.scale.set(1.18, 1, 1.18); B.neck.scale.set(0.78, 0.92, 0.78); B.shoulderL.scale.set(1.12, 1, 1.12); B.shoulderR.scale.set(1.12, 1, 1.12); }
+  else if (z.type === 'boss') { B.pelvis.scale.set(0.96, 1, 0.96); B.spine.scale.set(1.42, 1, 1.28); B.neck.scale.set(0.68, 0.82, 0.68); B.shoulderL.scale.set(1.32, 1.04, 1.25); B.shoulderR.scale.set(1.45, 1.08, 1.36); B.elbowR.scale.set(1.55, 1.18, 1.55); }
+  else if (z.type === 'runner') { B.pelvis.scale.set(0.82, 1.04, 0.82); B.spine.scale.set(0.78, 1.12, 0.84); B.neck.scale.set(1.05, 0.94, 1.05); B.shoulderL.scale.set(0.82, 1.14, 0.82); B.shoulderR.scale.set(0.82, 1.14, 0.82); B.elbowL.scale.set(0.78, 1.14, 0.78); B.elbowR.scale.set(0.78, 1.14, 0.78); }
   const dying = z.state === 'dying';
   r.procW = dying ? Math.min(1, r.procW + dt / 0.22) : Math.max(0, r.procW - dt / 0.3);
   if (dt === 0 && dying) r.procW = Math.max(r.procW, 0.001);
@@ -271,12 +274,13 @@ function drawZombieRig(z, time) {
   const r = z.rig, u = r.u, T = z.type, B = r.B;
   const P = _ZP; zPose(z, time); // colours / flash for this frame
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
-  const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.6 : z.elite ? 1.1 : 0.45) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
+  const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.35 : z.elite ? 0.9 : 0.34) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
-  const eyeGlow = dying ? 0.0 : T === 'boss' ? 2.6 : z.elite ? 1.1 : 0.62, pul = 0.6 + 0.4 * Math.sin(time * 6);
+  const eyeGlow = dying ? 0.0 : T === 'boss' ? 1.75 : z.elite ? 0.8 : 0.42, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
   const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
-  for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin);
+  const skinK = T === 'walker' ? 1.38 : T === 'runner' ? 1.22 : 1;
+  for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin, skinK);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
   setV(u.uPT.value[1], cloth); setV(u.uPE.value[1], vein);
   setV(u.uPT.value[2], cloth); setV(u.uPE.value[2], vein);
@@ -287,7 +291,10 @@ function drawZombieRig(z, time) {
   if (T === 'boss') { u.uPT.value[7].set(0.22, 0.16, 0.24); u.uPS.value[7].set(0.12, 0.09, 0.14); u.uPE.value[7].set(2 * pul, 0.3, 1.8 * pul); }
   else { setV(u.uPT.value[7], ARMOUR_PLATE); setV(u.uPS.value[7], ARMOUR_DARK); u.uPE.value[7].set(0, 0, 0); }
   setV(u.uPT.value[8], ARMOUR_PLATE); setV(u.uPS.value[8], ARMOUR_DARK); if (dying) u.uPE.value[8].set(0.3, 0, 0.05); else u.uPE.value[8].set(e[0] * 0.55, e[1] * 0.5, e[2] * 0.5);
-  setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul);
+  if (T === 'boss') { setV(u.uPT.value[9], skin); setV(u.uPS.value[9], skin, 0.8); u.uPE.value[9].set(2.4 * pul, 0.3, 2.2 * pul); }
+  else if (T === 'walker' || T === 'spitter' || T === 'screamer') { u.uPT.value[9].set(0.72, 0.66, 0.54); u.uPS.value[9].set(0.25, 0.035, 0.04); u.uPE.value[9].set(e[0] * 0.11, e[1] * 0.045, e[2] * 0.035); }
+  else if (T === 'runner' || T === 'climber') { setV(u.uPT.value[9], skin, 0.72); setV(u.uPS.value[9], skin, 0.58); u.uPE.value[9].set(0.04, 0.13, 0.035); }
+  else { u.uPT.value[9].set(0.28, 0.025, 0.035); u.uPS.value[9].set(0.12, 0.018, 0.025); u.uPE.value[9].set(0.18, 0.012, 0.02); }
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
   u.uFlash.value = fl; u.uSeed.value = z.seed;
   r.mesh.visible = true;

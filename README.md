@@ -52,6 +52,7 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
 - **Surface textures on Balanced and up:** photo-scanned PBR textures (half resolution on Balanced, full on Sharp/Ultra, none on Fast) and real stone sills, lintels, ledges and cornices on street-facing buildings at every quality level.
+- **Laptop mode for integrated graphics:** targets a 720p-class pixel budget, keeps lower-resolution wet-street reflections at a reduced refresh rate, uses fewer dynamic lights and smaller shadow maps, updates distant zombie rigs less often, and skips MSAA, bloom and streamed surface textures. First-time players on detected integrated GPUs start here automatically; desktop quality modes are unchanged.
 - **Ultra quality** (Settings → Quality → Ultra) is for strong desktop GPUs: full-resolution photo-scanned PBR surface textures (asphalt, concrete, brick, rusted and corrugated steel, pavers, plaster) projected triplanar in world space on top of the city's own shading, real-time GTAO contact shadows, 1.5x supersampling, 4x-resolution moon/sun shadows over a wider area, and full-rate 2x-resolution shadows on all six nearby lamps. It never lowers resolution automatically. Textures download on demand: about 0.8 MB on Balanced, 3.7 MB on Sharp/Ultra.
 - Add `?prof=1` to the URL for a performance overlay: GPU time per render pass, CPU frame time, draw calls and triangles.
 

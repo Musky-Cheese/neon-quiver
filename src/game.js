@@ -670,7 +670,10 @@ function step(dt) {
       z._pdt = (z._pdt || 0) + dt;
       const zd2 = (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2, phase = STEPN.n + (z.seed * 10 | 0);
       if (z.rig && z.state === 'dying' && z.dieT > 4 && z.dieT < CORPSE_SETTLE && phase % 12) continue;
-      if (z.rig && z.state !== 'dying' && ((zd2 > 8100 && phase % 4) || (zd2 > 2025 && phase % 2))) continue;
+      // Laptop spends animation work where it can actually be seen: half rate past 30 m and quarter rate past 60 m.
+      // Other modes retain the original 45/90 m thresholds.
+      const animNear2 = SETTINGS.laptop ? 900 : 2025, animFar2 = SETTINGS.laptop ? 3600 : 8100;
+      if (z.rig && z.state !== 'dying' && ((zd2 > animFar2 && phase % 4) || (zd2 > animNear2 && phase % 2))) continue;
       poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
@@ -728,7 +731,7 @@ function setCamera(time) {
 function render(time) {
   // resolution: pixel budget per quality level, plus automatic scaling if frames run slow
   const q = SETTINGS.quality;   // Ultra never drops resolution behind your back
-  const budget = (q === 0 ? 1.0e6 : q >= 2 ? 8.3e6 : 2.4e6) * (q >= 3 ? 1 : PERF.scale);   // High / Ultra render up to native 4K
+  const budget = (q === 0 ? 1.0e6 : SETTINGS.laptop ? 1.4e6 : q >= 2 ? 8.3e6 : 2.4e6) * (q >= 3 ? 1 : PERF.scale);   // Laptop targets native 720p-class displays; High / Ultra render up to native 4K
   const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
   let dpr = Math.min(2, devicePixelRatio || 1); if (q >= 3) dpr = Math.min(2.25, dpr * 1.5);   // Ultra supersamples: renders at 1.5x and scales down
   if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
@@ -758,7 +761,7 @@ function wireUI() {
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
-  // 'L' is the Laptop level: Balanced's pipeline, plus lighter detail on distant things (r3.js FAR)
+  // 'L' is the Laptop level: a deliberately cheaper pipeline for integrated graphics (r3.js).
   const qv = () => SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality);
   for (const id of ['quality', 'quality2']) { const s = $(id); s.value = qv(); s.addEventListener('change', () => { PERF.scale = 1; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; $('quality').value = $('quality2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   syncMusicBtn();

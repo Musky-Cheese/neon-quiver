@@ -77,7 +77,7 @@ function spawnZombie(type, x, z, wave) {
   // what each body looks like and how it moves: clothes, build, gait
   const r = Math.random();
   if (type === 'walker') {
-    zz.top = r < 0.34 ? 'shirt' : r < 0.58 ? 'jacket' : r < 0.72 ? 'bare' : r < 0.87 ? 'bloat' : 'lean';
+    zz.top = r < 0.45 ? 'bare' : r < 0.65 ? 'lean' : r < 0.8 ? 'jacket' : r < 0.9 ? 'bloat' : 'shirt';
     const g = Math.random(); zz.gait = g < 0.45 ? 'walk' : g < 0.7 ? 'walk_b' : 'walk_c';
     if (zz.gait === 'walk_b') zz.speed *= 0.8;
   } else if (type === 'runner') {

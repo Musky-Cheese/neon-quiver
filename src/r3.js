@@ -390,11 +390,12 @@ function updateLights3(cam) {
   for (let i = 0; i < _dynN; i++) { const e = _dynPool[i]; e.d = d2c(e.p, cam); _dyn.push(e); }
   _dyn.sort(byD);
   let n = 0;
+  const lightCap = SETTINGS.laptop ? 8 : MAX_PL;
   if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; const hl = PL[n++]; setPL(hl, [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.25, BOW.handWorld[2] || cam[2]], [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18], 2.2); hl.intensity *= 0.3; }
-  const nStat = Math.min(_stat.length, 8);
-  for (let i = 0; i < nStat && n < MAX_PL; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
-  for (const d of _dyn) { if (n >= MAX_PL) break; setPL(PL[n++], d.p, d.c, d.r); }
-  for (let i = nStat; i < _stat.length && n < MAX_PL; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
+  const nStat = Math.min(_stat.length, SETTINGS.laptop ? 4 : 8);
+  for (let i = 0; i < nStat && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
+  for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
+  for (let i = nStat; i < _stat.length && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
 }
 
@@ -773,16 +774,17 @@ const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); B
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
 NQU.uRefl.value = BLACK_TEX;
 function renderReflection(r) {
-  const k = SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // sharper mirror on High
+  const k = SETTINGS.laptop ? 0.38 : SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // Laptop keeps the wet look at roughly quarter pixel cost
   const resized = reflRT.width !== W || reflRT.height !== H;
   if (resized) { reflRT.setSize(W, H); REFL_CACHE.valid = false; }
   const cm = camera.matrixWorld.elements, pm = REFL_CACHE.matrix.elements;
   const dx = cm[12] - pm[12], dy = cm[13] - pm[13], dz = cm[14] - pm[14];
-  const movedFar = dx * dx + dy * dy + dz * dz > 16;
-  const turnedFar = Math.abs(cm[0] - pm[0]) + Math.abs(cm[2] - pm[2]) + Math.abs(cm[8] - pm[8]) + Math.abs(cm[10] - pm[10]) > 0.7;
-  const cadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;   // reuse more only while the frame budget is under pressure
+  const movedFar = dx * dx + dy * dy + dz * dz > (SETTINGS.laptop ? 36 : 16);
+  const turnedFar = Math.abs(cm[0] - pm[0]) + Math.abs(cm[2] - pm[2]) + Math.abs(cm[8] - pm[8]) + Math.abs(cm[10] - pm[10]) > (SETTINGS.laptop ? 1.0 : 0.7);
+  const cadence = SETTINGS.laptop ? (PERF.pressure > 0.55 ? 8 : 4) : SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
-  const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== SETTINGS.quality || movedFar || turnedFar || stale;
+  const mode = SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0);
+  const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
   if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H); return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
@@ -798,7 +800,7 @@ function renderReflection(r) {
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
   REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
-  REFL_CACHE.quality = SETTINGS.quality; REFL_CACHE.w = W; REFL_CACHE.h = H;
+  REFL_CACHE.quality = mode; REFL_CACHE.w = W; REFL_CACHE.h = H;
 }
 
 /* ---------------- post: passes ---------------- */
@@ -897,13 +899,14 @@ function profFrame(cpuMs) {
   let gpu = 0, lines = [];
   for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
-  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${['Low', 'Balanced', 'High', 'Ultra'][SETTINGS.quality]}${SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  const qname = SETTINGS.laptop ? 'Laptop' : ['Fast', 'Balanced', 'Sharp', 'Ultra'][SETTINGS.quality];
+  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 function buildComposer(W, H, q) {
   if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); if (gtaoPass) gtaoPass.dispose(); bloomPass.dispose(); }
   if (msRT) { msRT.dispose(); msRT = null; }
-  if (q >= 1) msRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: 4 });
+  if (q >= 1 && !SETTINGS.laptop) msRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType, samples: 4 });
   const rt = new THREE.WebGLRenderTarget(W, H, { type: THREE.HalfFloatType });
   composer = new EffectComposer(renderer, rt); composer.setPixelRatio(1);
   worldPass = new ScenePass(camera, true); composer.addPass(worldPass);
@@ -923,11 +926,11 @@ function buildComposer(W, H, q) {
   bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.6, 0.55, 1.0); composer.addPass(bloomPass);
   gradePass = new ShaderPass(GradeShader); composer.addPass(gradePass);
   composer.setSize(W, H); profInstrument();
-  R3.quality = q; R3.W = W; R3.H = H;
+  R3.quality = q; R3.laptop = !!SETTINGS.laptop; R3.W = W; R3.H = H;
 }
 /* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
 const ULTRA = { state: 'none', res: null };
-const wantTexRes = (q) => q >= 2 ? 'full' : q >= 1 ? 'half' : null;
+const wantTexRes = (q) => SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;
 function loadUltraTextures(res) {
   if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
   const sfx = res === 'half' ? '_half' : '';
@@ -961,10 +964,10 @@ function applyQuality3(q) {
   const tr = wantTexRes(q); if (tr) loadUltraTextures(tr);
   NQU.uTexOn.value = tr && NQU.uTexA.value ? 1 : 0;
   // Ultra shadows: the moon/sun map at 4x the texels over a wider box; lamp shadows at 2x, all six lamps casting
-  const U = q >= 3, sm = U ? 4096 : 2048, box = U ? 80 : 52;
+  const U = q >= 3, L = !!SETTINGS.laptop, sm = U ? 4096 : L ? 1024 : 2048, box = U ? 80 : L ? 44 : 52;
   if (sun.shadow.mapSize.x !== sm) { sun.shadow.mapSize.set(sm, sm); if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; } }
   Object.assign(sun.shadow.camera, { left: -box, right: box, top: box, bottom: -box }); sun.shadow.camera.updateProjectionMatrix();
-  SPOTS.forEach((sp, i) => { const ms = U ? 2048 : 1024; sp.shadow = i < (U ? N_SPOTS : N_SHADOW_SPOTS); if (sp.s.shadow.mapSize.x !== ms) { sp.s.shadow.mapSize.set(ms, ms); if (sp.s.shadow.map) { sp.s.shadow.map.dispose(); sp.s.shadow.map = null; } } sp.s.shadow.needsUpdate = true; });
+  SPOTS.forEach((sp, i) => { const ms = U ? 2048 : L ? 512 : 1024; sp.shadow = i < (U ? N_SPOTS : L ? 2 : N_SHADOW_SPOTS); if (sp.s.shadow.mapSize.x !== ms) { sp.s.shadow.mapSize.set(ms, ms); if (sp.s.shadow.map) { sp.s.shadow.map.dispose(); sp.s.shadow.map = null; } } sp.s.shadow.needsUpdate = true; });
   const sh = q >= 1;
   sun.castShadow = sh; for (const { s, shadow } of SPOTS) s.castShadow = sh && shadow;
 }
@@ -992,7 +995,7 @@ function warmShaders() {
 
 /* ---------------- per-frame sync + render ---------------- */
 function render3(time, W, H, fov, cam) {
-  if (!composer || R3.quality !== SETTINGS.quality) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
+  if (!composer || R3.quality !== SETTINGS.quality || R3.laptop !== !!SETTINGS.laptop) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
   if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); if (msRT) msRT.setSize(W, H); R3.W = W; R3.H = H; }
   if (canvas.width !== W || canvas.height !== H) renderer.setSize(W, H, false);
   syncFar();
@@ -1030,6 +1033,7 @@ function render3(time, W, H, fov, cam) {
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  bloomPass.enabled = !SETTINGS.laptop;
   bloomPass.strength = T.bloom * (T.bloomK || 0.32) * 1.2; bloomPass.threshold = T.thr; bloomPass.radius = T.bloomR || 0.3;
   const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
   worldPass.withVM = vmOn && !!msRT && !gtaoPass;       // no AO pass in between: draw the bow into the anti-aliased buffer too

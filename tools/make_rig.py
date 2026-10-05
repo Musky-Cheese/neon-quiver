@@ -8,7 +8,7 @@
 import bpy, json, os, math, time, traceback
 from mathutils import Vector, Euler, Matrix
 
-ROOT = r"C:\Users\fouad\Downloads\neon-quiver"
+ROOT = globals().get('NQ_ROOT') or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MOD = os.path.join(ROOT, 'models')
 OUT = os.path.join(MOD, 'zombie.glb')
 LOG = []
@@ -171,6 +171,11 @@ def build_meshes(arm):
     add(build_mesh('brute_vest', 'brute_vest', jpos('spine'), rigid('spine')))
     add(build_mesh('brute_helmet', 'brute_helmet', jpos('neck'), rigid('neck')))
     add(build_mesh('boss_hump', 'boss_hump', jpos('spine'), rigid('spine')))
+    add(build_mesh('boss_arm', 'boss_arm', jpos('elbow.R'), rigid('elbow.R')))
+    add(build_mesh('walker_ribs', 'walker_ribs', jpos('spine'), rigid('spine')))
+    for s, mir in (('L', True), ('R', False)):
+        add(build_mesh('runner_tendons.' + s, 'runner_tendons', jpos('elbow.' + s), rigid('elbow.' + s), mirror=mir))
+    add(build_mesh('brute_breach', 'brute_breach', jpos('spine'), rigid('spine')))
     for o in obs:
         o.parent = arm
         m = o.modifiers.new('Armature', 'ARMATURE'); m.object = arm

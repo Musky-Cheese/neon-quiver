@@ -709,6 +709,70 @@ def build_boss_hump():
         return 0.0, smooth01((fbm(p, 8, 2, 51) - 0.3) * 3) * 0.6, tip, 1.0 - 0.3 * tip
     export('boss_hump', me, mask, ao_dist=0.1)
 
+# ---------- boss mutation: asymmetric crystalline growth sleeving the right forearm ----------
+def build_boss_arm():
+    # Local elbow space, following the bare forearm down -Y. The clustered off-axis branches make the
+    # Warden readable in silhouette without relying on a bright shader halo.
+    verts = [(0, -0.02, 0.015), (0.015, -0.18, 0.025), (0.035, -0.39, 0.045), (0.055, -0.56, 0.07)]
+    edges = [(0, 1), (1, 2), (2, 3)]
+    radii = [0.075, 0.095, 0.115, 0.08]
+    tips = []
+    branches = [(-0.11, -0.12, 0.035), (0.15, -0.22, 0.06), (-0.16, -0.33, 0.075),
+                (0.18, -0.43, 0.09), (-0.1, -0.55, 0.1)]
+    for i, (x, y, z) in enumerate(branches):
+        anchor = min(3, i // 2 + 1); k = len(verts)
+        tip = (x * 1.45, y - 0.025, z * 1.8)
+        verts += [(x * 0.58, y, z * 0.65), tip]
+        edges += [(anchor, k), (k, k + 1)]; radii += [0.04, 0.006]
+        tips.append(V(tip))
+    ob = skin_obj('boss_arm', verts, edges, radii, 2, 0.006, 3)
+    me = evaluated_mesh(ob)
+    displace(me, lambda p, n: 0.006 * fbm(p, 15, 3, 63))
+    me = decimate('boss_arm', me, 2200)
+    def mask(p, n):
+        tip = max(smooth01(1 - (p - t).length / 0.1) for t in tips)
+        fissure = smooth01((fbm(p, 11, 2, 64) - 0.18) * 2.6)
+        return 0.0, fissure * 0.45, max(tip, fissure * 0.55), 1.0 - 0.25 * fissure
+    export('boss_arm', me, mask, ao_dist=0.07)
+
+# ---------- archetype silhouette pieces ----------
+def build_walker_ribs():
+    # Six pale, broken ribs pushed well through an open chest cavity. These intentionally sit proud of
+    # every torso variant: the earlier subtle version disappeared into dark shirts at gameplay distance.
+    parts = []
+    for i in range(3):
+        y = 0.22 + i * 0.085
+        for sx in (-1, 1):
+            reach = 0.17 + i * 0.015
+            vs = [(0.028 * sx, y, 0.215), (0.105 * sx, y - 0.012, 0.255), (reach * sx, y - 0.045, 0.29)]
+            ob = skin_obj('rib_growth', vs, [(0, 1), (1, 2)], [0.026, 0.019, 0.006], 1, 0.0025, 2)
+            parts.append(evaluated_mesh(ob))
+    # Ragged sternum and wet tissue behind the ribs give the pale arcs a dark readable surround.
+    core = skin_obj('rib_core', [(0, 0.17, 0.205), (0, 0.31, 0.225), (0, 0.46, 0.205)], [(0, 1), (1, 2)], [0.055, 0.07, 0.045], 2, 0.004, 2)
+    parts.append(evaluated_mesh(core))
+    me = join_meshes('walker_ribs', parts)
+    me = decimate('walker_ribs', me, 1500)
+    export('walker_ribs', me, lambda p, n: (0.0, 0.85 * smooth01((0.245 - p.z) / 0.05), 0.0, 1.0), ao_dist=0.03)
+
+def build_runner_tendons():
+    # A corded, split forearm with two bone-like blades; mirrored by the rig for the other arm.
+    verts = [(0, -0.02, 0), (0.012, -0.18, 0.018), (0.025, -0.38, 0.035),
+             (-0.09, -0.29, 0.055), (-0.14, -0.42, 0.085), (0.1, -0.36, 0.05), (0.16, -0.51, 0.08)]
+    edges = [(0, 1), (1, 2), (1, 3), (3, 4), (2, 5), (5, 6)]
+    radii = [0.052, 0.06, 0.045, 0.035, 0.005, 0.03, 0.005]
+    ob = skin_obj('runner_tendons', verts, edges, radii, 2, 0.004, 2)
+    me = evaluated_mesh(ob); displace(me, lambda p, n: 0.004 * fbm(p, 22, 2, 71)); me = decimate('runner_tendons', me, 1500)
+    export('runner_tendons', me, lambda p, n: (0.0, 0.65 * smooth01((fbm(p, 12, 2, 72) - 0.1) * 2), 0.2, 0.9), ao_dist=0.035)
+
+def build_brute_breach():
+    # Jagged exposed tissue protruding through a split in the right side of the chest plate.
+    verts = [(0.09, 0.27, 0.175), (0.13, 0.34, 0.195), (0.12, 0.43, 0.18),
+             (0.19, 0.31, 0.2), (0.21, 0.39, 0.19)]
+    edges = [(0, 1), (1, 2), (1, 3), (2, 4)]
+    ob = skin_obj('brute_breach', verts, edges, [0.045, 0.065, 0.05, 0.025, 0.01], 2, 0.004, 2)
+    me = evaluated_mesh(ob); displace(me, lambda p, n: 0.005 * fbm(p, 18, 3, 74)); me = decimate('brute_breach', me, 1000)
+    export('brute_breach', me, lambda p, n: (0.0, 0.8, 0.15, 0.75), ao_dist=0.035)
+
 # ================= CYBER GAUNTLETS (bow-local space, metres) =================
 def plate_mask(p, n, seam_scale):
     band = (p.y * seam_scale) % 1.0
@@ -799,7 +863,8 @@ def run():
             ('torso_shirt', lambda: build_torso('shirt')), ('torso_bare', lambda: build_torso('bare')), ('torso_jacket', lambda: build_torso('jacket')), ('torso_lean', lambda: build_torso('lean')), ('torso_bloat', lambda: build_torso('bloat')), ('pelvis', build_pelvis),
             ('uarm_sleeve', lambda: build_uarm('sleeve')), ('uarm_bare', lambda: build_uarm('bare')), ('uarm_jacket', lambda: build_uarm('jacket')),
             ('farm', build_farm), ('farm_jacket', lambda: build_farm('jacket')),
-            ('thigh', build_thigh), ('shin', build_shin), ('brute', build_brute), ('boss_hump', build_boss_hump),
+            ('thigh', build_thigh), ('shin', build_shin), ('brute', build_brute), ('boss_hump', build_boss_hump), ('boss_arm', build_boss_arm),
+            ('walker_ribs', build_walker_ribs), ('runner_tendons', build_runner_tendons), ('brute_breach', build_brute_breach),
             ('g_right', build_gauntlet_right), ('g_left', build_gauntlet_left), ('g_forearm', build_gauntlet_forearm)]
     only = globals().get('NQ_ONLY')
     for name, fn in jobs:
