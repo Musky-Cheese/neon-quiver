@@ -387,10 +387,15 @@ function buildDistricts(C) {
   propPath(G, R, loop, 1.3);
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
-  // Three showcase positions are reserved for the Meshy hero model; the procedural trees fill out the grove cheaply.
-  for (const [x, z, s] of [[-12, 79.5, 0.95], [12, 81, 1.05], [-27, 92, 1.0], [-6, 86, 1.0], [5, 88, 0.9], [9, 95, 1.1],
-    [17, 104, 1.25], [27, 110, 1.0], [-28, 112, 1.05], [-19, 117, 1.1], [-6, 109, 0.95], [10, 109.5, 1.15], [22, 126, 1.2], [-22, 128, 1.1], [-17, 134, 1.3], [17.5, 134.5, 1.25]])
-    propSakura(G, R, x, z + OZ, s, false);
+  // A few big Meshy sakuras instead of a dense procedural grove (r3.js loadHeroSakuras draws them):
+  // [x, z, height in metres, yaw]. Each gets a moss mound and a trunk collider here.
+  WORLD.heroTrees = [[-13, 80.5 + OZ, 8.2, 0.3], [13.5, 82 + OZ, 7.4, 2.1], [-27, 93 + OZ, 8.8, 4.0], [18.5, 105 + OZ, 9.4, 1.2],
+    [-21, 127 + OZ, 8.6, 5.3], [21, 129 + OZ, 9.0, 3.1], [-9.5, 202, 7.6, 0.9], [11, 199.5, 7.8, 2.6]];
+  for (const [x, z, h] of WORLD.heroTrees) {
+    WORLD.petals.push([x, h * 0.62, z, h * 0.42]);
+    G.blob(pT(PM.a, x, 0.0, z, R() * TAU), 1.6, 0.16, 1.6, 0.3, R() * 99, [0.05, 0.08, 0.03], 0, 17, 12, 5);   // moss mound
+    solid(x - 0.55, x + 0.55, 0, 3.2, z - 0.55, z + 0.55);
+  }
   for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
   propShrine(G, 20, 115 + OZ, solid);                                   // the old shrine now sits off to the side
   // the end of the path: a walled manor

@@ -307,7 +307,17 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
 #endif
   vec3 base = vNqC.rgb * tint;
+#ifdef USE_MAP
+  vec3 nqTex = texture2D(map, vMapUv).rgb;   // downloaded (Meshy) models carry their own colour texture
+  base *= nqTex;
+#endif
   vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
+#ifdef NQ_MAPGLOW
+  {   // the model's painted neon (saturated cyan/teal texels) lights up like the city's signs
+    float cy = smoothstep(0.06, 0.22, min(nqTex.g, nqTex.b) - nqTex.r) * smoothstep(0.12, 0.35, max(nqTex.g, nqTex.b));
+    emis += nqTex * cy * NQ_MAPGLOW * uNeon;
+  }
+#endif
   float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
   float bumpH = 0.0, wetRefl = 0.0;
   float nqTL = -1., nqTS = 0.;   // Ultra texture layer + strength, chosen per material below
