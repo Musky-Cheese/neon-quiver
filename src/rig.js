@@ -277,7 +277,7 @@ function drawZombieRig(z, time) {
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.35 : z.elite ? 0.9 : 0.34) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
   const eyeGlow = dying ? 0.0 : T === 'boss' ? 1.75 : z.elite ? 0.8 : 0.42, pul = 0.6 + 0.4 * Math.sin(time * 6);
-  const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
+  const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * (z.chillK <= 0 ? 0.9 : 0.55) : 0;   // frosted over by a Cryo Burst
   const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
   const skinK = T === 'walker' ? 1.38 : T === 'runner' ? 1.22 : 1;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin, skinK);

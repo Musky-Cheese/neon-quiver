@@ -9,9 +9,9 @@
       <div id="remain"></div>
       <div id="bossbar" hidden><div class="bossname">THE WARDEN</div><div class="bosstrack"><div id="bossFill"></div></div></div>
     </div>
-    <div class="hud-tr"><div class="lbl">Credits</div><div id="cash" class="num">¢0</div></div>
-    <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div><i class="hpcap"></i></div></div></div>
-    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel · X last arrow · hold Q to aim the grapple</div></div>
+    <div class="hud-tr"><div class="lbl">Scrap</div><div id="scrap" class="num">0</div></div>
+    <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div></div><div id="stam" class="full"><div class="sttrack"><div id="stFill"></div></div><span class="lbl">Stamina</span></div></div></div>
+    <div class="hud-br"><div id="quiver"></div><div class="hint">1–3 special · press again or ` for standard · wheel · X last · C crouch · hold Q grapple</div></div>
   </div>
 
   <section id="scr-title" class="screen">
@@ -42,23 +42,18 @@
           <kbd>Hold left click</kbd><span>Draw the bow</span>
           <kbd>Release</kbd><span>Loose the arrow</span>
           <kbd>Right click</kbd><span>Let the string down</span>
-          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
-          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
+          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint (until you're winded) · <kbd>Space</kbd> jump · hold <kbd>C</kbd> crouch</span>
+          <kbd>1 – 3</kbd><span>The special arrows in your quiver; press the same key again, or <kbd>`</kbd>, for standard arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
           <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
-          <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
+          <kbd>E</kbd><span>Reopen the Armory at a terminal between waves · <kbd>N</kbd> start the next wave early</span>
           <kbd>P / Esc</kbd><span>Pause</span>
         </div>
       </div>
       <div class="card-p">
         <h3>Quiver</h3>
         <div class="arrows-legend">
-          <div style="--c:#dff3ff"><i></i><p style="margin:0"><b>Carbon</b><span>Unlimited. A full draw and a headshot kills most walkers.</span></p></div>
-          <div style="--c:#ffb52e"><i></i><p style="margin:0"><b>Incendiary</b><span>Sets targets and the ground on fire.</span></p></div>
-          <div style="--c:#ff3df0"><i></i><p style="margin:0"><b>Plasma Charge</b><span>Detonates on impact. Clears crowds.</span></p></div>
-          <div style="--c:#37f3ff"><i></i><p style="margin:0"><b>Rail Piercer</b><span>Flies flat and passes through five bodies.</span></p></div>
-          <div style="--c:#9fe8ff"><i></i><p style="margin:0"><b>Cryo Burst</b><span>Frosts everything within 5 m: slow to a crawl, weak attacks.</span></p></div>
-          <div style="--c:#b8ff3a"><i></i><p style="margin:0"><b>Tether</b><span>Stakes its target in place and chains two more.</span></p></div>
-          <div style="--c:#ffd9a0"><i></i><p style="margin:0"><b>Scatter</b><span>Six shards in a cone. Brutal up close, useless at range.</span></p></div>
+          <div style="--c:#dff3ff"><i></i><p style="margin:0"><b>Standard</b><span>20 per wave, more with Quiver Size. Spent arrows can be picked up again.</span></p></div>
+          <div style="--c:#38e1f2"><i></i><p style="margin:0"><b>Armory</b><span>Clear a wave, spend scrap: unlock Piercer, Blast, Shock, Cryo, Splitter and Tracer arrows and carry up to three.</span></p></div>
         </div>
       </div>
     </div>
@@ -80,16 +75,36 @@
     </div>
   </section>
 
-  <section id="scr-shop" class="screen" hidden>
-    <div class="terminal">
-      <div class="term-head">
-        <div><h2>ARMORY TERMINAL</h2><p class="muted" id="shopWave">Wave cleared</p></div>
-        <div class="wallet"><div><span class="lbl">Vitals</span><b id="shopHp">100</b></div><div><span class="lbl">Credits</span><b id="shopCash">¢0</b></div></div>
-      </div>
-      <div id="shopGrid"></div>
-      <div class="term-foot">
-        <p class="muted">Upgrades last for the whole run. Special arrows also drop from the infected.</p>
-        <button class="btn primary" id="nextWaveBtn" type="button">Start next wave</button>
+  <section id="scr-shop" class="screen" hidden aria-label="Armory">
+    <div class="aq-stage" id="aqStage">
+      <header class="aq-head">
+        <div class="aq-titles">
+          <div class="aq-eyebrow" id="aqWave">WAVE 01 CLEARED</div>
+          <h1>Armory</h1>
+        </div>
+        <div class="aq-headr">
+          <div class="aq-timer"><div class="aq-lbl">NEXT WAVE IN</div><div class="aq-time" id="aqTimer" role="timer">0:45</div></div>
+          <div class="aq-scrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFC857" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"></path><path d="M12 7l4 2.5v5L12 17l-4-2.5v-5z"></path></svg>
+            <div class="aq-scrapcol"><div class="aq-scrapn" id="aqScrap">0</div><div class="aq-lbl aq-lbl-s">SCRAP</div></div>
+          </div>
+          <button type="button" class="aq-start" id="aqStart"><span id="aqStartLbl">Start wave 02</span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+        </div>
+      </header>
+      <div class="aq-body">
+        <nav class="aq-nav" aria-label="Shop categories">
+          <div class="aq-tabs" id="aqTabs"></div>
+          <div class="aq-hint">Esc · back to the street<br>E at a terminal · reopen</div>
+        </nav>
+        <section class="aq-main">
+          <div class="aq-tabhead"><h2 id="aqTabTitle">Special arrows</h2><p id="aqTabBlurb"></p></div>
+          <div class="aq-grid" id="aqGrid"></div>
+          <div class="aq-load">
+            <div class="aq-loadhead"><h2>Quiver loadout</h2><div class="aq-used" id="aqSlotsUsed"></div></div>
+            <div class="aq-slots" id="aqSlots"></div>
+          </div>
+        </section>
+        <aside class="aq-detail" aria-label="Selected upgrade" id="aqDetail"></aside>
       </div>
     </div>
   </section>

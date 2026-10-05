@@ -1,16 +1,21 @@
 /* ============================================================
    First-person compound bow: draw, release, retract & reload
    ============================================================ */
+// Index order is load-bearing (hazards, audio and the rig refer to types by number), so new arrows are appended.
+// Standard is always in the quiver; the six armory specials go in the 3 loadout slots (game.js: ARMORY / LOADOUT).
+// Incendiary (1) and Tether (5) are retired from the armory: still defined so old code paths stay valid, never handed out.
 const ARROWS = [
-  { key: 'std', name: 'Carbon', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1, infinite: true },
+  { key: 'std', name: 'Standard', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1 },
   { key: 'fire', name: 'Incendiary', color: hex('#ffb52e'), glow: [4, 1.8, 0.4], dmg: 0.9, speed: 0.95 },
-  { key: 'boom', name: 'Plasma Charge', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },
-  { key: 'rail', name: 'Rail Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },
-  { key: 'frost', name: 'Cryo Burst', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows everything in a 5 m burst
-  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },             // pins the target and chains two neighbours
-  { key: 'scatter', name: 'Scatter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.42, speed: 0.9 },        // six-shard spread for close quarters
+  { key: 'boom', name: 'Blast Arrow', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },       // detonates on impact (radius by level)
+  { key: 'rail', name: 'Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },            // flat and fast, passes through 2/3/5 bodies
+  { key: 'frost', name: 'Cryo Arrow', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows (then freezes) what it hits
+  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },
+  { key: 'scatter', name: 'Splitter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.55, speed: 0.9 },       // breaks into 3/4/5 bolts mid-flight
+  { key: 'shock', name: 'Shock Arrow', color: hex('#8fa8ff'), glow: [1.4, 1.9, 4.6], dmg: 0.8, speed: 1.05 },      // arcs to 2/3/5 neighbours
+  { key: 'tracer', name: 'Tracer', color: hex('#7cff6b'), glow: [1.2, 4.2, 1], dmg: 0.6, speed: 1.15 },            // marks the infected through walls
 ];
-const AT = { FROST: 4, TETHER: 5, SCATTER: 6 };
+const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, TETHER: 5, SCATTER: 6, SHOCK: 7, TRACER: 8 };
 const BOW = {
   draw: 0, state: 'ready', t: 0, relFrom: 0, type: 0, nextType: -1, carryOld: false, hold: 0,
   swayT: 0, lagX: 0, lagY: 0, walkPhase: 0, walkAmt: 0, sprintAmt: 0, kick: 0, tipWorld: [0, 0, 0], handWorld: [0, 0, 0],
@@ -23,6 +28,7 @@ const LIMB_W = [0.032, 0.03, 0.027, 0.024, 0.021, 0.018];
 
 function bowStartDraw() {
   if (BOW.state !== 'ready' || HOOK.state === 'reel' || HOOK.state === 'fly') return false;
+  if (PLAYER.ammo[BOW.type] <= 0) { outOfArrows(); return false; }
   BOW.state = 'drawing'; BOW.hold = 0; AUD.drawStart(PLAYER.drawTime * (1 - BOW.draw)); return true;
 }
 function bowRelease() {
@@ -58,7 +64,7 @@ function updateBow(dt, input) {
       if (B.nextType >= 0 && B.nextType !== B.type) { B.t = 0; B.carryOld = true; return; }
       B.nextType = -1;
       B.state = 'ready'; B.t = 0; AUD.nock();
-      if (B.type !== 0 && PLAYER.ammo[B.type] <= 0) { B.type = 0; }
+      if (PLAYER.ammo[B.type] <= 0 || !arrowAvailable(B.type)) { B.type = firstLoaded(); }
       if (input.mouseDown && GAME.state === 'playing') bowStartDraw();
     }
   }

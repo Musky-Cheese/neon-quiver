@@ -17,6 +17,13 @@
 @font-face{font-family:"Quiver Cn";font-weight:400;font-style:normal;font-display:block;src:url(fonts/heroscn-regular.woff) format("woff");}
 @font-face{font-family:"Quiver Cn";font-weight:700;font-style:normal;font-display:block;src:url(fonts/heroscn-bold.woff) format("woff");}
 @font-face{font-family:"Quiver Cn";font-weight:700;font-style:italic;font-display:block;src:url(fonts/heroscn-bolditalic.woff) format("woff");}
+@font-face{font-family:"Chakra Petch";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/chakrapetch-regular.woff) format("woff");}
+@font-face{font-family:"Chakra Petch";font-weight:500;font-style:normal;font-display:swap;src:url(fonts/chakrapetch-medium.woff) format("woff");}
+@font-face{font-family:"Chakra Petch";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/chakrapetch-semibold.woff) format("woff");}
+@font-face{font-family:"Chakra Petch";font-weight:700;font-style:normal;font-display:swap;src:url(fonts/chakrapetch-bold.woff) format("woff");}
+@font-face{font-family:"IBM Plex Mono";font-weight:400;font-style:normal;font-display:swap;src:url(fonts/ibmplexmono-regular.woff) format("woff");}
+@font-face{font-family:"IBM Plex Mono";font-weight:500;font-style:normal;font-display:swap;src:url(fonts/ibmplexmono-medium.woff) format("woff");}
+@font-face{font-family:"IBM Plex Mono";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/ibmplexmono-semibold.woff) format("woff");}
 
 :root {
   color-scheme: dark;
@@ -43,8 +50,8 @@ button, select, input { font-family: var(--f); }
 .hud-tc { top: calc(14px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); text-align: center; display: grid; justify-items: center; gap: 2px; }
 .hud-bl { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); left: 22px; }
 .hud-br { bottom: calc(20px + env(safe-area-inset-bottom, 0px)); right: 22px; display: grid; justify-items: end; gap: 6px; }
-#score, #cash { font-size: 34px; font-weight: 700; line-height: 1; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(255, 46, 136, 0.35); }
-#cash { color: var(--amber); text-shadow: 0 0 18px rgba(255, 181, 46, 0.35); }
+#score, #scrap { font-size: 34px; font-weight: 700; line-height: 1; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(255, 46, 136, 0.35); }
+#scrap { color: #ffc857; text-shadow: 0 0 18px rgba(255, 200, 87, 0.35); }
 #combo { margin-top: 4px; font-size: 14px; font-weight: 700; color: var(--cyan); letter-spacing: 0.12em; min-height: 18px; }
 .wave { display: flex; align-items: baseline; gap: 8px; }
 #waveNum { font-size: 30px; font-weight: 700; color: var(--mag); text-shadow: 0 0 16px rgba(255, 46, 136, 0.6); font-variant-numeric: tabular-nums; }
@@ -63,7 +70,13 @@ button, select, input { font-family: var(--f); }
 #hp.low #hpFill { background: repeating-linear-gradient(90deg, var(--red) 0 14px, rgba(255, 48, 64, 0.7) 14px 16px); box-shadow: 0 0 10px var(--red); }
 #hp.low .hptrack { border-color: rgba(255, 48, 64, 0.6); }
 .hptrack { position: relative; }
-.hpcap { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: rgba(255, 255, 255, 0.35); pointer-events: none; }
+#stam { display: flex; align-items: center; gap: 8px; margin-top: 6px; transition: opacity 0.4s; }
+#stam.full { opacity: 0.35; }
+#stam .lbl { font-size: 9px; }
+.sttrack { flex: 1; height: 4px; background: rgba(255, 200, 87, 0.12); }
+#stFill { height: 100%; transform-origin: left; background: #ffc857; }
+#stam.winded #stFill { background: var(--red); }
+#stam.winded .lbl { color: var(--red); }
 #hp.regen #hpFill { animation: regen 1.1s ease-in-out infinite; }
 @keyframes regen { 50% { filter: brightness(1.45); } }
 #remain.count { color: var(--cyan); opacity: 1; }
@@ -77,6 +90,8 @@ button, select, input { font-family: var(--f); }
 .slot .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); box-shadow: 0 0 8px var(--c); }
 .slot.sel { opacity: 1; transform: translateX(-8px); border-color: var(--c); background: rgba(8, 6, 16, 0.8); box-shadow: inset 0 0 18px -8px var(--c); }
 .slot.empty { opacity: 0.3; }
+.slot.none { opacity: 0.35; border-style: dashed; }
+.slot.none .nm { color: var(--dim); text-transform: none; letter-spacing: 0.04em; }
 .slot.deny { animation: deny 0.35s; }
 @keyframes deny { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .hint { font-size: 11px; letter-spacing: 0.12em; color: var(--dim); }
@@ -134,32 +149,93 @@ button, select, input { font-family: var(--f); }
 .newbest { color: var(--amber); letter-spacing: 0.3em; font-size: 13px; font-weight: 700; text-shadow: 0 0 12px var(--amber); }
 .muted { color: var(--dim); font-size: 14px; margin: 0; }
 
-/* shop */
-#scr-shop { background: rgba(5, 4, 12, 0.72); padding-block: 24px; padding-inline: 16px; }
-.terminal { place-self: center; width: min(920px, 100%); background: var(--panel); border: 1px solid rgba(41, 231, 255, 0.35); box-shadow: 0 0 60px -20px rgba(41, 231, 255, 0.5); clip-path: polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px); display: grid; }
-.term-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px; padding: 20px 24px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(90deg, rgba(41, 231, 255, 0.08), transparent); }
-.term-head h2 { margin: 0; font-size: 26px; letter-spacing: 0.24em; font-weight: 700; }
-.term-head .muted { margin-top: 4px; }
-.wallet { display: flex; gap: 22px; text-align: right; }
-.wallet b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
-#shopCash { color: var(--amber); }
-#shopGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; padding: 18px 24px; }
-.card { appearance: none; text-align: left; font: inherit; color: var(--ink); background: var(--panel-2); border: 1px solid var(--line); padding: 14px 14px 12px; display: grid; gap: 6px; cursor: pointer; position: relative; transition: border-color 0.12s, background 0.12s; clip-path: polygon(10px 0, 100% 0, 100% 100%, 0 100%, 0 10px); }
-.card:hover, .card:focus-visible { border-color: var(--cyan); background: rgba(41, 231, 255, 0.08); outline: none; }
-.card.off { opacity: 0.45; cursor: not-allowed; }
-.card.off:hover { border-color: var(--line); background: var(--panel-2); }
-.cname { font-size: 16px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
-.cdesc { font-size: 13px; color: var(--dim); }
-.pips { display: flex; gap: 4px; margin-top: 2px; }
-.pips i { width: 16px; height: 5px; background: rgba(255, 255, 255, 0.12); }
-.pips i.on { background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
-.own { font-size: 12px; color: var(--dim); letter-spacing: 0.08em; }
-.cost { position: absolute; top: 12px; right: 14px; font-weight: 700; color: var(--amber); font-variant-numeric: tabular-nums; }
-.card.ammo::after { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; }
-.card.a1::after { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-.card.a2::after { background: var(--violet); box-shadow: 0 0 8px var(--violet); }
-.card.a3::after { background: var(--rail); box-shadow: 0 0 8px var(--rail); }
-.term-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 24px 22px; border-top: 1px solid var(--line); }
+/* armory (between-waves shop): a 1920x1080 board, scaled by armoryFit() to fit the window. Opaque, so the 3D
+   frame underneath is skipped while it's open. Static glows only: no blur filters, no animated shadows. */
+#scr-shop { display: block; overflow: hidden; background-color: #07080F; background-image: linear-gradient(rgba(120, 140, 255, 0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120, 140, 255, 0.05) 1px, transparent 1px); background-size: 48px 48px; font-family: "Chakra Petch", "Segoe UI", sans-serif; color: #EEF1F8; }
+#scr-shop button { font: inherit; color: inherit; cursor: pointer; margin: 0; appearance: none; }
+#scr-shop button:disabled { cursor: not-allowed; }
+#scr-shop button:focus-visible { outline: 2px solid #38E1F2; outline-offset: 3px; }
+.aq-stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; box-sizing: border-box; padding: 48px 56px; display: flex; flex-direction: column; gap: 36px; transform-origin: 0 0; }
+.aq-stage .mono, .aq-eyebrow, .aq-lbl, .aq-time, .aq-scrapn, .aq-tabn, .aq-status, .aq-cost, .aq-used, .aq-key, .aq-slotlv, .aq-dtag, .aq-dlvrow, .aq-nnlbl, .aq-msg, .aq-hint { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.aq-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; }
+.aq-titles { display: flex; flex-direction: column; gap: 6px; }
+.aq-eyebrow { font-size: 20px; font-weight: 500; letter-spacing: 0.28em; color: #38E1F2; }
+.aq-head h1 { margin: 0; font-size: 72px; line-height: 1; font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; }
+.aq-headr { display: flex; align-items: center; gap: 28px; }
+.aq-timer { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.aq-lbl { font-size: 16px; letter-spacing: 0.2em; color: #A3AAC2; }
+.aq-lbl-s { font-size: 14px; }
+.aq-time { font-size: 40px; font-weight: 600; color: #EEF1F8; font-variant-numeric: tabular-nums; }
+.aq-scrap { display: flex; align-items: center; gap: 16px; height: 80px; padding: 0 28px; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.14); background: #0E1020; }
+.aq-scrapcol { display: flex; flex-direction: column; }
+.aq-scrapn { font-size: 34px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+.aq-start { height: 80px; padding: 0 40px; border: 0; background: #FF4FA3; color: #0A0610 !important; font-size: 26px !important; font-weight: 700 !important; letter-spacing: 0.08em; text-transform: uppercase; display: flex; align-items: center; gap: 14px; box-shadow: 0 0 32px rgba(255, 79, 163, 0.45); }
+.aq-start:hover { background: #ff6db4; }
+.aq-body { flex: 1; min-height: 0; display: flex; gap: 40px; }
+.aq-nav { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+.aq-tabs { display: flex; flex-direction: column; gap: 12px; }
+.aq-tab { height: 72px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; text-align: left; font-size: 24px !important; font-weight: 600 !important; letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid rgba(255, 255, 255, 0.12); background: #0B0D18; color: #C3C8D8 !important; }
+.aq-tab:hover { border-color: rgba(255, 255, 255, 0.3); }
+.aq-tab.on { border-color: #38E1F2; background: rgb(17, 43, 55); color: #FFFFFF !important; }
+.aq-tabn { font-size: 18px; font-weight: 500; }
+.aq-hint { margin-top: auto; font-size: 15px; line-height: 1.5; color: #A3AAC2; }
+.aq-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.aq-tabhead { display: flex; flex-direction: column; gap: 6px; }
+.aq-tabhead h2 { margin: 0; font-size: 32px; font-weight: 600; }
+.aq-tabhead p { margin: 0; font-size: 20px; color: #A3AAC2; }
+.aq-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.aq-card { height: 236px; box-sizing: border-box; padding: 24px; display: flex; flex-direction: column; gap: 14px; text-align: left; border: 1px solid rgba(255, 255, 255, 0.12); background: #0B0D18; }
+.aq-card:hover { border-color: rgba(255, 255, 255, 0.3); }
+.aq-card.on { border-color: #38E1F2; background: #111529; box-shadow: 0 0 28px rgba(56, 225, 242, 0.35); }
+.aq-cardtop { display: flex; align-items: center; justify-content: space-between; }
+.aq-ico { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.14); background: #07080F; }
+.aq-status { font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; }
+.aq-cname { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.aq-pips, .aq-dpips { display: flex; gap: 6px; }
+.aq-dpips { gap: 8px; }
+.aq-pip, .aq-dpip { flex: 1; height: 6px; background: transparent; border: 1px solid rgba(255, 255, 255, 0.22); }
+.aq-dpip { height: 12px; }
+.aq-pip.on, .aq-dpip.on { background: #38E1F2; border-color: #38E1F2; }
+.aq-costrow { margin-top: auto; display: flex; align-items: center; justify-content: space-between; }
+.aq-cap { font-size: 17px; color: #A3AAC2; }
+.aq-cost { font-size: 24px; font-weight: 600; }
+.aq-load { margin-top: auto; display: flex; flex-direction: column; gap: 14px; }
+.aq-loadhead { display: flex; align-items: baseline; justify-content: space-between; gap: 24px; }
+.aq-loadhead h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+.aq-used { font-size: 16px; color: #A3AAC2; }
+.aq-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+.aq-slot { height: 96px; box-sizing: border-box; padding: 0 20px; display: flex; align-items: center; gap: 18px; text-align: left; border: 1px solid rgba(255, 255, 255, 0.22); background: #0E1020; }
+.aq-slot.empty { border-style: dashed; background: transparent; }
+.aq-slot.on { border-color: #38E1F2; }
+.aq-slot:hover { border-color: rgba(255, 255, 255, 0.4); }
+.aq-slot.on:hover { border-color: #38E1F2; }
+.aq-key { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.22); font-size: 20px; font-weight: 600; color: #EEF1F8; }
+.aq-slottx { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.aq-slotname { font-size: 22px; font-weight: 600; white-space: nowrap; }
+.aq-slotlv { font-size: 15px; color: #A3AAC2; }
+.aq-slotempty { font-size: 19px; color: #A3AAC2; }
+.aq-detail { width: 520px; flex-shrink: 0; box-sizing: border-box; padding: 36px; display: flex; flex-direction: column; gap: 26px; border: 1px solid rgba(255, 255, 255, 0.14); background: #0E1020; }
+.aq-dhead { display: flex; align-items: center; gap: 24px; }
+.aq-dico { width: 112px; height: 112px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid #38E1F2; background: #07080F; box-shadow: 0 0 40px rgba(56, 225, 242, 0.30); }
+.aq-dtitle { display: flex; flex-direction: column; gap: 6px; }
+.aq-dtag { font-size: 16px; letter-spacing: 0.2em; text-transform: uppercase; color: #38E1F2; }
+.aq-dname { font-size: 44px; font-weight: 700; line-height: 1; }
+.aq-ddesc { margin: 0; font-size: 22px; line-height: 1.45; color: #C3C8D8; text-wrap: pretty; }
+.aq-dlevel { display: flex; flex-direction: column; gap: 12px; }
+.aq-dlvrow { display: flex; justify-content: space-between; font-size: 16px; letter-spacing: 0.18em; color: #A3AAC2; }
+.aq-nn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.aq-nnbox { padding: 18px; display: flex; flex-direction: column; gap: 8px; border: 1px solid rgba(255, 255, 255, 0.12); background: #07080F; }
+.aq-nnbox.next { border-color: #38E1F2; }
+.aq-nnlbl { font-size: 14px; letter-spacing: 0.2em; color: #A3AAC2; }
+.aq-nnlbl.next { color: #38E1F2; }
+.aq-nntx { font-size: 20px; line-height: 1.3; }
+.aq-spacer { flex: 1; }
+.aq-msg { font-size: 17px; color: #38E1F2; }
+.aq-equip { height: 60px; border: 1px solid #38E1F2; background: transparent; color: #EEF1F8 !important; font-size: 20px !important; font-weight: 600 !important; letter-spacing: 0.06em; text-transform: uppercase; }
+.aq-equip:hover { background: rgba(56, 225, 242, 0.1); }
+.aq-buy { height: 76px; border: 0; font-size: 24px !important; font-weight: 700 !important; letter-spacing: 0.06em; text-transform: uppercase; background: #38E1F2; color: #05060C !important; box-shadow: 0 0 32px rgba(56, 225, 242, 0.45); }
+.aq-buy:hover:not(:disabled) { background: #6ae9f6; }
+.aq-buy.off { background: #1A1D2E; color: #9AA1B8 !important; box-shadow: none; }
 
 #swWarn { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--amber); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
 #swWarn b { color: var(--amber); }
@@ -191,9 +267,9 @@ button, select, input { font-family: var(--f); }
       <div id="remain"></div>
       <div id="bossbar" hidden><div class="bossname">THE WARDEN</div><div class="bosstrack"><div id="bossFill"></div></div></div>
     </div>
-    <div class="hud-tr"><div class="lbl">Credits</div><div id="cash" class="num">¢0</div></div>
-    <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div><i class="hpcap"></i></div></div></div>
-    <div class="hud-br"><div id="quiver"></div><div class="hint">1–7 or wheel · X last arrow · hold Q to aim the grapple</div></div>
+    <div class="hud-tr"><div class="lbl">Scrap</div><div id="scrap" class="num">0</div></div>
+    <div class="hud-bl"><div id="hp"><div class="lbl">Vitals</div><div class="hprow"><span id="hpText">100</span><span id="hpMax">/ 100</span></div><div class="hptrack"><div id="hpFill"></div></div><div id="stam" class="full"><div class="sttrack"><div id="stFill"></div></div><span class="lbl">Stamina</span></div></div></div>
+    <div class="hud-br"><div id="quiver"></div><div class="hint">1–3 special · press again or ` for standard · wheel · X last · C crouch · hold Q grapple</div></div>
   </div>
 
   <section id="scr-title" class="screen">
@@ -224,23 +300,18 @@ button, select, input { font-family: var(--f); }
           <kbd>Hold left click</kbd><span>Draw the bow</span>
           <kbd>Release</kbd><span>Loose the arrow</span>
           <kbd>Right click</kbd><span>Let the string down</span>
-          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump</span>
-          <kbd>1 – 7</kbd><span>Switch arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
+          <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint (until you're winded) · <kbd>Space</kbd> jump · hold <kbd>C</kbd> crouch</span>
+          <kbd>1 – 3</kbd><span>The special arrows in your quiver; press the same key again, or <kbd>`</kbd>, for standard arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
           <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
-          <kbd>E</kbd><span>Use an armory terminal · <kbd>N</kbd> start the next wave early</span>
+          <kbd>E</kbd><span>Reopen the Armory at a terminal between waves · <kbd>N</kbd> start the next wave early</span>
           <kbd>P / Esc</kbd><span>Pause</span>
         </div>
       </div>
       <div class="card-p">
         <h3>Quiver</h3>
         <div class="arrows-legend">
-          <div style="--c:#dff3ff"><i></i><p style="margin:0"><b>Carbon</b><span>Unlimited. A full draw and a headshot kills most walkers.</span></p></div>
-          <div style="--c:#ffb52e"><i></i><p style="margin:0"><b>Incendiary</b><span>Sets targets and the ground on fire.</span></p></div>
-          <div style="--c:#ff3df0"><i></i><p style="margin:0"><b>Plasma Charge</b><span>Detonates on impact. Clears crowds.</span></p></div>
-          <div style="--c:#37f3ff"><i></i><p style="margin:0"><b>Rail Piercer</b><span>Flies flat and passes through five bodies.</span></p></div>
-          <div style="--c:#9fe8ff"><i></i><p style="margin:0"><b>Cryo Burst</b><span>Frosts everything within 5 m: slow to a crawl, weak attacks.</span></p></div>
-          <div style="--c:#b8ff3a"><i></i><p style="margin:0"><b>Tether</b><span>Stakes its target in place and chains two more.</span></p></div>
-          <div style="--c:#ffd9a0"><i></i><p style="margin:0"><b>Scatter</b><span>Six shards in a cone. Brutal up close, useless at range.</span></p></div>
+          <div style="--c:#dff3ff"><i></i><p style="margin:0"><b>Standard</b><span>20 per wave, more with Quiver Size. Spent arrows can be picked up again.</span></p></div>
+          <div style="--c:#38e1f2"><i></i><p style="margin:0"><b>Armory</b><span>Clear a wave, spend scrap: unlock Piercer, Blast, Shock, Cryo, Splitter and Tracer arrows and carry up to three.</span></p></div>
         </div>
       </div>
     </div>
@@ -262,16 +333,36 @@ button, select, input { font-family: var(--f); }
     </div>
   </section>
 
-  <section id="scr-shop" class="screen" hidden>
-    <div class="terminal">
-      <div class="term-head">
-        <div><h2>ARMORY TERMINAL</h2><p class="muted" id="shopWave">Wave cleared</p></div>
-        <div class="wallet"><div><span class="lbl">Vitals</span><b id="shopHp">100</b></div><div><span class="lbl">Credits</span><b id="shopCash">¢0</b></div></div>
-      </div>
-      <div id="shopGrid"></div>
-      <div class="term-foot">
-        <p class="muted">Upgrades last for the whole run. Special arrows also drop from the infected.</p>
-        <button class="btn primary" id="nextWaveBtn" type="button">Start next wave</button>
+  <section id="scr-shop" class="screen" hidden aria-label="Armory">
+    <div class="aq-stage" id="aqStage">
+      <header class="aq-head">
+        <div class="aq-titles">
+          <div class="aq-eyebrow" id="aqWave">WAVE 01 CLEARED</div>
+          <h1>Armory</h1>
+        </div>
+        <div class="aq-headr">
+          <div class="aq-timer"><div class="aq-lbl">NEXT WAVE IN</div><div class="aq-time" id="aqTimer" role="timer">0:45</div></div>
+          <div class="aq-scrap">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFC857" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"></path><path d="M12 7l4 2.5v5L12 17l-4-2.5v-5z"></path></svg>
+            <div class="aq-scrapcol"><div class="aq-scrapn" id="aqScrap">0</div><div class="aq-lbl aq-lbl-s">SCRAP</div></div>
+          </div>
+          <button type="button" class="aq-start" id="aqStart"><span id="aqStartLbl">Start wave 02</span><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+        </div>
+      </header>
+      <div class="aq-body">
+        <nav class="aq-nav" aria-label="Shop categories">
+          <div class="aq-tabs" id="aqTabs"></div>
+          <div class="aq-hint">Esc · back to the street<br>E at a terminal · reopen</div>
+        </nav>
+        <section class="aq-main">
+          <div class="aq-tabhead"><h2 id="aqTabTitle">Special arrows</h2><p id="aqTabBlurb"></p></div>
+          <div class="aq-grid" id="aqGrid"></div>
+          <div class="aq-load">
+            <div class="aq-loadhead"><h2>Quiver loadout</h2><div class="aq-used" id="aqSlotsUsed"></div></div>
+            <div class="aq-slots" id="aqSlots"></div>
+          </div>
+        </section>
+        <aside class="aq-detail" aria-label="Selected upgrade" id="aqDetail"></aside>
       </div>
     </div>
   </section>
@@ -2532,6 +2623,8 @@ const AUD = {
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
     if (type === 5) { this.tone('square', 300, 1400, 0.12, 0.05); }
     if (type === 6) { this.burst('lowpass', 1400, 300, 1, 0.3, 0.3); this.tone('square', 120, 50, 0.15, 0.1); }
+    if (type === 7) { this.tone('sawtooth', 1600, 3200, 0.12, 0.04); this.burst('highpass', 5000, 7000, 3, 0.12, 0.08); }
+    if (type === 8) { this.tone('sine', 2200, 2600, 0.1, 0.05); }
   },
   nock() { if (!this.ctx) return; const t = this.now(); this.burst('bandpass', 2500, 2500, 6, 0.05, 0.12); this.tone('square', 1800, 1700, 0.03, 0.03, this.sfx, t + 0.02); },
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
@@ -2561,6 +2654,12 @@ const AUD = {
   click() { if (!this.ctx) return; this.tone('square', 1400, 1400, 0.03, 0.04); },
   buy() { if (!this.ctx) return; const t = this.now(); this.tone('square', 740, 740, 0.06, 0.05); this.tone('square', 1480, 1480, 0.1, 0.05, this.sfx, t + 0.06); },
   deny() { if (!this.ctx) return; this.tone('square', 180, 140, 0.15, 0.06); },
+  // Shock Arrow arc: a crackle that gets denser with every zombie in the chain
+  zap(pan, n = 1) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); for (let i = 0; i < Math.min(5, n + 1); i++) { this.burst('highpass', 3500, 1800, 4, 0.08, 0.16, o, t + i * 0.045); this.tone('square', 90 + i * 25, 60, 0.07, 0.05, o, t + i * 0.045); } },
+  // Tracer tag: a short rising ping
+  tag(pan) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); this.tone('sine', 1400, 2100, 0.09, 0.07, o); this.tone('sine', 2100, 2100, 0.12, 0.05, o, t + 0.08); },
+  // armory: purchase confirmation already exists (buy); a soft panel-open chirp
+  armory() { if (!this.ctx) return; const t = this.now(); [392, 523, 784].forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.06, this.sfx, t + i * 0.07)); },
   swap() { if (!this.ctx) return; this.tone('triangle', 500, 900, 0.07, 0.06); },
   waveHorn(boss) {
     if (!this.ctx) return; const c = this.ctx, t = this.now(), d = boss ? 3.2 : 2.2;
@@ -4220,9 +4319,8 @@ function updateSupplies(dt) {
     if (GAME.state !== 'playing' || PLAYER.dead) continue;
     const d = Math.hypot(s.x - PLAYER.x, s.z - PLAYER.z);
     if (s.kind === 'cache' && s.cd <= 0 && d < 1.9) {
-      PLAYER.ammo[1] += 2; PLAYER.ammo[2] += 1; PLAYER.ammo[3] += 2; PLAYER.ammo[4] += 1; PLAYER.ammo[5] += 1; PLAYER.ammo[6] += 2; PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + 15);
-      s.cd = 70; AUD.pickup(); updateQuiverHUD();
-      GAME.toast('SUPPLY CACHE  +SPECIAL ARROWS  +15 HP', '#ffb52e');
+      supplyRefill(); s.cd = 70; AUD.pickup();
+      GAME.toast('SUPPLY CACHE  +ARROWS  +15 HP', '#ffb52e');
       burst(s.x, 1, s.z, 36, [2.4, 1.6, 0.5], 4, 0.6, 0.08, 0, 2);
     }
   }
@@ -4357,22 +4455,27 @@ function drawObjective(hx, W, H) {
   hx.font = '700 13px "Quiver Cn", sans-serif'; hx.textAlign = 'center'; hx.fillStyle = '#bff6ff';
   hx.fillText(`ARMORY ${Math.round(t.d)} m`, x, y + 24);
   hx.font = '700 15px "Quiver Cn", sans-serif'; hx.fillStyle = '#e9ecff';
-  hx.fillText(GAME.nearTerminal ? 'PRESS E TO OPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  REACH AN ARMORY TERMINAL`, cx, H - 64);
+  hx.fillText(GAME.nearTerminal ? 'PRESS E TO REOPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  ARMORY TERMINALS REOPEN THE SHOP  ·  N TO START NOW`, cx, H - 64);
 }
 
 /* ============================================================
    First-person compound bow: draw, release, retract & reload
    ============================================================ */
+// Index order is load-bearing (hazards, audio and the rig refer to types by number), so new arrows are appended.
+// Standard is always in the quiver; the six armory specials go in the 3 loadout slots (game.js: ARMORY / LOADOUT).
+// Incendiary (1) and Tether (5) are retired from the armory: still defined so old code paths stay valid, never handed out.
 const ARROWS = [
-  { key: 'std', name: 'Carbon', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1, infinite: true },
+  { key: 'std', name: 'Standard', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1 },
   { key: 'fire', name: 'Incendiary', color: hex('#ffb52e'), glow: [4, 1.8, 0.4], dmg: 0.9, speed: 0.95 },
-  { key: 'boom', name: 'Plasma Charge', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },
-  { key: 'rail', name: 'Rail Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },
-  { key: 'frost', name: 'Cryo Burst', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows everything in a 5 m burst
-  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },             // pins the target and chains two neighbours
-  { key: 'scatter', name: 'Scatter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.42, speed: 0.9 },        // six-shard spread for close quarters
+  { key: 'boom', name: 'Blast Arrow', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },       // detonates on impact (radius by level)
+  { key: 'rail', name: 'Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },            // flat and fast, passes through 2/3/5 bodies
+  { key: 'frost', name: 'Cryo Arrow', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows (then freezes) what it hits
+  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },
+  { key: 'scatter', name: 'Splitter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.55, speed: 0.9 },       // breaks into 3/4/5 bolts mid-flight
+  { key: 'shock', name: 'Shock Arrow', color: hex('#8fa8ff'), glow: [1.4, 1.9, 4.6], dmg: 0.8, speed: 1.05 },      // arcs to 2/3/5 neighbours
+  { key: 'tracer', name: 'Tracer', color: hex('#7cff6b'), glow: [1.2, 4.2, 1], dmg: 0.6, speed: 1.15 },            // marks the infected through walls
 ];
-const AT = { FROST: 4, TETHER: 5, SCATTER: 6 };
+const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, TETHER: 5, SCATTER: 6, SHOCK: 7, TRACER: 8 };
 const BOW = {
   draw: 0, state: 'ready', t: 0, relFrom: 0, type: 0, nextType: -1, carryOld: false, hold: 0,
   swayT: 0, lagX: 0, lagY: 0, walkPhase: 0, walkAmt: 0, sprintAmt: 0, kick: 0, tipWorld: [0, 0, 0], handWorld: [0, 0, 0],
@@ -4385,6 +4488,7 @@ const LIMB_W = [0.032, 0.03, 0.027, 0.024, 0.021, 0.018];
 
 function bowStartDraw() {
   if (BOW.state !== 'ready' || HOOK.state === 'reel' || HOOK.state === 'fly') return false;
+  if (PLAYER.ammo[BOW.type] <= 0) { outOfArrows(); return false; }
   BOW.state = 'drawing'; BOW.hold = 0; AUD.drawStart(PLAYER.drawTime * (1 - BOW.draw)); return true;
 }
 function bowRelease() {
@@ -4420,7 +4524,7 @@ function updateBow(dt, input) {
       if (B.nextType >= 0 && B.nextType !== B.type) { B.t = 0; B.carryOld = true; return; }
       B.nextType = -1;
       B.state = 'ready'; B.t = 0; AUD.nock();
-      if (B.type !== 0 && PLAYER.ammo[B.type] <= 0) { B.type = 0; }
+      if (PLAYER.ammo[B.type] <= 0 || !arrowAvailable(B.type)) { B.type = firstLoaded(); }
       if (input.mouseDown && GAME.state === 'playing') bowStartDraw();
     }
   }
@@ -4627,7 +4731,7 @@ function hookRay(ox, oy, oz, dx, dy, dz, maxD) {
 // where a hook along the view would take you, and how far you'd fall from there
 function hookAim() {
   camBasis();
-  const P = PLAYER, h = hookRay(P.x, P.y + 1.62, P.z, _cf[0], _cf[1], _cf[2], HOOK_CFG.range);
+  const P = PLAYER, h = hookRay(P.x, P.y + P.eyeH, P.z, _cf[0], _cf[1], _cf[2], HOOK_CFG.range);
   if (!h) return null;
   const ty = clamp(Math.min(h.y, h.top - 0.3) - HOOK_CFG.hang, 0, 400);
   h.tx = h.x + h.n[0] * 0.75; h.tz = h.z + h.n[2] * 0.75; h.ty = ty;
@@ -4645,7 +4749,7 @@ function hookFire() {
   camBasis();
   if (!h) {   // nothing in range: the hook flies out and falls short
     HOOK.state = 'whiff'; HOOK.t = 0; HOOK.cd = 1;
-    HOOK.ax = PLAYER.x + _cf[0] * HOOK_CFG.range; HOOK.ay = PLAYER.y + 1.62 + _cf[1] * HOOK_CFG.range; HOOK.az = PLAYER.z + _cf[2] * HOOK_CFG.range;
+    HOOK.ax = PLAYER.x + _cf[0] * HOOK_CFG.range; HOOK.ay = PLAYER.y + PLAYER.eyeH + _cf[1] * HOOK_CFG.range; HOOK.az = PLAYER.z + _cf[2] * HOOK_CFG.range;
     AUD.hookFire(); return;
   }
   Object.assign(HOOK, { state: 'fly', t: 0, ax: h.x, ay: h.y, az: h.z, tx: h.tx, ty: h.ty, tz: h.tz, flyT: h.t / 140, cd: HOOK_CFG.cooldown, stuckT: 0 });
@@ -4722,14 +4826,14 @@ function drawHookHUD(hx, cx, cy, W, H) {
    Sculpted in Blender (tools/make_models.py), animated procedurally here.
    ============================================================ */
 const ZTYPES = {
-  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
-  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
-  brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
-  boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
+  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, scrap: 7, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
+  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, scrap: 9, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
+  brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, scrap: 22, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
+  boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, scrap: 150, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
   // spitter: hangs back and lobs acid; screamer: hangs back and buffs the pack; climber: fast, scales a wall and pounces
-  spitter: { hp: 42, hpW: 6, speed: [1.3, 1.7], dmg: 6, scale: 0.96, score: 180, cash: 18, eyes: [0.25, 1, 0.35], reach: 1.3, atk: 0.85 },
-  screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, cash: 20, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
-  climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, cash: 22, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
+  spitter: { hp: 42, hpW: 6, speed: [1.3, 1.7], dmg: 6, scale: 0.96, score: 180, scrap: 10, eyes: [0.25, 1, 0.35], reach: 1.3, atk: 0.85 },
+  screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, scrap: 11, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
+  climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, scrap: 11, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
 };
 // how long a corpse holds before it starts sinking, and before it's finally removed (blood pools use DECAL_LIFE/DECAL_CAP in fx.js)
 const CORPSE_SETTLE = 14, CORPSE_LIFE = 24, CORPSE_CAP = 26;
@@ -4783,7 +4887,7 @@ function spawnZombie(type, x, z, wave) {
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
-    chill: 0, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
+    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // spitter/screamer/climber state
     spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
@@ -4961,7 +5065,7 @@ function updateZombies(dt, time) {
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
-    z.chill = Math.max(0, z.chill - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
     { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
       z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }
     if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
@@ -4999,7 +5103,7 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
+    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
@@ -5028,26 +5132,86 @@ function updateZombies(dt, time) {
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
-      z.atkT += dt / z.T.atk * (z.chill > 0 ? 0.45 : 1);
+      z.atkT += dt / z.T.atk * zAtkK(z);
       if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
 }
-// Cryo Burst: everything within 5 m slows to a crawl (attacks too) for a few seconds
-function frostBurst(x, y, z) {
-  for (const o of zombieCandidates(x - 5, x + 5, z - 5, z + 5)) {
-    if (o.dead || o.state === 'drop') continue;
-    const d = Math.hypot(o.x - x, o.z - z); if (d > 5) continue;
-    o.chill = Math.max(o.chill, o.type === 'boss' ? 2.5 : 6); o.burn = 0;
-    damageZombie(o, 18 * PLAYER.dmgMult * (1 - d / 8), 'body', null, null, 4);
+// speed / attack-rate factors from Cryo (slow or freeze) and Shock (stun)
+function zSlowK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? z.chillK : 1; }
+function zAtkK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? (z.chillK <= 0 ? 0 : Math.max(0.45, z.chillK)) : 1; }
+// Cryo Arrow: the coolant capsule slows (Lv 3: freezes) whatever it hits, plus anything standing right at the impact.
+// slowK is the speed left (0.6 = 40% slower, 0 = frozen solid); the Warden shrugs it off in half the time.
+function cryoHit(x, y, z, target, slowK, dur) {
+  const hitOne = (o) => {
+    if (o.dead || o.state === 'drop') return;
+    const d = o.type === 'boss' ? dur * 0.5 : dur;
+    if (o.chill <= 0 || slowK <= o.chillK || d > o.chill) { o.chillK = slowK; o.chill = Math.max(o.chill, d); }
+    o.burn = 0;
+  };
+  if (target) hitOne(target);
+  for (const o of zombieCandidates(x - 1.4, x + 1.4, z - 1.4, z + 1.4)) if (o !== target && Math.hypot(o.x - x, o.z - z) < 1.3) hitOne(o);
+  for (let k = 0; k < 26; k++) { const a = Math.random() * TAU, v = rand(1, 4); emit(x, y, z, Math.cos(a) * v, rand(0.5, 2.5), Math.sin(a) * v, rand(0.4, 0.8), [1.2, 2.4, 3.6], rand(0.04, 0.1), 2, 2, 0.1); }
+  flashLight(x, Math.max(0.6, y), z, [1.4, 2.8, 4], 7, 0.35);
+  for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 2) f.t = 0;
+  AUD.frost(PLAYER.panOf(x, z));
+  hazFrost(x, z);   // still ices over flood water and cools a cooking fuel tank
+}
+// Shock Arrow: current arcs from the struck zombie (or the impact point) to the nearest unhit neighbour, n hops.
+// Each hop deals part of the hit; Lv 3 also stuns everything in the chain for a second.
+const ARCS = [];
+function shockChain(x, y, z, first, hops, dmg, stun) {
+  const hit = first ? [first] : [];
+  let fx = x, fy = y, fz = z;
+  if (first && stun > 0 && !first.dead) { first.stun = Math.max(first.stun, first.type === 'boss' ? stun * 0.3 : stun); if (first.state === 'attack') first.state = 'walk'; }
+  for (let n = 0; n < hops; n++) {
+    let best = null, bd = 6.5;
+    for (const o of zombieCandidates(fx - 6.5, fx + 6.5, fz - 6.5, fz + 6.5)) {
+      if (o.dead || o.state === 'drop' || hit.includes(o)) continue;
+      const d = Math.hypot(o.x - fx, o.z - fz); if (d < bd) { bd = d; best = o; }
+    }
+    if (!best) break;
+    hit.push(best);
+    const ty = best.y + 1.1 * best.scale;
+    ARCS.push({ x0: fx, y0: fy, z0: fz, x1: best.x, y1: ty, z1: best.z, t: 0.22 });
+    damageZombie(best, dmg, 'body', [best.x, ty, best.z], null, AT.SHOCK, 0.6);
+    if (stun > 0 && !best.dead) { best.stun = Math.max(best.stun, best.type === 'boss' ? stun * 0.3 : stun); if (best.state === 'attack') best.state = 'walk'; }
+    else best.flinch = 1;
+    fx = best.x; fy = ty; fz = best.z;
   }
-  for (let k = 0; k < 70; k++) { const a = Math.random() * TAU, v = rand(2, 9); emit(x, y, z, Math.cos(a) * v, rand(0.5, 4), Math.sin(a) * v, rand(0.5, 1), [1.2, 2.4, 3.6], rand(0.05, 0.14), 2, 2, 0.1); }
-  burst(x, Math.max(0.3, y), z, 30, [0.7, 0.9, 1.1], 5, 0.6, 0.12, 4, 1.4, 3);
-  flashLight(x, 1.2, z, [1.4, 2.8, 4], 14, 0.5);
-  for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 5) f.t = 0;   // puts out fires too
-  AUD.frost(PLAYER.panOf(x, z)); shakeNear({ x, z }, 0.2);
-  hazFrost(x, z);
+  if (ARCS.length > 24) ARCS.splice(0, ARCS.length - 24);
+  flashLight(x, Math.max(0.8, y), z, [1.6, 2, 5], 9, 0.25);
+  AUD.zap(PLAYER.panOf(x, z), hit.length);
+}
+// arcs are drawn as a few jittered glowing segments for a fraction of a second (no extra lights, no geometry)
+function updateArcs(dt) {
+  for (let i = ARCS.length - 1; i >= 0; i--) { ARCS[i].t -= dt; if (ARCS[i].t <= 0) ARCS.splice(i, 1); }
+}
+const _arcP = [0, 0, 0];
+function drawArcs() {
+  const C = ARROWS[AT.SHOCK].color, G = ARROWS[AT.SHOCK].glow;
+  for (const a of ARCS) {
+    const k = a.t / 0.22, SEG = 5; let px = a.x0, py = a.y0, pz = a.z0;
+    for (let s = 1; s <= SEG; s++) {
+      const u = s / SEG, j = s === SEG ? 0 : 0.35;
+      const qx = lerp(a.x0, a.x1, u) + rand(-j, j), qy = lerp(a.y0, a.y1, u) + rand(-j, j) * 0.6, qz = lerp(a.z0, a.z1, u) + rand(-j, j);
+      drawItem(MESH.box, M4.align(poolM(), px, py, pz, qx, qy, qz, 0.022, 0.022), C, [G[0] * k * 1.6, G[1] * k * 1.6, G[2] * k * 1.6]);
+      px = qx; py = qy; pz = qz;
+    }
+  }
+}
+// Tracer: tags the infected with a marker the HUD draws through walls (game.js drawMarks). Lv 3 tags the whole group.
+function tracerMark(x, z, target, dur, radius) {
+  let n = 0;
+  if (target && !target.dead) { target.markT = Math.max(target.markT, dur); n++; }
+  for (const o of zombieCandidates(x - radius, x + radius, z - radius, z + radius)) {
+    if (o === target || o.dead || Math.hypot(o.x - x, o.z - z) > radius) continue;
+    o.markT = Math.max(o.markT, dur); n++;
+  }
+  burst(x, 1, z, 14, ARROWS[AT.TRACER].glow, 3, 0.4, 0.05, 0, 2);
+  AUD.tag(PLAYER.panOf(x, z));
+  return n;
 }
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
 function tetherFrom(z, hx, hy, hz) {
@@ -5132,7 +5296,7 @@ function updateSpitter(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
   pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
   z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
@@ -5141,7 +5305,7 @@ function updateSpitter(z, dt, P) {
   z.spitCd -= dt;
   if (z.state === 'walk' && dist >= 6 && dist <= 18 && z.spitCd <= 0 && GAME.state === 'playing' && hasLineOfSight(z, P)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
   if (z.state === 'attack') {
-    z.atkT += dt / 1.1;
+    z.atkT += dt / 1.1 * zAtkK(z);
     if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; spitAt(z, P); z.spitCd = rand(2.6, 4.2); }
     if (z.atkT >= 1) z.state = 'walk';
   }
@@ -5160,7 +5324,7 @@ function updateScreamer(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -5172,7 +5336,7 @@ function updateScreamer(z, dt, P) {
   z.atkCd -= dt;
   if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
   if (z.state === 'attack') {
-    z.atkT += dt / z.T.atk;
+    z.atkT += dt / z.T.atk * zAtkK(z);
     if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
     if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.4, 0.8); }
   }
@@ -5197,7 +5361,7 @@ function updateClimber(z, dt, P) {
     const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -5211,7 +5375,7 @@ function updateClimber(z, dt, P) {
     }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
-      z.atkT += dt / z.T.atk;
+      z.atkT += dt / z.T.atk * zAtkK(z);
       if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.6); }
     }
@@ -5462,9 +5626,9 @@ function objStart(type) {
 function objFinish(ok) {
   const o = OBJ.cur; if (!o) return; const w = GAME.wave;
   if (ok) {
-    const cash = (o.type === 'nest' ? 90 : 70) + w * 14;
-    GAME.cash += cash; GAME.score += cash * 6; hudScore();
-    GAME.showBanner(o.type === 'nest' ? 'NEST DESTROYED' : 'UPLINK SECURED', `+¢${cash} · SUPPLIES DROPPED`, OBJ_COL[o.type]);
+    const scrap = (o.type === 'nest' ? 50 : 40) + w * 6;
+    GAME.scrap += scrap; GAME.score += scrap * 14; hudScore();
+    GAME.showBanner(o.type === 'nest' ? 'NEST DESTROYED' : 'UPLINK SECURED', `+${scrap} SCRAP · SUPPLIES DROPPED`, OBJ_COL[o.type]);
     for (let k = 0; k < 3; k++) dropPickup(o.x + rand(-2, 2), o.z + rand(-2, 2), k === 0 ? 'health' : 'ammo');
     AUD.cleared();
   } else GAME.showBanner('OBJECTIVE FAILED', 'THE UPLINK WENT DARK', '#ff3040');
@@ -6043,7 +6207,7 @@ function drawZombieRig(z, time) {
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.35 : z.elite ? 0.9 : 0.34) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
   const eyeGlow = dying ? 0.0 : T === 'boss' ? 1.75 : z.elite ? 0.8 : 0.42, pul = 0.6 + 0.4 * Math.sin(time * 6);
-  const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * 0.55 : 0;   // frosted over by a Cryo Burst
+  const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * (z.chillK <= 0 ? 0.9 : 0.55) : 0;   // frosted over by a Cryo Burst
   const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
   const skinK = T === 'walker' ? 1.38 : T === 'runner' ? 1.22 : 1;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin, skinK);
@@ -7139,6 +7303,225 @@ function render3(time, W, H, fov, cam) {
 }
 
 /* ============================================================
+   Armory: the between-waves upgrade shop and quiver loadout.
+   Opens on its own a moment after each wave is cleared. Scrap from kills buys arrow unlocks and levels,
+   bow tuning and survival perks; up to 3 special arrows ride in the quiver (keys 1–3), standard arrows always do.
+   Layout, copy and logic follow the "Neon Quiver – Upgrade shop" design canvas: a 1920×1080 board scaled to fit.
+   ============================================================ */
+
+// ---- catalog (copy and prices straight from the design) ----
+const ARMORY = [
+  { id: 'piercer', cat: 'arrows', name: 'Piercer', tag: 'Special arrow', desc: 'A hardened tip that punches clean through bodies. Line them up in a corridor and one shot does the work of three.', base: 'Not owned', effects: ['Passes through 2 zombies', 'Passes through 3 zombies', 'Passes through 5 zombies'], costs: [120, 180, 260], icon: 'M3 12h16M15 8l4 4-4 4M8 6v12M12 6v12' },
+  { id: 'blast', cat: 'arrows', name: 'Blast Arrow', tag: 'Special arrow', desc: 'Packed with a micro-charge that detonates on impact. Best saved for packs bunched at a choke point.', base: 'Not owned', effects: ['Explodes on impact, 2 m radius', 'Explodes on impact, 3 m radius', '4 m radius with knockback'], costs: [200, 280, 380], icon: 'M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8' },
+  { id: 'shock', cat: 'arrows', name: 'Shock Arrow', tag: 'Special arrow', desc: 'Releases an arc of current that jumps between nearby zombies. Wet streets make it even nastier.', base: 'Not owned', effects: ['Chains to 2 nearby zombies', 'Chains to 3 nearby zombies', 'Chains to 5 and stuns for 1 s'], costs: [180, 250, 340], icon: 'M13 2L4 14h7l-1 8 9-12h-7z' },
+  { id: 'cryo', cat: 'arrows', name: 'Cryo Arrow', tag: 'Special arrow', desc: 'Coolant capsule that slows whatever it hits. Buys you time to reload when a runner closes in.', base: 'Not owned', effects: ['Slows target 40% for 2 s', 'Slows target 50% for 3 s', 'Freezes target solid for 1.5 s'], costs: [150, 210, 300], icon: 'M12 2v20M3.5 7l17 10M20.5 7l-17 10M9 4l3 3 3-3M9 20l3-3 3 3' },
+  { id: 'splitter', cat: 'arrows', name: 'Splitter', tag: 'Special arrow', desc: 'Breaks apart mid-flight into a spread of smaller bolts. Forgiving against fast, scattered waves.', base: 'Not owned', effects: ['Splits into 3 mid-flight', 'Splits into 4 mid-flight', 'Splits into 5 with a wider spread'], costs: [220, 300, 400], icon: 'M3 12h7M10 12l10-7M10 12h10M10 12l10 7' },
+  { id: 'tracer', cat: 'arrows', name: 'Tracer', tag: 'Special arrow', desc: 'Tags zombies with a neon marker you can see through walls. Cheap, and it never misses the big picture.', base: 'Not owned', effects: ['Marks zombies through walls for 4 s', 'Marks for 6 s', 'Marks the whole group for 8 s'], costs: [90, 140, 200], icon: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6' },
+
+  { id: 'drawspeed', cat: 'bow', name: 'Draw Speed', tag: 'Bow', desc: 'Lighter limbs and a smoother cam. Reach full draw faster so you are never caught half-pulled.', base: 'Full draw in 1.0 s', effects: ['Full draw in 0.9 s', 'Full draw in 0.8 s', 'Full draw in 0.7 s', 'Full draw in 0.6 s'], costs: [100, 160, 240, 340], icon: 'M4 18a8 8 0 1 1 16 0M12 18l4-6' },
+  { id: 'power', cat: 'bow', name: 'Draw Power', tag: 'Bow', desc: 'Heavier draw weight for more damage on a fully drawn shot. Rewards patience over spam.', base: 'Full-draw damage 100', effects: ['Full-draw damage 115', 'Full-draw damage 130', 'Full-draw damage 150', 'Full-draw damage 175'], costs: [120, 190, 280, 400], icon: 'M7 3c8 4 8 14 0 18M7 3v18M7 12h14M18 9l3 3-3 3' },
+  { id: 'quiver', cat: 'bow', name: 'Quiver Size', tag: 'Bow', desc: 'Carry more standard arrows into each wave before you need to scavenge the street.', base: '20 arrows', effects: ['25 arrows', '30 arrows', '36 arrows', '42 arrows'], costs: [80, 130, 200, 290], icon: 'M7 21V8M12 21V5M17 21V8M5 10l2-3 2 3M10 7l2-3 2 3M15 10l2-3 2 3' },
+  { id: 'aim', cat: 'bow', name: 'Steady Aim', tag: 'Bow', desc: 'Less sway while holding a full draw, so long shots across the plaza actually land.', base: 'Normal sway', effects: ['Sway reduced 20%', 'Sway reduced 35%', 'Sway reduced 50%', 'No sway while crouched'], costs: [90, 150, 220, 320], icon: 'M12 3v5M12 16v5M3 12h5M16 12h5M12 8a4 4 0 1 0 0 8a4 4 0 1 0 0-8' },
+  { id: 'recovery', cat: 'bow', name: 'Arrow Recovery', tag: 'Bow', desc: 'Pull spent arrows back into the quiver without walking over every single one.', base: 'Pick up arrows by hand', effects: ['Auto-collect within 2 m', 'Auto-collect within 4 m', 'Auto-collect within 6 m', 'Spent arrows return after 10 s'], costs: [70, 120, 180, 260], icon: 'M4 12a8 8 0 1 0 2.3-5.7M4 4v4h4' },
+
+  { id: 'regen', cat: 'survival', name: 'Slow Regen', tag: 'Survival', desc: 'Health trickles back once you have been out of combat for a while. Kept slow on purpose: it saves runs, it does not make you tanky.', base: '1 HP every 4 s after 6 s out of combat', effects: ['1 HP every 3.5 s', '1 HP every 3 s', '1 HP every 2.5 s'], costs: [150, 240, 360], icon: 'M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10zM12 9v6M9 12h6' },
+  { id: 'maxhp', cat: 'survival', name: 'Max Health', tag: 'Survival', desc: 'Raises your health ceiling so one surprise bite from behind is not the end of the run.', base: '100 HP', effects: ['115 HP', '130 HP', '150 HP'], costs: [120, 200, 300], icon: 'M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z' },
+  { id: 'armor', cat: 'survival', name: 'Armor Plating', tag: 'Survival', desc: 'Lightweight plates under the jacket that soak part of every bite and swipe.', base: 'No armor', effects: ['Blocks 10% of damage', 'Blocks 20% of damage', 'Blocks 30% of damage'], costs: [140, 220, 330], icon: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z' },
+  { id: 'stamina', cat: 'survival', name: 'Sprint Stamina', tag: 'Survival', desc: 'Sprint longer before you are winded. Space is the archer’s best armor.', base: 'Sprint for 5 s', effects: ['Sprint for 6 s', 'Sprint for 7.5 s', 'Sprint for 9 s'], costs: [80, 140, 210], icon: 'M5 6l6 6-6 6M12 6l6 6-6 6' },
+];
+const ARMORY_TABS = [
+  { id: 'arrows', label: 'Arrows', title: 'Special arrows', blurb: 'Unlock an arrow type, upgrade it, and equip up to 3 in your quiver.' },
+  { id: 'bow', label: 'Bow', title: 'Bow upgrades', blurb: 'Permanent tuning for your draw, damage and ammo.' },
+  { id: 'survival', label: 'Survival', title: 'Survival', blurb: 'Stay alive longer without making the waves any easier.' },
+];
+const SPECIAL_AT = { piercer: AT.PIERCE, blast: AT.BLAST, shock: AT.SHOCK, cryo: AT.FROST, splitter: AT.SCATTER, tracer: AT.TRACER };
+const SLOT_COUNT = 3;
+// special arrows topped up at the start of every wave for each equipped type (supply caches and drops add more)
+const ALLOT = { [AT.PIERCE]: 4, [AT.BLAST]: 2, [AT.SHOCK]: 3, [AT.FROST]: 3, [AT.SCATTER]: 4, [AT.TRACER]: 5 };
+
+// ---- what each level actually does in game (index = level; matches the Now / Next copy above) ----
+const UPG = {
+  draw: [1.0, 0.9, 0.8, 0.7, 0.6],          // seconds to full draw
+  power: [1, 1.15, 1.3, 1.5, 1.75],         // full-draw damage multiplier (scales with how far you drew)
+  quiver: [20, 25, 30, 36, 42],             // standard arrows carried into each wave
+  sway: [1, 0.8, 0.65, 0.5, 0.5],           // aim sway at full draw (Lv 4: none while crouched)
+  recover: [1.3, 2, 4, 6, 6],               // pick-up radius in metres (Lv 0 is walking over them)
+  regen: [4, 3.5, 3, 2.5],                  // seconds per HP once out of combat for 6 s
+  maxhp: [100, 115, 130, 150],
+  armor: [0, 0.1, 0.2, 0.3],                // share of incoming damage blocked
+  stamina: [5, 6, 7.5, 9],                  // seconds of sprint
+  pierce: [2, 2, 3, 5],                     // bodies a Piercer passes through
+  blastR: [2, 2, 3, 4],                     // Blast radius in metres (Lv 3 adds knockback)
+  shock: [2, 2, 3, 5],                      // zombies a Shock arc jumps to (Lv 3 stuns 1 s)
+  cryo: [[0.6, 2], [0.6, 2], [0.5, 3], [0, 1.5]],   // [speed left, seconds]; 0 = frozen solid
+  split: [3, 3, 4, 5],                      // bolts a Splitter breaks into (Lv 3: wider spread)
+  tracer: [4, 4, 6, 8],                     // seconds a Tracer mark lasts (Lv 3: the whole group)
+};
+const LOADOUT = { levels: {}, equipped: [] };
+const upLv = (id) => LOADOUT.levels[id] || 0;
+function loadoutReset() { LOADOUT.levels = {}; LOADOUT.equipped = []; AQ.tab = 'arrows'; AQ.sel = 'piercer'; AQ.msg = ''; }
+
+// ---- screen state + design tokens ----
+const AQ = { tab: 'arrows', sel: 'piercer', msg: '', sec: -1, built: false };
+const AQC = { accent: '#38E1F2', glow30: 'rgba(56,225,242,0.30)', glow35: 'rgba(56,225,242,0.35)', glow45: 'rgba(56,225,242,0.45)', tabOn: 'rgb(17,43,55)', line: 'rgba(255,255,255,0.12)', line22: 'rgba(255,255,255,0.22)', dim: '#A3AAC2', gold: '#FFC857', pink: '#FF6FB4' };
+const aqItem = (id) => ARMORY.find((i) => i.id === id);
+const aqPad = (n) => String(n).padStart(2, '0');
+
+function aqDerive(it, selected) {
+  const A = AQC, scrap = GAME.scrap, level = upLv(it.id), max = it.effects.length, maxed = level >= max;
+  const cost = maxed ? 0 : it.costs[level], affordable = !maxed && scrap >= cost, isArrow = it.cat === 'arrows';
+  const equipped = LOADOUT.equipped.includes(it.id);
+  let status = 'Lv ' + level;
+  if (level === 0) status = isArrow ? 'Locked' : 'Base';
+  if (maxed) status = 'Max';
+  if (equipped) status = 'Equipped';
+  return {
+    it, level, max, maxed, cost, affordable, isArrow, equipped, status, selected,
+    pips: it.effects.map((_, i) => i < level),
+    statusColor: maxed || equipped ? A.accent : A.dim,
+    costLabel: maxed ? 'MAXED' : String(cost),
+    costCaption: maxed ? 'Fully upgraded' : (level === 0 && isArrow ? 'Unlock' : 'Next level'),
+    costColor: maxed ? A.accent : (affordable ? A.gold : A.pink),
+    now: level === 0 ? it.base : it.effects[level - 1],
+    next: maxed ? 'Fully upgraded' : it.effects[level],
+  };
+}
+const aqIcon = (d, size, sw) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${AQC.accent}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"></path></svg>`;
+const aqPips = (pips, cls) => pips.map((on) => `<i class="${cls}${on ? ' on' : ''}"></i>`).join('');
+
+function armoryRender() {
+  const A = AQC, s = AQ, all = ARMORY;
+  const $a = (id) => document.getElementById(id);
+  const focusAct = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.act : null;
+  // header
+  $a('aqWave').textContent = `WAVE ${aqPad(GAME.wave)} CLEARED`;
+  $a('aqStartLbl').textContent = `Start wave ${aqPad(GAME.wave + 1)}`;
+  $a('aqScrap').textContent = String(GAME.scrap);
+  // tabs
+  $a('aqTabs').innerHTML = ARMORY_TABS.map((t) => {
+    const on = t.id === s.tab;
+    return `<button type="button" class="aq-tab${on ? ' on' : ''}" data-act="tab:${t.id}" aria-pressed="${on}"><span>${t.label}</span><span class="aq-tabn">${all.filter((i) => i.cat === t.id).length}</span></button>`;
+  }).join('');
+  const tab = ARMORY_TABS.find((t) => t.id === s.tab);
+  $a('aqTabTitle').textContent = tab.title; $a('aqTabBlurb').textContent = tab.blurb;
+  // cards
+  $a('aqGrid').innerHTML = all.filter((i) => i.cat === s.tab).map((i) => {
+    const d = aqDerive(i, i.id === s.sel);
+    return `<button type="button" class="aq-card${d.selected ? ' on' : ''}" data-act="item:${i.id}" aria-pressed="${d.selected}">
+      <div class="aq-cardtop"><div class="aq-ico">${aqIcon(i.icon, 34, 1.6)}</div><div class="aq-status" style="color:${d.statusColor}">${d.status}</div></div>
+      <div class="aq-cname">${i.name}</div>
+      <div class="aq-pips">${aqPips(d.pips, 'aq-pip')}</div>
+      <div class="aq-costrow"><div class="aq-cap">${d.costCaption}</div><div class="aq-cost" style="color:${d.costColor}">${d.costLabel}</div></div>
+    </button>`;
+  }).join('');
+  // loadout slots
+  let slots = '';
+  for (let n = 0; n < SLOT_COUNT; n++) {
+    const id = LOADOUT.equipped[n], it = id ? aqItem(id) : null;
+    const lab = it ? `Slot ${n + 1}: ${it.name}. Select to view` : `Slot ${n + 1}: empty. Browse arrows`;
+    slots += `<button type="button" class="aq-slot${it ? '' : ' empty'}${it && id === s.sel ? ' on' : ''}" data-act="slot:${n}" aria-label="${lab}">
+      <div class="aq-key">${n + 1}</div>
+      ${it ? `${aqIcon(it.icon, 32, 1.6)}<div class="aq-slottx"><div class="aq-slotname">${it.name}</div><div class="aq-slotlv">Lv ${upLv(id)} / ${it.effects.length}</div></div>` : '<div class="aq-slotempty">Empty slot</div>'}
+    </button>`;
+  }
+  $a('aqSlots').innerHTML = slots;
+  $a('aqSlotsUsed').textContent = `${LOADOUT.equipped.length} / ${SLOT_COUNT} special · standard arrows always equipped`;
+  // detail panel
+  const d = aqDerive(aqItem(s.sel) || all.find((i) => i.cat === s.tab), true), it = d.it;
+  const cant = d.maxed || !d.affordable;
+  const buyLabel = d.maxed ? 'Fully upgraded' : !d.affordable ? `Need ${d.cost - GAME.scrap} more scrap` : `${d.level === 0 && d.isArrow ? 'Unlock' : 'Upgrade'} · ${d.cost} scrap`;
+  $a('aqDetail').innerHTML = `
+    <div class="aq-dhead"><div class="aq-dico">${aqIcon(it.icon, 64, 1.4)}</div><div class="aq-dtitle"><div class="aq-dtag">${it.tag}</div><div class="aq-dname">${it.name}</div></div></div>
+    <p class="aq-ddesc">${it.desc}</p>
+    <div class="aq-dlevel"><div class="aq-dlvrow"><span>LEVEL</span><span>${d.level} / ${d.max}</span></div><div class="aq-dpips">${aqPips(d.pips, 'aq-dpip')}</div></div>
+    <div class="aq-nn"><div class="aq-nnbox"><div class="aq-nnlbl">NOW</div><div class="aq-nntx">${d.now}</div></div><div class="aq-nnbox${d.maxed ? '' : ' next'}"><div class="aq-nnlbl next">NEXT</div><div class="aq-nntx">${d.next}</div></div></div>
+    <div class="aq-spacer"></div>
+    ${s.msg ? `<div role="status" class="aq-msg">${s.msg}</div>` : ''}
+    ${d.isArrow && d.level > 0 ? `<button type="button" class="aq-equip" data-act="equip">${d.equipped ? 'Remove from quiver' : 'Equip to quiver'}</button>` : ''}
+    <button type="button" class="aq-buy${cant ? ' off' : ''}" data-act="buy"${cant ? ' disabled' : ''}>${buyLabel}</button>`;
+  // keep keyboard focus on the control that was used
+  if (focusAct) { const el = document.querySelector(`#aqStage [data-act="${focusAct}"]`); if (el && !el.disabled) el.focus({ preventScroll: true }); else if (focusAct === 'buy') { const e2 = document.querySelector('#aqStage [data-act="item:' + s.sel + '"]'); if (e2) e2.focus({ preventScroll: true }); } }
+}
+
+// countdown: touch the DOM only when the shown second changes
+function armoryTick() {
+  const left = Math.max(0, Math.ceil(GAME.interT));
+  if (left === AQ.sec) return; AQ.sec = left;
+  const el = document.getElementById('aqTimer');
+  el.textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
+  el.style.color = left <= 10 ? AQC.pink : '#EEF1F8';
+}
+// the board is laid out at 1920×1080 and scaled (one transform, no relayout) to fit any window
+function armoryFit() {
+  const scr = document.getElementById('scr-shop'), st = document.getElementById('aqStage');
+  const W = scr.clientWidth || innerWidth, H = scr.clientHeight || innerHeight, k = Math.min(W / 1920, H / 1080);
+  const tx = (W - 1920 * k) / 2, ty = (H - 1080 * k) / 2;
+  st.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`;
+  scr.style.backgroundSize = `${48 * k}px ${48 * k}px`; scr.style.backgroundPosition = `${tx}px ${ty}px`;
+}
+function armoryOpen() {
+  if (!aqItem(AQ.sel)) AQ.sel = 'piercer';
+  AQ.msg = ''; AQ.sec = -1;
+  armoryFit(); armoryRender(); armoryTick();
+}
+
+// ---- actions ----
+function armoryPickTab(id) { const first = ARMORY.find((i) => i.cat === id); AQ.tab = id; AQ.sel = first.id; AQ.msg = ''; AUD.click(); armoryRender(); }
+function armoryPick(id) { AQ.sel = id; AQ.msg = ''; AUD.click(); armoryRender(); }
+function armoryBuy() {
+  const it = aqItem(AQ.sel), d = aqDerive(it, true);
+  if (d.maxed || !d.affordable) { AUD.deny(); return false; }
+  const P = PLAYER, hp0 = P.maxHp, q0 = P.quiverMax, st0 = P.stamMax;
+  GAME.scrap -= d.cost; LOADOUT.levels[it.id] = d.level + 1;
+  let msg = it.name + ' upgraded to level ' + (d.level + 1);
+  if (d.level === 0 && d.isArrow) {
+    const t = SPECIAL_AT[it.id]; P.ammo[t] = Math.max(P.ammo[t], ALLOT[t]);
+    if (LOADOUT.equipped.length < SLOT_COUNT) { LOADOUT.equipped.push(it.id); msg = it.name + ' unlocked and equipped'; }
+    else msg = it.name + ' unlocked. Quiver is full: remove an arrow to equip it.';
+  }
+  // new ceilings take effect now: the extra health, arrows and stamina come with them
+  applyUpgrades();
+  P.hp = Math.min(P.maxHp, P.hp + (P.maxHp - hp0)); P.ammo[0] += P.quiverMax - q0; P.stam += P.stamMax - st0;
+  AQ.msg = msg; AUD.buy(); hudScore(); loadoutChanged(); armoryRender();
+  return true;
+}
+function armoryToggleEquip() {
+  const id = AQ.sel, it = aqItem(id), eq = LOADOUT.equipped;
+  if (!it || it.cat !== 'arrows') return;
+  if (eq.includes(id)) { LOADOUT.equipped = eq.filter((x) => x !== id); AQ.msg = it.name + ' removed from quiver'; AUD.swap(); }
+  else if (upLv(id) === 0) return;
+  else if (eq.length >= SLOT_COUNT) { AQ.msg = 'Quiver is full: remove an arrow first'; AUD.deny(); }
+  else { LOADOUT.equipped = [...eq, id]; AQ.msg = it.name + ' equipped'; AUD.swap(); }
+  loadoutChanged(); armoryRender();
+}
+function armorySlot(n) {
+  const id = LOADOUT.equipped[n];
+  AQ.tab = 'arrows'; if (id) AQ.sel = id; else if (aqItem(AQ.sel).cat !== 'arrows') AQ.sel = 'piercer';
+  AQ.msg = ''; AUD.click(); armoryRender();
+}
+// a slot's arrow left the quiver: never keep a bow nocked with something you can't fire
+function loadoutChanged() {
+  if (!arrowAvailable(BOW.type)) { BOW.type = firstLoaded(); BOW.nextType = -1; }
+  if (BOW.nextType >= 0 && !arrowAvailable(BOW.nextType)) BOW.nextType = -1;
+  if (!arrowAvailable(GAME.lastType)) GAME.lastType = 0;
+  updateQuiverHUD();
+}
+function armoryWire() {
+  const st = document.getElementById('aqStage');
+  st.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]'); if (!b || b.disabled || GAME.state !== 'shop') return;
+    const [act, arg] = b.dataset.act.split(':');
+    if (act === 'tab') armoryPickTab(arg);
+    else if (act === 'item') armoryPick(arg);
+    else if (act === 'slot') armorySlot(+arg);
+    else if (act === 'buy') armoryBuy();
+    else if (act === 'equip') armoryToggleEquip();
+  });
+  document.getElementById('aqStart').addEventListener('click', () => { if (GAME.state !== 'shop') return; AUD.click(); GAME.startNow(); });
+  addEventListener('resize', () => { if (GAME.state === 'shop') armoryFit(); });
+}
+
+/* ============================================================
    Game: player, arrows, waves, shop, HUD, render loop
    ============================================================ */
 /* ---------------- draw lists ---------------- */
@@ -7161,28 +7544,49 @@ if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
 /* ---------------- player ---------------- */
-const REGEN = { delay: 6, rate: 2.5, cap: 0.5 };
-const INTERMISSION = 25;   // seconds between waves (visible countdown; N starts the next wave early)
+const REGEN = { delay: 6 };   // out of combat = 6 s without taking a hit; the rate (1 HP every 4 s at base) comes from the armory
+const INTERMISSION = 45;      // seconds between waves, shown in the Armory and the HUD (Start wave / N skips it)
+const EYE = 1.62, CROUCH_DROP = 0.55;
+function newAmmo() { const a = ARROWS.map(() => 0); a[0] = 20; return a; }
 const PLAYER = {
   x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0, roll: 0, grounded: true,
-  hp: 100, maxHp: 100, speedMult: 1, drawTime: 0.62, reloadTime: 0.62, dmgMult: 1, ammo: [Infinity, 4, 2, 4, 2, 2, 3],
+  hp: 100, maxHp: 100, speedMult: 1, drawTime: 1, reloadTime: 0.62, dmgMult: 1, powerMult: 1, armor: 0, quiverMax: 20, regenInt: 4, swayK: 1, recoverR: 1.3,
+  stam: 5, stamMax: 5, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0, ammo: newAmmo(),
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
-  up: { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 },
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
+    d *= 1 - this.armor;   // Armor Plating
     this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
     const ang = Math.atan2(fx - this.x, fz - this.z); this.hurtDirs.push({ ang, t: 1.2 });
     if (this.hp <= 0) { this.hp = 0; GAME.gameOver(); }
   },
 };
+// armory levels -> live player numbers (tables in armory.js: UPG)
 function applyUpgrades() {
-  const u = PLAYER.up;
-  PLAYER.drawTime = 0.62 * Math.pow(0.86, u.draw);
-  PLAYER.dmgMult = 1 + 0.16 * u.dmg;
-  PLAYER.maxHp = 100 + 25 * u.hp;
-  PLAYER.reloadTime = 0.62 * Math.pow(0.84, u.reload);
-  PLAYER.speedMult = 1 + 0.08 * u.speed;
+  const P = PLAYER;
+  P.drawTime = UPG.draw[upLv('drawspeed')]; P.powerMult = UPG.power[upLv('power')]; P.quiverMax = UPG.quiver[upLv('quiver')];
+  P.swayK = UPG.sway[upLv('aim')]; P.recoverR = UPG.recover[upLv('recovery')];
+  P.regenInt = UPG.regen[upLv('regen')]; P.maxHp = UPG.maxhp[upLv('maxhp')]; P.armor = UPG.armor[upLv('armor')]; P.stamMax = UPG.stamina[upLv('stamina')];
+}
+/* ---------------- quiver: standard + up to 3 equipped specials ---------------- */
+function arrowAvailable(t) { return t === 0 || LOADOUT.equipped.some((id) => SPECIAL_AT[id] === t); }
+function availTypes() { const a = [0]; for (const id of LOADOUT.equipped) a.push(SPECIAL_AT[id]); return a; }
+function slotType(n) { const id = LOADOUT.equipped[n]; return id ? SPECIAL_AT[id] : -1; }
+function firstLoaded() { for (const t of availTypes()) if (PLAYER.ammo[t] > 0) return t; return 0; }
+let _oooT = -9;
+function outOfArrows() { AUD.deny(); flashQuiver(0); if (GAME.time - _oooT > 2.5) { _oooT = GAME.time; GAME.toast('OUT OF ARROWS · PICK UP SPENT ONES', '#ff6fb4'); } }
+// every wave starts with a full quiver of standard arrows and each equipped special topped up to its allotment
+function refillForWave() {
+  const P = PLAYER; P.ammo[0] = Math.max(P.ammo[0], P.quiverMax);
+  for (const t of availTypes()) if (t) P.ammo[t] = Math.max(P.ammo[t], ALLOT[t]);
+  updateQuiverHUD();
+}
+// supply caches (world.js)
+function supplyRefill() {
+  const P = PLAYER; P.ammo[0] = Math.min(P.quiverMax, P.ammo[0] + 10);
+  for (const t of availTypes()) if (t) P.ammo[t] += Math.ceil(ALLOT[t] / 2);
+  P.hp = Math.min(P.maxHp, P.hp + 15); updateQuiverHUD();
 }
 
 /* ---------------- input ---------------- */
@@ -7191,7 +7595,8 @@ const gameEl = document.getElementById('game');
 addEventListener('keydown', (e) => {
   const k = e.code; INPUT.keys[k] = true;
   if (GAME.state === 'playing') {
-    const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
+    const dn = /^Digit([1-3])$/.exec(k); if (dn) selectSlot(+dn[1] - 1);
+    if (k === 'Backquote') selectArrow(0);
     if (k === 'KeyX') selectArrow(GAME.lastType);
     // grapple: hold Q to preview the anchor and fall risk, release to fire; Q while reeling cuts the rope
     if (k === 'KeyQ' && !e.repeat) { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }
@@ -7200,6 +7605,7 @@ addEventListener('keydown', (e) => {
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
     if (k === 'KeyN' && GAME.intermission) { GAME.interT = 0; }
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
+  else if (GAME.state === 'shop' && k === 'Escape') { e.preventDefault(); GAME.closeShop(); }   // back to the street; the countdown keeps running
 });
 addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
 addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
@@ -7208,12 +7614,17 @@ gameEl.addEventListener('mousedown', (e) => {
   if (GAME.state !== 'playing') return;
   if (!INPUT.locked && !INPUT.freeLook) { requestLock(); return; }
   if (INPUT.freeLook && !INPUT.locked) requestLock(true);
-  if (e.button === 0) { INPUT.mouseDown = true; bowStartDraw(); }
+  if (e.button === 0) { INPUT.mouseDown = true; if (BOW.state === 'ready' && PLAYER.ammo[BOW.type] <= 0) { const t = firstLoaded(); if (t !== BOW.type && PLAYER.ammo[t] > 0) { selectArrow(t); return; } } bowStartDraw(); }
   if (e.button === 2) { bowCancel(); }
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) { INPUT.mouseDown = false; if (GAME.state === 'playing') { const p = bowRelease(); if (p) fireArrow(p); } } });
 gameEl.addEventListener('contextmenu', (e) => e.preventDefault());
-addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; const NA = ARROWS.length; for (let i = 0; i < NA; i++) { t = (t + dir + NA) % NA; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
+addEventListener('wheel', (e) => {
+  if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1, L = availTypes(), N = L.length;
+  let i = Math.max(0, L.indexOf(BOW.nextType >= 0 ? BOW.nextType : BOW.type));
+  for (let k = 0; k < N; k++) { i = (i + dir + N) % N; if (PLAYER.ammo[L[i]] > 0) break; }
+  selectArrow(L[i]);
+}, { passive: true });
 function requestLock(quiet) {
   try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { INPUT.freeLook = true; }); } catch (e) { INPUT.freeLook = true; }
   if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 1500);
@@ -7224,42 +7635,103 @@ document.addEventListener('pointerlockchange', () => {
   if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
-  if (t < 0 || t >= ARROWS.length) return;
-  if (t !== 0 && PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
+  if (t < 0 || t >= ARROWS.length || !arrowAvailable(t)) return;
+  if (PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
   const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (cur === t) return;
   GAME.lastType = cur; bowSwap(t);
+}
+// keys 1–3: the special in that loadout slot; pressing the active slot again goes back to standard arrows
+function selectSlot(n) {
+  const t = slotType(n); if (t < 0) { AUD.deny(); flashQuiver('e' + n); return; }
+  const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type;
+  selectArrow(cur === t ? 0 : t);
 }
 
 /* ---------------- projectiles ---------------- */
 const PROJ = [];
 const GRAV = 9.5;
 const _cf = [0, 0, 0], _cr = [0, 0, 0], _cu = [0, 0, 0];
-function camBasis() {
-  const cy = Math.cos(PLAYER.yaw), sy = Math.sin(PLAYER.yaw), cp = Math.cos(PLAYER.pitch), sp = Math.sin(PLAYER.pitch);
+function camBasis(swX = 0, swY = 0) {
+  const yaw = PLAYER.yaw + swX, pitch = PLAYER.pitch + swY;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
   _cf[0] = -sy * cp; _cf[1] = sp; _cf[2] = -cy * cp; _cr[0] = cy; _cr[1] = 0; _cr[2] = -sy; _cu[0] = sy * sp; _cu[1] = cp; _cu[2] = cy * sp;
 }
 function fireArrow(power) {
   const type = BOW.type, A = ARROWS[type];
-  if (type !== 0) { PLAYER.ammo[type]--; }
-  camBasis();
-  const eye = [PLAYER.x, PLAYER.y + 1.62 - (PLAYER.sink || 0), PLAYER.z];
+  if (PLAYER.ammo[type] <= 0) return;
+  PLAYER.ammo[type]--;
+  camBasis(PLAYER.swayX, PLAYER.swayY);   // the arrow goes where the swaying crosshair is
+  const eye = [PLAYER.x, PLAYER.y + PLAYER.eyeH - (PLAYER.sink || 0), PLAYER.z];
   const spd = (40 + 64 * power) * A.speed;
-  // tiny spread when not fully drawn
-  const spr = (1 - power) * 0.012 + (BOW.hold > 2.2 ? 0.004 : 0);
-  const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr;
-  const n = type === AT.SCATTER ? 6 : 1, cone = type === AT.SCATTER ? 0.08 : 0;
-  for (let s = 0; s < n; s++) {
-    const jx = dx + (Math.random() - 0.5) * cone * 2, jy = dy + (Math.random() - 0.5) * cone * 1.4, jz = dz + (Math.random() - 0.5) * cone * 2, jl = Math.hypot(jx, jy, jz);
-    PROJ.push({
-      x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
-      vx: jx / jl * spd, vy: jy / jl * spd, vz: jz / jl * spd, type, power, pierce: type === 3 ? 5 : 0, hits: [], age: 0, stuck: false, stuckT: 0, dir: [jx / jl, jy / jl, jz / jl], stuckZ: null,
-      life: type === AT.SCATTER ? 0.24 : 6,   // scatter shards burn out after ~20 m
-    });
-  }
+  const spr = (1 - power) * 0.012;   // tiny spread when not fully drawn
+  const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr, jl = Math.hypot(dx, dy, dz);
+  const a = {
+    x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
+    vx: dx / jl * spd, vy: dy / jl * spd, vz: dz / jl * spd, type, power, hits: [], age: 0, stuck: false, stuckT: 0, dir: [dx / jl, dy / jl, dz / jl], stuckZ: null, life: 6,
+    pierce: type === AT.PIERCE ? UPG.pierce[upLv('piercer')] : 0,
+    split: type === AT.SCATTER ? UPG.split[upLv('splitter')] : 0, tok: null,
+  };
+  if (type === 0) a.tok = recToken(a);   // standard arrows can be picked up again
+  PROJ.push(a);
   AUD.release(power, type); shake(0.04 + power * 0.05);
   GAME.shots++;
-  if (type !== 0 && PLAYER.ammo[type] <= 0) { GAME.lastType = 0; BOW.nextType = 0; }
+  if (PLAYER.ammo[type] <= 0) { const nx = firstLoaded(); if (nx !== type && PLAYER.ammo[nx] > 0) BOW.nextType = nx; }
   updateQuiverHUD();
+}
+// Splitter: one arrow leaves the bow and breaks into a fan of bolts ~4 m out
+function splitArrow(a) {
+  const n = a.split, wide = upLv('splitter') >= 3, cone = wide ? 0.085 : 0.05, sp = Math.hypot(a.vx, a.vy, a.vz), d = a.dir;
+  const rl = Math.hypot(d[0], d[2]) || 1, rx = -d[2] / rl, rz = d[0] / rl;
+  for (let k = 0; k < n; k++) {
+    const off = (n === 1 ? 0 : (k / (n - 1) - 0.5) * 2) * cone + rand(-0.008, 0.008), up = rand(-0.3, 0.3) * cone;
+    const jx = d[0] + rx * off, jy = d[1] + up, jz = d[2] + rz * off, jl = Math.hypot(jx, jy, jz);
+    PROJ.push({ x: a.x, y: a.y, z: a.z, vx: jx / jl * sp, vy: jy / jl * sp, vz: jz / jl * sp, type: AT.SCATTER, power: a.power, hits: [], age: 0, stuck: false, stuckT: 0, dir: [jx / jl, jy / jl, jz / jl], stuckZ: null, life: 1.2, pierce: 0, split: 0, tok: null });
+  }
+  burst(a.x, a.y, a.z, 10, ARROWS[AT.SCATTER].glow, 3, 0.2, 0.04, 0, 2);
+}
+// level-aware special effects (armory.js UPG); a locked arrow never reaches these, but Lv 1 is the floor anyway
+function arrowDamage(a, A) { return 52 * (0.3 + 0.7 * a.power) * A.dmg * (1 + (PLAYER.powerMult - 1) * a.power) * PLAYER.dmgMult; }
+function blastAt(x, y, z) { const L = Math.max(1, upLv('blast')); explode(x, y, z, UPG.blastR[L], L >= 3); }
+function cryoAt(x, y, z, t) { const c = UPG.cryo[Math.max(1, upLv('cryo'))]; cryoHit(x, y, z, t, c[0], c[1]); }
+function shockAt(x, y, z, t, dmg) { const L = Math.max(1, upLv('shock')); shockChain(x, y, z, t, UPG.shock[L], Math.max(14, dmg * 0.45), L >= 3 ? 1 : 0); }
+function tracerAt(x, z, t) { const L = Math.max(1, upLv('tracer')); tracerMark(x, z, t, UPG.tracer[L], L >= 3 ? 10 : 1.5); }
+
+/* ---------------- arrow recovery ---------------- */
+// one token per standard arrow fired, oldest first. Picking an arrow up spends its token; at Arrow Recovery Lv 4
+// any token still unspent after 10 s brings that arrow home on its own.
+const RECQ = [];
+function recToken(proj) { const k = { t: GAME.time, done: false, proj, z: null }; RECQ.push(k); return k; }
+function dropZombieArrow(z) { const i = z.stuck.findIndex((sa) => sa.type === 0); if (i >= 0) z.stuck.splice(i, 1); }
+function updateRecovery() {
+  const P = PLAYER; let got = 0, back = 0;
+  if (P.ammo[0] < P.quiverMax) {
+    const r = P.recoverR, r2 = r * r, top = r > 1.5 ? 4 : 2.6;
+    for (let i = PROJ.length - 1; i >= 0 && P.ammo[0] + got < P.quiverMax; i--) {
+      const a = PROJ[i]; if (!a.stuck || !a.tok || a.tok.done) continue;
+      const dx = a.x - P.x, dz = a.z - P.z, dy = a.y - P.y; if (dx * dx + dz * dz > r2 || dy < -1 || dy > top) continue;
+      a.tok.done = true; PROJ.splice(i, 1); got++;
+    }
+    const rc = r + 0.6;
+    for (const z of ZOMBIES) {
+      if (!z.dead || !z.quiver || P.ammo[0] + got >= P.quiverMax) continue;
+      if ((z.x - P.x) ** 2 + (z.z - P.z) ** 2 > rc * rc) continue;
+      const n = Math.min(z.quiver, P.quiverMax - P.ammo[0] - got);
+      for (let k = 0; k < n; k++) { const t = z.toks && z.toks.pop(); if (t) t.done = true; dropZombieArrow(z); }
+      z.quiver -= n; got += n;
+    }
+  }
+  const ret = upLv('recovery') >= 4;
+  while (RECQ.length && (RECQ[0].done || GAME.time - RECQ[0].t >= 10)) {
+    const k = RECQ.shift(); if (k.done || !ret) continue;   // below Lv 4 it simply stays where it fell
+    if (P.ammo[0] + got + back >= P.quiverMax) { k.t = GAME.time; RECQ.push(k); break; }   // quiver full: try again later
+    k.done = true; back++;
+    if (k.z) { k.z.quiver = Math.max(0, k.z.quiver - 1); const j = k.z.toks ? k.z.toks.indexOf(k) : -1; if (j >= 0) k.z.toks.splice(j, 1); dropZombieArrow(k.z); }
+    else if (k.proj) { const j = PROJ.indexOf(k.proj); if (j >= 0) PROJ.splice(j, 1); }
+  }
+  if (got || back) {
+    P.ammo[0] += got + back; AUD.quiver(); updateQuiverHUD();
+    GAME.toast(got && back ? `+${got + back} ARROWS` : got ? `+${got} ARROW${got > 1 ? 'S' : ''}` : `+${back} ARROW${back > 1 ? 'S' : ''} RETURNED`, '#dff3ff');
+  }
 }
 const _seg0 = [0, 0, 0], _seg1 = [0, 0, 0], _so = { s: 0 };
 const _trailC = [0, 0, 0];
@@ -7267,8 +7739,9 @@ const LEG_SEGS = ['hipL', 'knL', 'knL', 'ftL', 'hipR', 'knR', 'knR', 'ftR'];
 function updateProjectiles(dt) {
   for (let i = PROJ.length - 1; i >= 0; i--) {
     const a = PROJ[i];
-    if (a.stuck) { a.stuckT += dt; if (a.stuckT > 14 || (a.stuckZ && a.stuckZ.dead && a.stuckZ.dieT > 4)) PROJ.splice(i, 1); continue; }
+    if (a.stuck) { a.stuckT += dt; if (a.stuckT > (a.tok ? 40 : 14) || (a.stuckZ && a.stuckZ.dead && a.stuckZ.dieT > 4)) PROJ.splice(i, 1); continue; }
     a.age += dt; if (a.age > (a.life || 6)) { PROJ.splice(i, 1); continue; }
+    if (a.split && a.age > 0.04) { splitArrow(a); PROJ.splice(i, 1); continue; }
     _seg0[0] = a.x; _seg0[1] = a.y; _seg0[2] = a.z;
     a.vy -= GRAV * dt * (a.type === 3 ? 0.35 : 1);
     const nx = a.x + a.vx * dt, ny = a.y + a.vy * dt, nz = a.z + a.vz * dt;
@@ -7315,13 +7788,13 @@ function updateProjectiles(dt) {
     if (!hitKind) { a.x = nx; a.y = ny; a.z = nz; continue; }
     const hx = a.x + (nx - a.x) * best, hy = a.y + (ny - a.y) * best, hz = a.z + (nz - a.z) * best;
     if (hitKind === 'n') {
-      objNestDamage(52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
-      if (a.type === 2) explode(hx, hy, hz); else if (a.type === AT.FROST) frostBurst(hx, hy, hz);
+      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
+      if (a.type === AT.BLAST) blastAt(hx, hy, hz); else if (a.type === AT.FROST) cryoAt(hx, hy, hz, null); else if (a.type === AT.SHOCK) shockAt(hx, hy, hz, null, nd); else if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       PROJ.splice(i, 1); continue;
     }
     if (hitKind === 'z') {
       const z = hitZ; a.hits.push(z);
-      const dmgBase = 52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult;
+      const dmgBase = arrowDamage(a, A);
       const mult = hitPart === 'head' ? (z.type === 'boss' ? 1.8 : 2.6) : hitPart === 'core' ? 2.2 : 1;
       const dmg = dmgBase * mult;
       const dir = a.dir.slice();
@@ -7331,6 +7804,7 @@ function updateProjectiles(dt) {
       GAME.hits++;
       // stick arrow into zombie (not rail)
       if (a.type !== 3 && a.type !== 2 && a.type !== AT.SCATTER && a.type !== AT.FROST && z.stuck.length < 8 && hitPart !== 'legs') { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
+      if (a.tok) { a.tok.proj = null; a.tok.z = z; z.quiver++; (z.toks || (z.toks = [])).push(a.tok); a.tok = null; }   // carried until it drops
       const killed = damageZombie(z, dmg, hitPart, [hx, hy, hz], dir, a.type, a.power);
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
@@ -7338,9 +7812,11 @@ function updateProjectiles(dt) {
       AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
       if (killed) { GAME.hitMarker(true, true); }
       if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
-      if (a.type === AT.FROST) { frostBurst(hx, hy, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
       if (a.type === AT.TETHER) { tetherFrom(z, hx, hy, hz); }
-      if (a.type === 2) { explode(hx, hy, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.SHOCK) { shockAt(hx, hy, hz, z, dmg); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.TRACER) { tracerAt(hx, hz, z); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.BLAST) { blastAt(hx, hy, hz); PROJ.splice(i, 1); continue; }
       if (a.type === 3 && a.pierce > 0) { a.pierce--; a.x = hx + a.dir[0] * 0.05; a.y = hy + a.dir[1] * 0.05; a.z = hz + a.dir[2] * 0.05; continue; }
       PROJ.splice(i, 1); continue; // arrow now drawn as stuck on zombie
     } else {
@@ -7348,12 +7824,15 @@ function updateProjectiles(dt) {
       a.stuck = true; a.stuckT = 0;
       hazArrowHit(hx, hy, hz, a.type);
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
-      if (a.type === 2) { explode(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
-      if (a.type === AT.FROST) { frostBurst(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.BLAST) { blastAt(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.FROST) { cryoAt(hx, hy + 0.2, hz, null); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.SHOCK) shockAt(hx, hy + 0.2, hz, null, arrowDamage(a, A));
+      if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
       if (a.type === 1) { FIRES.push({ x: hx, z: hz, t: 4.5 }); AUD.fireIgnite(); }
       AUD.thunk();
-      if (PROJ.filter(p => p.stuck).length > 45) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
+      let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
+      if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
     }
   }
 }
@@ -7400,21 +7879,24 @@ function updateFires(dt) {
     for (const z of zombieCandidates(f.x - 1.8, f.x + 1.8, f.z - 1.8, f.z + 1.8)) if (!z.dead && Math.hypot(z.x - f.x, z.z - f.z) < 1.8) z.burn = Math.max(z.burn, 2);
   }
 }
-function explode(x, y, z) {
-  const R = 6;
+// R: damage radius (Blast Arrow 2–4 m by level; tanks, the nest and the Warden's death use the full 6 m). knock: hard shove for survivors
+function explode(x, y, z, R = 6, knock = true) {
+  const q = clamp(R / 6, 0.35, 1);   // smaller blasts spend fewer particles
   objBlast(x, y, z, R, 160 * PLAYER.dmgMult);
-  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z)); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9));
-  flashLight(x, y + 1, z, [6, 1.2, 5.5], 26, 0.55);
-  burst(x, y, z, 120, [2.8, 0.5, 2.6], 14, 0.7, 0.3, 2, 2.5);
-  burst(x, y, z, 60, [3, 2.2, 3], 8, 0.35, 0.45, 0, 4);
-  burst(x, y, z, 50, [0.25, 0.18, 0.3], 5, 1.6, 0.9, -0.5, 1.2, 1);
-  for (let k = 0; k < 48; k++) { const a = k / 48 * TAU; emit(x, Math.max(0.2, y * 0.3), z, Math.cos(a) * 18, 0.3, Math.sin(a) * 18, 0.4, [2.5, 0.6, 2.4], 0.3, 0, 4); }
+  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z) + (1 - q) * 14); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9) * (0.5 + 0.5 * q));
+  flashLight(x, y + 1, z, [6, 1.2, 5.5], 26 * (0.4 + 0.6 * q), 0.55);
+  burst(x, y, z, Math.round(120 * q), [2.8, 0.5, 2.6], 14 * q, 0.7, 0.3, 2, 2.5);
+  burst(x, y, z, Math.round(60 * q), [3, 2.2, 3], 8 * q, 0.35, 0.45, 0, 4);
+  burst(x, y, z, Math.round(50 * q), [0.25, 0.18, 0.3], 5, 1.6, 0.9, -0.5, 1.2, 1);
+  const ring = Math.round(48 * q); for (let k = 0; k < ring; k++) { const a = k / ring * TAU; emit(x, Math.max(0.2, y * 0.3), z, Math.cos(a) * 18 * q, 0.3, Math.sin(a) * 18 * q, 0.4, [2.5, 0.6, 2.4], 0.3, 0, 4); }
   for (const zz of zombieCandidates(x - R * 1.4, x + R * 1.4, z - R * 1.4, z + R * 1.4)) {
     if (zz.dead) continue; const d = Math.hypot(zz.x - x, (zz.y + 1) - y, zz.z - z);
     if (d < R * (zz.type === 'boss' ? 1.4 : 1)) { const k = 1 - d / (R * 1.4); const dir = [(zz.x - x) / (d || 1), 0, (zz.z - z) / (d || 1)];
-      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
+      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true);
+      if (!killed) { const kb = knock ? 12 : 3; zz.vx += dir[0] * kb * k; zz.vz += dir[2] * kb * k; if (knock && zz.type !== 'boss') zz.stumble = Math.max(zz.stumble, 0.8); }
+      GAME.hitMarker(false, killed); }
   }
-  const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < 3.2 && GAME.state === 'playing') PLAYER.hurt(8, x, z);
+  const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < Math.min(3.2, R * 0.6) && GAME.state === 'playing') PLAYER.hurt(8, x, z);
   hazBlast(x, z, R, y);   // fuel tanks in reach go up too
 }
 
@@ -7422,8 +7904,9 @@ function explode(x, y, z) {
 const PICKUPS = [];
 function dropPickup(x, z, forceType) {
   const r = Math.random();
-  let kind = forceType || (r < 0.55 ? 'ammo' : 'health');
-  const at = kind === 'ammo' ? pick([1, 1, 2, 3, 3, 4, 5, 6, 6]) : 0;
+  const kind = forceType || (r < 0.55 ? 'ammo' : 'health');
+  // arrow drops: standard arrows, or one of the specials you have equipped
+  const sp = availTypes().slice(1), at = kind === 'ammo' && sp.length && Math.random() < 0.45 ? pick(sp) : 0;
   PICKUPS.push({ x, z, kind, at, t: 0 });
 }
 function updatePickups(dt) {
@@ -7432,7 +7915,8 @@ function updatePickups(dt) {
     if (p.t > 25) { PICKUPS.splice(i, 1); continue; }
     if (GAME.state === 'playing' && Math.hypot(p.x - PLAYER.x, p.z - PLAYER.z) < 1.7) {
       if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; const h = Math.round(Math.max(25, PLAYER.maxHp * 0.25)); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + h); AUD.heal(); GAME.toast(`+${h} HEALTH`, '#6dff9a'); }
-      else { const n = p.at === 2 || p.at === AT.FROST || p.at === AT.TETHER ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
+      else if (p.at === 0) { const n = Math.min(6, PLAYER.quiverMax - PLAYER.ammo[0]); if (n <= 0) continue; PLAYER.ammo[0] += n; AUD.pickup(); GAME.toast(`+${n} ARROWS`, '#dff3ff'); updateQuiverHUD(); }
+      else { const n = p.at === AT.BLAST || p.at === AT.FROST || p.at === AT.SHOCK ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
       burst(p.x, 1, p.z, 30, p.kind === 'health' ? [0.4, 2.4, 0.9] : ARROWS[p.at].glow, 4, 0.5, 0.08, 0, 2);
       PICKUPS.splice(i, 1);
     }
@@ -7463,15 +7947,17 @@ function drawProjectiles() {
 
 /* ---------------- game state ---------------- */
 const GAME = {
-  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, cash: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
+  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
   best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
-    for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
+    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
+    loadoutReset(); RECQ.length = 0; ARCS.length = 0; this.lastType = 0;
     ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
+    applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0;
+    PLAYER.ammo = newAmmo(); PLAYER.ammo[0] = PLAYER.quiverMax; Object.assign(PLAYER, { stam: PLAYER.stamMax, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0 });
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     objReset(); wxReset(); hazReset(); PLAYER.sink = 0;
@@ -7479,8 +7965,9 @@ const GAME = {
   },
   startWave() {
     if (this.state !== 'playing') return;
-    this.intermission = false; this.clearedShown = false;
+    this.intermission = false; this.clearedShown = false; this.armoryT = 0;
     this.wave++;
+    refillForWave();
     const boss = this.wave % 5 === 0;
     const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
@@ -7525,11 +8012,17 @@ const GAME = {
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
         this.clearT += dt;
-        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · ${INTERMISSION}s TO RESUPPLY · N TO SKIP`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = INTERMISSION; }
+        if (this.clearT > 0.4 && !this.clearedShown) {
+          this.clearedShown = true; const bonus = 20 + this.wave * 6; this.scrap += bonus; this.score += bonus * 12;
+          this.showBanner('WAVE CLEARED', `+${bonus} SCRAP · ARMORY OPENING`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
+          this.intermission = true; this.interT = INTERMISSION; this.armoryT = 1.8;   // a beat to see the banner, then the Armory opens
+        }
       }
     }
     // 25 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
     if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick && AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
+    if (this.armoryT > 0 && this.state === 'playing' && this.intermission) { this.armoryT -= dt; if (this.armoryT <= 0) this.openShop(); }
+    if (this.state === 'shop') armoryTick();
     if (this.bannerT > 0) this.bannerT -= dt;
     this.hm.t = Math.max(0, this.hm.t - dt);
     for (let i = this.toasts.length - 1; i >= 0; i--) { this.toasts[i].t -= dt; if (this.toasts[i].t <= 0) this.toasts.splice(i, 1); }
@@ -7548,8 +8041,8 @@ const GAME = {
     this.combo++; this.comboT = 3.5;
     const mult = 1 + Math.min(8, Math.floor(this.combo / 3)) * 0.25;
     const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
-    const cash = z.T.cash * (z.elite ? 2 : 1) + (head ? 5 : 0);
-    this.score += pts; this.cash += cash; this.kills++; if (head) this.headshots++;
+    const scrap = z.T.scrap * (z.elite ? 2 : 1) + (head ? 2 : 0);   // scrap per kill: see ZTYPES in zombies.js
+    this.score += pts; this.scrap += scrap; this.kills++; if (head) this.headshots++;
     AUD.kill();
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
     if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
@@ -7562,8 +8055,13 @@ const GAME = {
   hitMarker(head, kill) { this.hm.t = 0.18; this.hm.head = !!head; this.hm.kill = !!kill; },
   toast(text, color) { this.toasts.unshift({ text, color, t: 1.6 }); if (this.toasts.length > 4) this.toasts.pop(); },
   showBanner(title, sub, color) { this.banner = { title, sub, color }; this.bannerT = 3; },
-  openShop() { this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; BOW.state = 'ready'; BOW.draw = 0; if (document.exitPointerLock) document.exitPointerLock(); renderShop(); setScreen('shop'); },
-  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // leaving early keeps the countdown
+  openShop() {
+    if (this.state !== 'playing') return;
+    this.state = 'shop'; this.armoryT = 0; AUD.drawStop(); INPUT.mouseDown = false; INPUT.keys = {}; HOOK.aiming = false; HOOK.aim = null; BOW.state = 'ready'; BOW.draw = 0;
+    if (document.exitPointerLock) document.exitPointerLock(); setScreen('shop'); armoryOpen(); AUD.armory();
+  },
+  closeShop() { if (this.state !== 'shop') return; setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // Esc keeps the countdown running
+  startNow() { this.intermission = false; this.interT = 0; this.closeShop(); },
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; AUD.drawStop(); INPUT.mouseDown = false; if (BOW.state === 'drawing') BOW.state = 'letdown'; setScreen('pause'); drawLogo($('pauseLogo'), 'PAUSED', '#29e7ff'); if (document.exitPointerLock && INPUT.locked) document.exitPointerLock(); },
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
@@ -7580,47 +8078,24 @@ const GAME = {
   },
 };
 
-/* ---------------- shop ---------------- */
-const SHOP = [
-  { id: 'draw', name: 'Tension Servos', desc: 'Draw the bow faster', max: 6, cost: (l) => Math.round(70 * Math.pow(1.55, l)), level: () => PLAYER.up.draw, buy() { PLAYER.up.draw++; applyUpgrades(); } },
-  { id: 'dmg', name: 'Tungsten Heads', desc: '+16% arrow damage', max: 10, cost: (l) => Math.round(80 * Math.pow(1.5, l)), level: () => PLAYER.up.dmg, buy() { PLAYER.up.dmg++; applyUpgrades(); } },
-  { id: 'reload', name: 'Auto-Quiver', desc: 'Nock the next arrow faster', max: 5, cost: (l) => Math.round(60 * Math.pow(1.6, l)), level: () => PLAYER.up.reload, buy() { PLAYER.up.reload++; applyUpgrades(); } },
-  { id: 'hp', name: 'Dermal Plating', desc: '+25 max health', max: 6, cost: (l) => Math.round(90 * Math.pow(1.55, l)), level: () => PLAYER.up.hp, buy() { PLAYER.up.hp++; applyUpgrades(); PLAYER.hp += 25; } },
-  { id: 'speed', name: 'Kinetic Boots', desc: '+8% move speed', max: 4, cost: (l) => Math.round(70 * Math.pow(1.6, l)), level: () => PLAYER.up.speed, buy() { PLAYER.up.speed++; applyUpgrades(); } },
-  { id: 'heal', name: 'Med Injector', desc: 'Restore full health', cost: () => 45, level: () => 0, can: () => PLAYER.hp < PLAYER.maxHp, buy() { PLAYER.hp = PLAYER.maxHp; } },
-  { id: 'a1', name: 'Incendiary ×4', desc: 'Sets the infected on fire', cost: () => 55, level: () => 0, ammo: 1, buy() { PLAYER.ammo[1] += 4; } },
-  { id: 'a2', name: 'Plasma Charge ×2', desc: 'Explodes on impact', cost: () => 80, level: () => 0, ammo: 2, buy() { PLAYER.ammo[2] += 2; } },
-  { id: 'a3', name: 'Rail Piercer ×4', desc: 'Flat and fast, pierces 5', cost: () => 65, level: () => 0, ammo: 3, buy() { PLAYER.ammo[3] += 4; } },
-  { id: 'a4', name: 'Cryo Burst ×3', desc: 'Freezes a crowd to a crawl', cost: () => 70, level: () => 0, ammo: 4, buy() { PLAYER.ammo[4] += 3; } },
-  { id: 'a5', name: 'Tether ×3', desc: 'Pins its target and two more', cost: () => 60, level: () => 0, ammo: 5, buy() { PLAYER.ammo[5] += 3; } },
-  { id: 'a6', name: 'Scatter ×4', desc: 'Six shards, point blank', cost: () => 50, level: () => 0, ammo: 6, buy() { PLAYER.ammo[6] += 4; } },
-];
-function renderShop() {
-  const el = document.getElementById('shopGrid');
-  document.getElementById('shopCash').textContent = '¢' + GAME.cash.toLocaleString();
-  document.getElementById('shopWave').textContent = `Wave ${GAME.wave} cleared · Next: wave ${GAME.wave + 1}${(GAME.wave + 1) % 5 === 0 ? ' — the Warden' : ''}`;
-  document.getElementById('shopHp').textContent = `${Math.ceil(PLAYER.hp)} / ${PLAYER.maxHp}`;
-  el.innerHTML = '';
-  for (const it of SHOP) {
-    const lvl = it.level(), maxed = it.max && lvl >= it.max, cost = it.cost(lvl), can = !maxed && GAME.cash >= cost && (!it.can || it.can());
-    const b = document.createElement('button'); b.className = 'card' + (it.ammo ? ' ammo a' + it.ammo : '') + (can ? '' : ' off'); b.type = 'button'; b.id = 'shop-' + it.id;
-    const pips = it.max ? `<div class="pips">${Array.from({ length: it.max }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('')}</div>` : (it.ammo ? `<div class="own">In quiver: ${PLAYER.ammo[it.ammo]}</div>` : `<div class="own">${Math.ceil(PLAYER.hp)} / ${PLAYER.maxHp} HP</div>`);
-    b.innerHTML = `<div class="cname">${it.name}</div><div class="cdesc">${it.desc}</div>${pips}<div class="cost">${maxed ? 'MAXED' : '¢' + cost}</div>`;
-    b.addEventListener('click', () => { if (!can) { AUD.deny(); return; } GAME.cash -= cost; it.buy(); AUD.buy(); renderShop(); updateQuiverHUD(); hudScore(); });
-    el.appendChild(b);
-  }
-}
-
 /* ---------------- HUD (DOM) ---------------- */
 const $ = (id) => document.getElementById(id);
 function rgbHex(c) { return '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join(''); }
-function hudScore() { $('score').textContent = GAME.score.toLocaleString(); $('cash').textContent = '¢' + GAME.cash.toLocaleString(); const m = 1 + Math.min(8, Math.floor(GAME.combo / 3)) * 0.25; $('combo').textContent = GAME.combo >= 3 ? `×${m.toFixed(2)} COMBO` : ''; }
+function hudScore() { $('score').textContent = GAME.score.toLocaleString(); $('scrap').textContent = GAME.scrap.toLocaleString(); const m = 1 + Math.min(8, Math.floor(GAME.combo / 3)) * 0.25; $('combo').textContent = GAME.combo >= 3 ? `×${m.toFixed(2)} COMBO` : ''; }
 function hudWave() { $('waveNum').textContent = GAME.wave; }
+// bottom-right quiver: standard arrows (` key) and the three loadout slots (1–3); rebuilt only when the loadout changes
+let _qSig = '';
 function updateQuiverHUD() {
-  const el = $('quiver'); if (!el.children.length) {
-    ARROWS.forEach((A, i) => { const d = document.createElement('div'); d.className = 'slot'; d.id = 'slot' + i; d.style.setProperty('--c', rgbHex(A.color)); d.innerHTML = `<span class="k">${i + 1}</span><span class="nm">${A.name}</span><span class="ct"></span><span class="bar"></span>`; el.appendChild(d); });
+  const el = $('quiver'), sig = LOADOUT.equipped.join(',');
+  if (sig !== _qSig || !el.children.length) {
+    _qSig = sig;
+    const row = (id, key, A, empty) => `<div class="slot${empty ? ' none' : ''}" id="${id}" style="--c:${A ? rgbHex(A.color) : '#5b6078'}"><span class="k">${key}</span><span class="nm">${A ? A.name : 'Empty slot'}</span><span class="ct"></span><span class="bar"></span></div>`;
+    let h = row('slot0', '`', ARROWS[0]);
+    for (let n = 0; n < SLOT_COUNT; n++) { const t = slotType(n); h += t >= 0 ? row('slot' + t, n + 1, ARROWS[t]) : row('slote' + n, n + 1, null, true); }
+    el.innerHTML = h;
   }
-  ARROWS.forEach((A, i) => { const d = $('slot' + i); const cur = (BOW.nextType >= 0 ? BOW.nextType : BOW.type) === i; d.classList.toggle('sel', cur); d.classList.toggle('empty', i > 0 && PLAYER.ammo[i] <= 0); d.querySelector('.ct').textContent = i === 0 ? '∞' : PLAYER.ammo[i]; });
+  const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type;
+  for (const t of availTypes()) { const d = $('slot' + t); if (!d) continue; d.classList.toggle('sel', cur === t); d.classList.toggle('empty', PLAYER.ammo[t] <= 0); d.querySelector('.ct').textContent = t === 0 ? `${PLAYER.ammo[0]} / ${PLAYER.quiverMax}` : PLAYER.ammo[t]; }
 }
 function flashQuiver(i) { const d = $('slot' + i); if (!d) return; d.classList.remove('deny'); void d.offsetWidth; d.classList.add('deny'); }
 let _lastSel = -1;
@@ -7633,9 +8108,10 @@ function hudFrame() {
   hudSet('hpFill', 's', `scaleX(${clamp(hpK, 0, 1)})`); hudSet('hpText', 't', String(Math.ceil(PLAYER.hp))); hudSet('hpMax', 't', '/ ' + PLAYER.maxHp);
   hudCls('hp', 'low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO START NOW`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
   else { hudSet('remain', 't', GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''); hudCls('remain', 'soon', false); hudCls('remain', 'count', false); }
   hudCls('hp', 'regen', !!PLAYER.regen);
+  hudSet('stFill', 's', `scaleX(${clamp(PLAYER.stam / PLAYER.stamMax, 0, 1).toFixed(3)})`); hudCls('stam', 'winded', PLAYER.winded); hudCls('stam', 'full', PLAYER.stam >= PLAYER.stamMax);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
   if (GAME.boss) hudSet('bossFill', 's', `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`);
 }
@@ -7669,6 +8145,7 @@ function drawHUD2D(time) {
     hx.fillStyle = 'rgba(8,6,16,0.7)'; hx.fillRect(p[0] - w / 2 - 1, p[1] - 1, w + 2, 5); hx.fillStyle = k > 0.5 ? '#a6ff3a' : k > 0.25 ? '#ffb52e' : '#ff3040'; hx.fillRect(p[0] - w / 2, p[1], w * k, 3);
   }
   hx.globalAlpha = 1;
+  drawMarks(W, H);
   // floating numbers
   hx.textAlign = 'center'; hx.textBaseline = 'middle';
   for (const f of FLOATS) {
@@ -7680,6 +8157,8 @@ function drawHUD2D(time) {
   hx.globalAlpha = 1;
   // crosshair
   if (GAME.state === 'playing') {
+    // the crosshair rides the aim sway, so what you see is where the arrow goes
+    const ppr = (H / 2) / Math.tan(PLAYER.fov * Math.PI / 360), cx = W / 2 - PLAYER.swayX * ppr, cy = H / 2 - PLAYER.swayY * ppr;
     const d = BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; const gap = lerp(22, 5, d), len = lerp(9, 7, d);
     hx.strokeStyle = col; hx.lineWidth = 2; hx.shadowColor = col; hx.shadowBlur = 8 * d;
     hx.beginPath();
@@ -7698,10 +8177,10 @@ function drawHUD2D(time) {
       hx.beginPath(); for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { hx.moveTo(cx + sx * r0, cy + sy * r0); hx.lineTo(cx + sx * r1, cy + sy * r1); } hx.stroke(); hx.globalAlpha = 1; }
     // damage direction arcs
     for (const h of PLAYER.hurtDirs) { const rel = h.ang - Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw)); const a = -rel - Math.PI / 2; hx.strokeStyle = `rgba(255,40,70,${clamp(h.t, 0, 1)})`; hx.lineWidth = 6; hx.beginPath(); hx.arc(cx, cy, 120, a - 0.35, a + 0.35); hx.stroke(); }
-    drawHookHUD(hx, cx, cy, W, H);
+    drawHookHUD(hx, W / 2, H / 2, W, H);
     // toasts
     hx.font = '700 15px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif';
-    GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
+    GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, W / 2, H / 2 + 78 + i * 20); });
     hx.globalAlpha = 1;
   }
   drawMinimap(hx, W, H, time); drawObjective(hx, W, H); drawFieldObjectiveHUD(hx, W, H);
@@ -7714,6 +8193,22 @@ function drawHUD2D(time) {
     if (GAME.banner.sub) { hx.font = `700 ${Math.round(h * 0.26)}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; hx.fillStyle = '#e9ecff'; hx.letterSpacing = '4px'; hx.fillText(GAME.banner.sub, cx, H * 0.3 + h * 0.95); hx.letterSpacing = '0px'; }
     hx.globalAlpha = 1;
   }
+}
+// Tracer marks: a neon diamond over every tagged zombie, drawn on the HUD layer so walls never hide it
+function drawMarks(W, H) {
+  let any = false; for (const z of ZOMBIES) if (z.markT > 0 && !z.dead) { any = true; break; }
+  if (!any) return;
+  const col = rgbHex(ARROWS[AT.TRACER].color);
+  hx.strokeStyle = col; hx.fillStyle = col; hx.lineWidth = 2; hx.textAlign = 'center'; hx.font = '700 11px "Quiver Cn", sans-serif';
+  for (const z of ZOMBIES) {
+    if (z.dead || z.markT <= 0) continue;
+    const p = toScreen(z.x, z.y + 1.25 * z.scale * (z.crawl ? 0.35 : 1), z.z, W, H); if (!p) continue;
+    const r = clamp(220 / p[2], 7, 22), a = Math.min(1, z.markT / 0.6);
+    hx.globalAlpha = a * (0.65 + 0.35 * Math.sin(GAME.time * 8 + z.seed));
+    hx.beginPath(); hx.moveTo(p[0], p[1] - r); hx.lineTo(p[0] + r * 0.7, p[1]); hx.lineTo(p[0], p[1] + r); hx.lineTo(p[0] - r * 0.7, p[1]); hx.closePath(); hx.stroke();
+    if (p[2] > 14) { hx.globalAlpha = a * 0.8; hx.fillText(Math.round(p[2]) + ' m', p[0], p[1] - r - 6); }
+  }
+  hx.globalAlpha = 1;
 }
 const HUDVIS = { on: true };
 const DBG = {};
@@ -7750,10 +8245,16 @@ function updatePlayer(dt) {
   if (K.KeyW || K.ArrowUp) fz -= 1; if (K.KeyS || K.ArrowDown) fz += 1; if (K.KeyA || K.ArrowLeft) fx -= 1; if (K.KeyD || K.ArrowRight) fx += 1;
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
   const drawing = BOW.state === 'drawing';
-  const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
+  // crouch (hold C): lower and slower, and with Steady Aim Lv 4 the bow stops swaying
+  P.crouch = lerp(P.crouch, K.KeyC && P.grounded && HOOK.state === 'idle' ? 1 : 0, Math.min(1, dt * 10)); P.eyeH = EYE - CROUCH_DROP * P.crouch;
+  // sprint stamina: drains while sprinting, refills after a short breather; run it dry and you're winded until 30%
+  if (P.winded && P.stam >= P.stamMax * 0.3) P.winded = false;
+  const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing && P.crouch < 0.3 && !P.winded && P.stam > 0;
+  if (sprint && l > 0) { P.stam -= dt; P.stamT = 0; if (P.stam <= 0) { P.stam = 0; P.winded = true; } }
+  else { P.stamT += dt; if (P.stamT > 0.8) P.stam = Math.min(P.stamMax, P.stam + dt * P.stamMax / 4); }
   const water = P.y < 0.05 ? waterAt(P.x, P.z) : 0; P.wading = water > 0;   // knee-deep in the koi pond, or the Metro's flooded track beds
   P.sink = lerp(P.sink || 0, P.wading ? 0.26 : 0, Math.min(1, dt * 6));
-  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
+  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (1 - 0.5 * P.crouch) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
   const hooked = updateHook(dt);   // while reeling in, the grapple owns the movement
@@ -7761,7 +8262,7 @@ function updatePlayer(dt) {
     const acc = P.grounded ? 12 : P.fling ? 0.8 : 3;   // flung off the hook: keep the momentum
     P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
     P.x += P.vx * dt; P.z += P.vz * dt;
-    if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
+    if (K.Space && P.grounded && P.crouch < 0.3) { P.vy = 6.6; P.grounded = false; }
     P.vy -= 20 * dt; P.y += P.vy * dt;
   }
   if (!P.grounded) P.peakY = Math.max(P.peakY ?? P.y, P.y);
@@ -7779,6 +8280,10 @@ function updatePlayer(dt) {
     if (P.x > 104) { P.x = Math.max(P.x, 108.4); P.z = Math.min(P.z, 143.6); } else P.x = clamp(P.x, -59, 59);
   }
   const hs = Math.hypot(P.vx, P.vz);
+  // aim sway at draw: grows if you hold a full draw too long; Steady Aim scales it down
+  { const dk = BOW.state === 'drawing' ? easeOut(BOW.draw) : 0, hold = BOW.hold > 2.2 ? Math.min(1, (BOW.hold - 2.2) / 2) : 0;
+    const amp = upLv('aim') >= 4 && P.crouch > 0.8 ? 0 : (0.0045 + 0.007 * hold) * dk * P.swayK * (1 + Math.min(1, hs / 5) * 0.6), t = GAME.time;
+    P.swayX = amp * (Math.sin(t * 1.15) * 0.75 + Math.sin(t * 2.7 + 1.3) * 0.25); P.swayY = amp * (Math.sin(t * 1.6 + 2.1) * 0.6 + Math.sin(t * 0.85 + 0.4) * 0.4); }
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
   const ph0 = BOW.walkPhase; BOW.walkPhase += dt * hs * 1.6 * (1 + BOW.sprintAmt * 0.35);
@@ -7788,11 +8293,10 @@ function updatePlayer(dt) {
   P.dmgFlash = Math.max(0, P.dmgFlash - dt * 1.4);
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }
   P.vmIn = Math.min(1, P.vmIn + dt * 2.5);
-  // slow regen: kicks in 6 s after the last hit, 2.5 HP/s, and only up to 50% of max health.
-  // Pickups, the Med Injector and Dermal Plating are still the only way back to full.
-  const regenCap = P.maxHp * REGEN.cap;
-  P.regen = GAME.state === 'playing' && !P.dead && P.hp < regenCap && GAME.time - P.lastHurt > REGEN.delay;
-  if (P.regen) P.hp = Math.min(regenCap, P.hp + REGEN.rate * dt);
+  // slow regen, on purpose: 6 s after the last hit, 1 HP every 4 s (Slow Regen: down to every 2.5 s)
+  P.regen = GAME.state === 'playing' && !P.dead && P.hp < P.maxHp && GAME.time - P.lastHurt > REGEN.delay;
+  if (P.regen) P.hp = Math.min(P.maxHp, P.hp + dt / P.regenInt);
+  if (GAME.state === 'playing' && !P.dead) updateRecovery();
   if (P.hp / P.maxHp < 0.3) { P.beat -= dt; if (P.beat <= 0) { P.beat = 0.9; AUD.heartbeat(); } }
 }
 
@@ -7814,7 +8318,7 @@ function step(dt) {
       // Other modes retain the original 45/90 m thresholds.
       const animNear2 = SETTINGS.laptop ? 900 : 2025, animFar2 = SETTINGS.laptop ? 3600 : 8100;
       if (z.rig && z.state !== 'dying' && ((zd2 > animFar2 && phase % 4) || (zd2 > animNear2 && phase % 2))) continue;
-      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+      poseZombieRig(z, z.chill > 0 && z.chillK <= 0 && !z.dead ? 0 : z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateArcs(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
@@ -7847,16 +8351,15 @@ function frame(now) {
   if (GAME.noLoop) return;
   const c0 = performance.now();
   if (!GAME.frozen) step(dt);
-  render(GAME.time);
-  if (GAME.state !== 'title') hudFrame();
-  drawHUD2D(GAME.time);
+  // the Armory is an opaque full-screen board: skip the 3D frame and the HUD entirely while it's up (no GPU work at all)
+  if (GAME.state !== 'shop') { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
   profFrame(performance.now() - c0);
 }
 
 /* ---------------- render ---------------- */
 function setCamera(time) {
   const P = PLAYER;
-  let x = P.x, y = P.y + 1.62 - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
+  let x = P.x, y = P.y + P.eyeH - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
   if (GAME.state === 'title' || GAME.attract) {
     const a = time * 0.06; x = Math.sin(a) * 19; z = Math.cos(a) * 19; y = 3.2 + Math.sin(time * 0.2) * 0.6; yaw = a + 0.35; pitch = 0.1; roll = 0;
     if (GAME.camOverride) ({ x, y, z, yaw, pitch, roll } = GAME.camOverride);
@@ -7885,7 +8388,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHazards(time); drawHook();
+  drawProjectiles(); drawArcs(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHazards(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -7897,7 +8400,7 @@ function wireUI() {
   $('quitBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
   $('againBtn').addEventListener('click', () => { AUD.click(); ZOMBIES.length = 0; GAME.newGame(); requestLock(); });
   $('menuBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
-  $('nextWaveBtn').addEventListener('click', () => { AUD.click(); GAME.closeShop(); });
+  armoryWire();
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
@@ -7937,6 +8440,8 @@ async function boot() {
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
   gpuCheck();
   wireUI();
+  // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
+  try { for (const f of ['400 20px "Chakra Petch"', '500 20px "Chakra Petch"', '600 20px "Chakra Petch"', '700 20px "Chakra Petch"', '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 20px "IBM Plex Mono"']) document.fonts.load(f).catch(() => { }); } catch (e) { }
   toTitle();
   render(GAME.time); warmShaders();   // build the post chain, then compile everything before the first real frame
   $('loading').hidden = true;
@@ -7957,14 +8462,14 @@ window.NQ = {
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   AUD,
-  bowStartDraw, bowRelease, fireArrow, selectArrow, SHOP, renderShop, camBasis,
+  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
-  shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + 1.62), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
+  shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };
 boot();
 

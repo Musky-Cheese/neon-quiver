@@ -37,7 +37,7 @@ function hookRay(ox, oy, oz, dx, dy, dz, maxD) {
 // where a hook along the view would take you, and how far you'd fall from there
 function hookAim() {
   camBasis();
-  const P = PLAYER, h = hookRay(P.x, P.y + 1.62, P.z, _cf[0], _cf[1], _cf[2], HOOK_CFG.range);
+  const P = PLAYER, h = hookRay(P.x, P.y + P.eyeH, P.z, _cf[0], _cf[1], _cf[2], HOOK_CFG.range);
   if (!h) return null;
   const ty = clamp(Math.min(h.y, h.top - 0.3) - HOOK_CFG.hang, 0, 400);
   h.tx = h.x + h.n[0] * 0.75; h.tz = h.z + h.n[2] * 0.75; h.ty = ty;
@@ -55,7 +55,7 @@ function hookFire() {
   camBasis();
   if (!h) {   // nothing in range: the hook flies out and falls short
     HOOK.state = 'whiff'; HOOK.t = 0; HOOK.cd = 1;
-    HOOK.ax = PLAYER.x + _cf[0] * HOOK_CFG.range; HOOK.ay = PLAYER.y + 1.62 + _cf[1] * HOOK_CFG.range; HOOK.az = PLAYER.z + _cf[2] * HOOK_CFG.range;
+    HOOK.ax = PLAYER.x + _cf[0] * HOOK_CFG.range; HOOK.ay = PLAYER.y + PLAYER.eyeH + _cf[1] * HOOK_CFG.range; HOOK.az = PLAYER.z + _cf[2] * HOOK_CFG.range;
     AUD.hookFire(); return;
   }
   Object.assign(HOOK, { state: 'fly', t: 0, ax: h.x, ay: h.y, az: h.z, tx: h.tx, ty: h.ty, tz: h.tz, flyT: h.t / 140, cd: HOOK_CFG.cooldown, stuckT: 0 });

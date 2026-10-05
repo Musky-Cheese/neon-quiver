@@ -3,14 +3,14 @@
    Sculpted in Blender (tools/make_models.py), animated procedurally here.
    ============================================================ */
 const ZTYPES = {
-  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, cash: 10, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
-  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, cash: 15, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
-  brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, cash: 45, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
-  boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, cash: 600, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
+  walker: { hp: 60, hpW: 10, speed: [1.5, 2.3], dmg: 10, scale: 1, score: 100, scrap: 7, eyes: [1, 0.55, 0.12], reach: 1.35, atk: 0.85 },
+  runner: { hp: 34, hpW: 5, speed: [4.9, 5.9], dmg: 7, scale: 0.94, score: 150, scrap: 9, eyes: [0.35, 1, 0.2], reach: 1.3, atk: 0.6 },
+  brute: { hp: 300, hpW: 34, speed: [1.25, 1.55], dmg: 24, scale: 1.55, score: 450, scrap: 22, eyes: [1, 0.1, 0.25], reach: 2.0, atk: 1.1 },
+  boss: { hp: 2000, hpW: 0, speed: [2.2, 2.2], dmg: 34, scale: 3.1, score: 6000, scrap: 150, eyes: [1, 0.2, 0.9], reach: 3.6, atk: 1.2 },
   // spitter: hangs back and lobs acid; screamer: hangs back and buffs the pack; climber: fast, scales a wall and pounces
-  spitter: { hp: 42, hpW: 6, speed: [1.3, 1.7], dmg: 6, scale: 0.96, score: 180, cash: 18, eyes: [0.25, 1, 0.35], reach: 1.3, atk: 0.85 },
-  screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, cash: 20, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
-  climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, cash: 22, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
+  spitter: { hp: 42, hpW: 6, speed: [1.3, 1.7], dmg: 6, scale: 0.96, score: 180, scrap: 10, eyes: [0.25, 1, 0.35], reach: 1.3, atk: 0.85 },
+  screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, scrap: 11, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
+  climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, scrap: 11, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
 };
 // how long a corpse holds before it starts sinking, and before it's finally removed (blood pools use DECAL_LIFE/DECAL_CAP in fx.js)
 const CORPSE_SETTLE = 14, CORPSE_LIFE = 24, CORPSE_CAP = 26;
@@ -64,7 +64,7 @@ function spawnZombie(type, x, z, wave) {
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
-    chill: 0, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
+    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // spitter/screamer/climber state
     spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
@@ -242,7 +242,7 @@ function updateZombies(dt, time) {
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
-    z.chill = Math.max(0, z.chill - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
     { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
       z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }
     if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
@@ -280,7 +280,7 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * (z.chill > 0 ? 0.3 : 1) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
+    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
@@ -309,26 +309,86 @@ function updateZombies(dt, time) {
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
-      z.atkT += dt / z.T.atk * (z.chill > 0 ? 0.45 : 1);
+      z.atkT += dt / z.T.atk * zAtkK(z);
       if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
 }
-// Cryo Burst: everything within 5 m slows to a crawl (attacks too) for a few seconds
-function frostBurst(x, y, z) {
-  for (const o of zombieCandidates(x - 5, x + 5, z - 5, z + 5)) {
-    if (o.dead || o.state === 'drop') continue;
-    const d = Math.hypot(o.x - x, o.z - z); if (d > 5) continue;
-    o.chill = Math.max(o.chill, o.type === 'boss' ? 2.5 : 6); o.burn = 0;
-    damageZombie(o, 18 * PLAYER.dmgMult * (1 - d / 8), 'body', null, null, 4);
+// speed / attack-rate factors from Cryo (slow or freeze) and Shock (stun)
+function zSlowK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? z.chillK : 1; }
+function zAtkK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? (z.chillK <= 0 ? 0 : Math.max(0.45, z.chillK)) : 1; }
+// Cryo Arrow: the coolant capsule slows (Lv 3: freezes) whatever it hits, plus anything standing right at the impact.
+// slowK is the speed left (0.6 = 40% slower, 0 = frozen solid); the Warden shrugs it off in half the time.
+function cryoHit(x, y, z, target, slowK, dur) {
+  const hitOne = (o) => {
+    if (o.dead || o.state === 'drop') return;
+    const d = o.type === 'boss' ? dur * 0.5 : dur;
+    if (o.chill <= 0 || slowK <= o.chillK || d > o.chill) { o.chillK = slowK; o.chill = Math.max(o.chill, d); }
+    o.burn = 0;
+  };
+  if (target) hitOne(target);
+  for (const o of zombieCandidates(x - 1.4, x + 1.4, z - 1.4, z + 1.4)) if (o !== target && Math.hypot(o.x - x, o.z - z) < 1.3) hitOne(o);
+  for (let k = 0; k < 26; k++) { const a = Math.random() * TAU, v = rand(1, 4); emit(x, y, z, Math.cos(a) * v, rand(0.5, 2.5), Math.sin(a) * v, rand(0.4, 0.8), [1.2, 2.4, 3.6], rand(0.04, 0.1), 2, 2, 0.1); }
+  flashLight(x, Math.max(0.6, y), z, [1.4, 2.8, 4], 7, 0.35);
+  for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 2) f.t = 0;
+  AUD.frost(PLAYER.panOf(x, z));
+  hazFrost(x, z);   // still ices over flood water and cools a cooking fuel tank
+}
+// Shock Arrow: current arcs from the struck zombie (or the impact point) to the nearest unhit neighbour, n hops.
+// Each hop deals part of the hit; Lv 3 also stuns everything in the chain for a second.
+const ARCS = [];
+function shockChain(x, y, z, first, hops, dmg, stun) {
+  const hit = first ? [first] : [];
+  let fx = x, fy = y, fz = z;
+  if (first && stun > 0 && !first.dead) { first.stun = Math.max(first.stun, first.type === 'boss' ? stun * 0.3 : stun); if (first.state === 'attack') first.state = 'walk'; }
+  for (let n = 0; n < hops; n++) {
+    let best = null, bd = 6.5;
+    for (const o of zombieCandidates(fx - 6.5, fx + 6.5, fz - 6.5, fz + 6.5)) {
+      if (o.dead || o.state === 'drop' || hit.includes(o)) continue;
+      const d = Math.hypot(o.x - fx, o.z - fz); if (d < bd) { bd = d; best = o; }
+    }
+    if (!best) break;
+    hit.push(best);
+    const ty = best.y + 1.1 * best.scale;
+    ARCS.push({ x0: fx, y0: fy, z0: fz, x1: best.x, y1: ty, z1: best.z, t: 0.22 });
+    damageZombie(best, dmg, 'body', [best.x, ty, best.z], null, AT.SHOCK, 0.6);
+    if (stun > 0 && !best.dead) { best.stun = Math.max(best.stun, best.type === 'boss' ? stun * 0.3 : stun); if (best.state === 'attack') best.state = 'walk'; }
+    else best.flinch = 1;
+    fx = best.x; fy = ty; fz = best.z;
   }
-  for (let k = 0; k < 70; k++) { const a = Math.random() * TAU, v = rand(2, 9); emit(x, y, z, Math.cos(a) * v, rand(0.5, 4), Math.sin(a) * v, rand(0.5, 1), [1.2, 2.4, 3.6], rand(0.05, 0.14), 2, 2, 0.1); }
-  burst(x, Math.max(0.3, y), z, 30, [0.7, 0.9, 1.1], 5, 0.6, 0.12, 4, 1.4, 3);
-  flashLight(x, 1.2, z, [1.4, 2.8, 4], 14, 0.5);
-  for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 5) f.t = 0;   // puts out fires too
-  AUD.frost(PLAYER.panOf(x, z)); shakeNear({ x, z }, 0.2);
-  hazFrost(x, z);
+  if (ARCS.length > 24) ARCS.splice(0, ARCS.length - 24);
+  flashLight(x, Math.max(0.8, y), z, [1.6, 2, 5], 9, 0.25);
+  AUD.zap(PLAYER.panOf(x, z), hit.length);
+}
+// arcs are drawn as a few jittered glowing segments for a fraction of a second (no extra lights, no geometry)
+function updateArcs(dt) {
+  for (let i = ARCS.length - 1; i >= 0; i--) { ARCS[i].t -= dt; if (ARCS[i].t <= 0) ARCS.splice(i, 1); }
+}
+const _arcP = [0, 0, 0];
+function drawArcs() {
+  const C = ARROWS[AT.SHOCK].color, G = ARROWS[AT.SHOCK].glow;
+  for (const a of ARCS) {
+    const k = a.t / 0.22, SEG = 5; let px = a.x0, py = a.y0, pz = a.z0;
+    for (let s = 1; s <= SEG; s++) {
+      const u = s / SEG, j = s === SEG ? 0 : 0.35;
+      const qx = lerp(a.x0, a.x1, u) + rand(-j, j), qy = lerp(a.y0, a.y1, u) + rand(-j, j) * 0.6, qz = lerp(a.z0, a.z1, u) + rand(-j, j);
+      drawItem(MESH.box, M4.align(poolM(), px, py, pz, qx, qy, qz, 0.022, 0.022), C, [G[0] * k * 1.6, G[1] * k * 1.6, G[2] * k * 1.6]);
+      px = qx; py = qy; pz = qz;
+    }
+  }
+}
+// Tracer: tags the infected with a marker the HUD draws through walls (game.js drawMarks). Lv 3 tags the whole group.
+function tracerMark(x, z, target, dur, radius) {
+  let n = 0;
+  if (target && !target.dead) { target.markT = Math.max(target.markT, dur); n++; }
+  for (const o of zombieCandidates(x - radius, x + radius, z - radius, z + radius)) {
+    if (o === target || o.dead || Math.hypot(o.x - x, o.z - z) > radius) continue;
+    o.markT = Math.max(o.markT, dur); n++;
+  }
+  burst(x, 1, z, 14, ARROWS[AT.TRACER].glow, 3, 0.4, 0.05, 0, 2);
+  AUD.tag(PLAYER.panOf(x, z));
+  return n;
 }
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
 function tetherFrom(z, hx, hy, hz) {
@@ -413,7 +473,7 @@ function updateSpitter(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
   pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
   z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
@@ -422,7 +482,7 @@ function updateSpitter(z, dt, P) {
   z.spitCd -= dt;
   if (z.state === 'walk' && dist >= 6 && dist <= 18 && z.spitCd <= 0 && GAME.state === 'playing' && hasLineOfSight(z, P)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
   if (z.state === 'attack') {
-    z.atkT += dt / 1.1;
+    z.atkT += dt / 1.1 * zAtkK(z);
     if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; spitAt(z, P); z.spitCd = rand(2.6, 4.2); }
     if (z.atkT >= 1) z.state = 'walk';
   }
@@ -441,7 +501,7 @@ function updateScreamer(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -453,7 +513,7 @@ function updateScreamer(z, dt, P) {
   z.atkCd -= dt;
   if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
   if (z.state === 'attack') {
-    z.atkT += dt / z.T.atk;
+    z.atkT += dt / z.T.atk * zAtkK(z);
     if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
     if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.4, 0.8); }
   }
@@ -478,7 +538,7 @@ function updateClimber(z, dt, P) {
     const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * (z.chill > 0 ? 0.3 : 1) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -492,7 +552,7 @@ function updateClimber(z, dt, P) {
     }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
     if (z.state === 'attack') {
-      z.atkT += dt / z.T.atk;
+      z.atkT += dt / z.T.atk * zAtkK(z);
       if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.6); }
     }

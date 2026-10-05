@@ -155,9 +155,8 @@ function updateSupplies(dt) {
     if (GAME.state !== 'playing' || PLAYER.dead) continue;
     const d = Math.hypot(s.x - PLAYER.x, s.z - PLAYER.z);
     if (s.kind === 'cache' && s.cd <= 0 && d < 1.9) {
-      PLAYER.ammo[1] += 2; PLAYER.ammo[2] += 1; PLAYER.ammo[3] += 2; PLAYER.ammo[4] += 1; PLAYER.ammo[5] += 1; PLAYER.ammo[6] += 2; PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + 15);
-      s.cd = 70; AUD.pickup(); updateQuiverHUD();
-      GAME.toast('SUPPLY CACHE  +SPECIAL ARROWS  +15 HP', '#ffb52e');
+      supplyRefill(); s.cd = 70; AUD.pickup();
+      GAME.toast('SUPPLY CACHE  +ARROWS  +15 HP', '#ffb52e');
       burst(s.x, 1, s.z, 36, [2.4, 1.6, 0.5], 4, 0.6, 0.08, 0, 2);
     }
   }
@@ -292,5 +291,5 @@ function drawObjective(hx, W, H) {
   hx.font = '700 13px "Quiver Cn", sans-serif'; hx.textAlign = 'center'; hx.fillStyle = '#bff6ff';
   hx.fillText(`ARMORY ${Math.round(t.d)} m`, x, y + 24);
   hx.font = '700 15px "Quiver Cn", sans-serif'; hx.fillStyle = '#e9ecff';
-  hx.fillText(GAME.nearTerminal ? 'PRESS E TO OPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  REACH AN ARMORY TERMINAL`, cx, H - 64);
+  hx.fillText(GAME.nearTerminal ? 'PRESS E TO REOPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  ARMORY TERMINALS REOPEN THE SHOP  ·  N TO START NOW`, cx, H - 64);
 }

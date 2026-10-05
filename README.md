@@ -30,25 +30,28 @@ To rebuild `index.html` after editing `src/`, run `python3 build.py`.
 | Hold left click | Draw the bow (a full draw gives full damage, speed and a tight crosshair) |
 | Release | Loose the arrow |
 | Right click | Let the string down without firing |
-| W A S D | Move · Shift sprint · Space jump |
-| E | Open an Armory Terminal (between waves) |
-| 1 – 4, mouse wheel | Switch arrow type · Q swaps to the last one |
+| W A S D | Move · Shift sprint (limited by stamina) · Space jump · hold C to crouch |
+| 1 – 3 | The special arrows in your quiver's three slots; press the same key again (or `` ` ``) for standard arrows · mouse wheel cycles · X swaps to the last one |
+| E | Reopen the Armory at a terminal between waves · N starts the next wave early |
 | P / Esc | Pause |
 
 ## What's in the game
 
 - **Bow viewmodel with real animation:** limbs flex and cams glow as you draw, the string snaps and oscillates on release, then the hand pulls back, reaches for the quiver and nocks the next arrow. Arrows fly with gravity drop.
-- **Seven arrow types:** Carbon (unlimited), Incendiary (sets zombies and the ground on fire), Plasma Charge (explodes on impact), Rail Piercer (flat, fast, passes through five bodies), Cryo Burst (frosts everything within 5 m to a crawl), Tether (stakes its target in place and chains two more) and Scatter (six shards in a cone, brutal up close).
+- **Standard arrows plus six specials:** you carry 20 standard arrows into each wave (more with Quiver Size) and pick spent ones back up off the street and out of the bodies. Special arrows are unlocked and levelled in the Armory, and up to three ride in the quiver at once: **Piercer** (flat and fast, passes through 2/3/5 bodies), **Blast Arrow** (detonates on impact, 2–4 m, knockback at Lv 3), **Shock Arrow** (arcs to 2/3/5 nearby zombies, stuns at Lv 3), **Cryo Arrow** (slows what it hits 40–50%, freezes it solid at Lv 3, and still ices over flood water), **Splitter** (breaks into 3/4/5 bolts a few metres out) and **Tracer** (tags zombies with a marker you see through walls for 4–8 s; Lv 3 tags the whole group). Each equipped special is topped up at the start of every wave.
 - **The infected:** sculpted walkers, sprinting runners and armored brutes, with hit-location staggers, falls driven by the arrow's force, crawlers from leg shots, wall pinning and moderate gore. Every 5th wave brings *The Warden*, a boss that drops from the sky, slams the ground (jump to dodge) and summons runners. Hit its glowing core for extra damage.
 - **An open city to roam:** Sector 7 plaza sits at the centre. North is the **Rail Yard** (container stacks, a parked freight train, a gantry crane and floodlights). East is the **Night Market** (rows of stalls, lantern strings, food carts and steam). Past the far end of the market lie **the Docks** (a dead container port: stacks to get lost in, two gantry cranes over the quay, a cargo ship moored in black harbour water). The **Freight Line**, a walled rail cut lined with parked boxcars, runs from the Rail Yard's east wall round to the Docks. West is **the Warrens** (brick tenements, fire escapes, dumpsters and burning barrels in narrow alleys). North-west, between the Warrens and the Rail Yard, is the **Flooded Metro**: Line 3's open cut below the streets, with knee-deep water in the track beds, an island platform, a stalled train and a street bridge that came down into the cut. You reach it through a tiled underpass from the Warrens or a tunnel through the Rail Yard's west wall. South, past the freeway, are **the Suburbs** and the **Sakura Gardens**. South-east is **the Refinery** (a tank farm, distillation columns still venting, a loading rack with tankers, a tanker moored at the jetty, and a flare stack and cooling towers on the skyline). It lies between the Suburbs, down an access road off their eastern cross street, and the Docks, through a gate in the port's south wall. So both sides of the city loop. Zombies spawn out of sight around you and path through the streets to reach you. A minimap sits under the score.
-- **Hazards:** flood water in the Metro slows you and the infected by about 30% as you wade through it knee-deep. A Cryo Burst landing in or near it freezes a 5 m patch over for about 14 seconds, and everyone crosses the ice at full speed. The Refinery's small **fuel tanks** bite back. An Incendiary arrow in a tank's wall, or burning ground at its base, starts it cooking: it hisses, jets flame and goes up about 1.6 seconds later. A Plasma Charge or any other explosion sets it off almost at once. The 9 m blast hits zombies hard and sets survivors on fire, hurts you too if you're inside it, leaves the ground burning and sets off any neighbours in reach. A Cryo Burst within about 5 m cools a cooking tank before it blows. Blown tanks come back 3 waves later.
-- **Supplies:** amber **supply caches** refill special arrows and some health, then recharge. After each wave a 25-second countdown shows in the HUD (press N to start the next wave early) while you reach one of the cyan **Armory Terminals** (one in the plaza and one per district) and press E to spend credits on draw speed, damage, reload speed, max health, move speed, healing and special arrows. An arrow on screen points to the nearest terminal.
-- **Health:** after 6 seconds without taking a hit you slowly regenerate, but only up to half your max health; pickups, the Med Injector and Dermal Plating get you the rest of the way.
+- **Hazards:** flood water in the Metro slows you and the infected by about 30% as you wade through it knee-deep. A Cryo Arrow landing in or near it freezes a 5 m patch over for about 14 seconds, and everyone crosses the ice at full speed. The Refinery's small **fuel tanks** bite back. Burning ground at a tank's base starts it cooking: it hisses, jets flame and goes up about 1.6 seconds later. A Blast Arrow or any other explosion that reaches it sets it off almost at once. The 9 m blast hits zombies hard and sets survivors on fire, hurts you too if you're inside it, leaves the ground burning and sets off any neighbours in reach. A Cryo Arrow within about 5 m cools a cooking tank before it blows. Blown tanks come back 3 waves later.
+- **The Armory:** a moment after each wave is cleared the Armory opens with a 45-second countdown to the next wave (**Start wave** skips it). Spend **scrap** in three tabs: **Arrows** (unlock, then upgrade to Lv 3: Piercer, Blast, Shock, Cryo, Splitter, Tracer), **Bow** (to Lv 4: Draw Speed, Draw Power, Quiver Size, Steady Aim, Arrow Recovery) and **Survival** (to Lv 3: Slow Regen, Max Health, Armor Plating, Sprint Stamina). Click a card for its description, level and Now → Next effect; the **Quiver loadout** row holds three special arrows (a newly unlocked arrow equips itself if a slot is free). Esc goes back to the street with the clock still running, and the cyan **Armory Terminals** (one in the plaza and one per district, E) reopen it.
+- **Scrap:** 7 per walker, 9 per runner, 10–11 for spitters, screamers and climbers, 22 per brute and 150 for the Warden; elites pay double and headshots add 2. Clearing a wave pays 20 + 6 × the wave number and field objectives 40–50 + 6 × the wave. That buys roughly one upgrade per wave early on, and the whole Armory by around wave 20. Tune it in `ZTYPES` (`zombies.js`) and `GAME.update` (`game.js`); prices are in `ARMORY` and effects in `UPG` (`armory.js`).
+- **Supplies:** amber **supply caches** give back 10 standard arrows, some of each equipped special and 15 HP, then recharge. The infected sometimes drop arrows and health.
+- **Health:** regeneration is slow on purpose: 6 seconds after your last hit you get back 1 HP every 4 s (every 2.5 s with Slow Regen maxed). Pickups and supply caches are the fast way back.
+- **Stamina:** sprinting lasts 5 s (up to 9 s with Sprint Stamina) and refills after a short breather; run it dry and you're winded until it's back to 30%.
 - **Difficulty keeps climbing:** zombies hit harder and move faster every wave, the mix shifts toward runners and brutes, runners come in packs from wave 6, and white-eyed **elites** (tougher, faster, double rewards) appear from wave 8.
 - **Grappling hook (Q):** fire at any wall, pole, crane or container within 36 m and get reeled toward it, keeping your momentum when it lets go (Q again cuts the rope; 8 s cooldown). You always come back down to the street, and falls over 5 m hurt, so the reticle turns green / amber / red to show what the landing will cost. X switches back to your last arrow.
 - **Field objectives:** from wave 3, most waves throw up an optional goal mid-fight: hold a **Data Uplink** ring for 20 seconds while runners converge, or destroy a **Hive Nest** that keeps birthing the infected (the wave can't end while it lives). Both pay credits and drop supplies.
 - **Weather that changes:** every minute or two the sky shifts between dry spells, drizzle, steady rain, wind-driven downpours with lightning and thunder, and snow that settles white on the streets and melts when the rain returns. Streets soak and dry gradually.
-- **Headshots, combos and credits.** Chain kills to build a score multiplier.
+- **Headshots and combos.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
 - **Surface textures on Balanced and up:** photo-scanned PBR textures (half resolution on Balanced, full on Sharp/Ultra, none on Fast) and real stone sills, lintels, ledges and cornices on street-facing buildings at every quality level.
@@ -96,18 +99,20 @@ The readable source is in `src/`:
 - `rig.js`: the skinned zombies and their animation blending
 - `bow.js`: bow viewmodel and draw/release/reload animation
 - `zombies.js`: enemy types, AI and procedural animation
-- `game.js`: player, arrows, waves, shop, HUD and the main loop
+- `armory.js`: the between-waves Armory: catalog and prices (`ARMORY`), what each level does (`UPG`), the quiver loadout and the screen itself
+- `game.js`: player, arrows, arrow recovery, waves, HUD and the main loop
 - `audio.js`: synthesized sound effects and music
 - `seg.js`: the 16-segment neon lettering
 
 After editing, run `python3 build.py`. It rebuilds `index.html`.
 
-Balance numbers you will probably want to tune live near the top of their files: `ZTYPES` in `zombies.js` (health, speed and damage per enemy), `SHOP` in `game.js` (upgrade prices), and `GAME.startWave` / `GAME.spawnOne` in `game.js` (wave sizes and the enemy mix).
+Balance numbers you will probably want to tune live near the top of their files: `ZTYPES` in `zombies.js` (health, speed and damage per enemy), `ARMORY` / `UPG` / `ALLOT` in `armory.js` (prices, upgrade effects, special arrows per wave), and `GAME.startWave` / `GAME.spawnOne` in `game.js` (wave sizes and the enemy mix).
 
 ## Credits
 
 - Code, art and audio were generated procedurally for this project.
 - The UI font is a subset of **TeX Gyre Heros Condensed** by GUST e-foundry, renamed "Quiver Cn" for embedding, and used under the GUST Font License.
+- The Armory uses Latin subsets of **Chakra Petch** (Cadson Demak) and **IBM Plex Mono** (IBM), both under the SIL Open Font License (`fonts/OFL-*.txt`).
 
 ## Credits
 - Ultra surface textures: [Poly Haven](https://polyhaven.com) (CC0): asphalt_02, concrete_wall_008, red_brick_03, rusty_metal_02, corrugated_iron_02, concrete_pavers, plastered_wall_02, concrete_floor_worn_001. Re-fetch with `tools/fetch_textures.py`, pack with `tools/pack_textures.py`.

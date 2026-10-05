@@ -4,6 +4,11 @@ S = lambda f: open(os.path.join(root, 'src', f)).read()
 fonts = ''
 for w, st, f in [(400, 'normal', 'heroscn-regular.woff'), (700, 'normal', 'heroscn-bold.woff'), (700, 'italic', 'heroscn-bolditalic.woff')]:
     fonts += '@font-face{font-family:"Quiver Cn";font-weight:%d;font-style:%s;font-display:block;src:url(fonts/%s) format("woff");}\n' % (w, st, f)
+# the Armory screen's faces (Chakra Petch + IBM Plex Mono, SIL OFL, Latin subsets in fonts/). font-display: swap and a
+# background document.fonts.load() at boot, so they never block the game and are ready before the first wave is cleared.
+for fam, pre, ws in [('Chakra Petch', 'chakrapetch', [(400, 'regular'), (500, 'medium'), (600, 'semibold'), (700, 'bold')]), ('IBM Plex Mono', 'ibmplexmono', [(400, 'regular'), (500, 'medium'), (600, 'semibold')])]:
+    for w, n in ws:
+        fonts += '@font-face{font-family:"%s";font-weight:%d;font-style:normal;font-display:swap;src:url(fonts/%s-%s.woff) format("woff");}\n' % (fam, w, pre, n)
 css = S('style.css').replace('/*__FONTS__*/', fonts)
 IMPORTS = '''import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -16,7 +21,7 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 '''
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
 TEX_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'textures', f), 'rb').read() for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg', 'albedo_half.jpg', 'normal_half.jpg', 'orm_half.jpg'))).hexdigest()[:10]
-js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'game.js'])
+js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'

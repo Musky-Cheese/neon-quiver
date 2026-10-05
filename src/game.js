@@ -21,28 +21,49 @@ if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 
 /* ---------------- player ---------------- */
-const REGEN = { delay: 6, rate: 2.5, cap: 0.5 };
-const INTERMISSION = 25;   // seconds between waves (visible countdown; N starts the next wave early)
+const REGEN = { delay: 6 };   // out of combat = 6 s without taking a hit; the rate (1 HP every 4 s at base) comes from the armory
+const INTERMISSION = 45;      // seconds between waves, shown in the Armory and the HUD (Start wave / N skips it)
+const EYE = 1.62, CROUCH_DROP = 0.55;
+function newAmmo() { const a = ARROWS.map(() => 0); a[0] = 20; return a; }
 const PLAYER = {
   x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0, roll: 0, grounded: true,
-  hp: 100, maxHp: 100, speedMult: 1, drawTime: 0.62, reloadTime: 0.62, dmgMult: 1, ammo: [Infinity, 4, 2, 4, 2, 2, 3],
+  hp: 100, maxHp: 100, speedMult: 1, drawTime: 1, reloadTime: 0.62, dmgMult: 1, powerMult: 1, armor: 0, quiverMax: 20, regenInt: 4, swayK: 1, recoverR: 1.3,
+  stam: 5, stamMax: 5, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0, ammo: newAmmo(),
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
-  up: { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 },
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
+    d *= 1 - this.armor;   // Armor Plating
     this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
     const ang = Math.atan2(fx - this.x, fz - this.z); this.hurtDirs.push({ ang, t: 1.2 });
     if (this.hp <= 0) { this.hp = 0; GAME.gameOver(); }
   },
 };
+// armory levels -> live player numbers (tables in armory.js: UPG)
 function applyUpgrades() {
-  const u = PLAYER.up;
-  PLAYER.drawTime = 0.62 * Math.pow(0.86, u.draw);
-  PLAYER.dmgMult = 1 + 0.16 * u.dmg;
-  PLAYER.maxHp = 100 + 25 * u.hp;
-  PLAYER.reloadTime = 0.62 * Math.pow(0.84, u.reload);
-  PLAYER.speedMult = 1 + 0.08 * u.speed;
+  const P = PLAYER;
+  P.drawTime = UPG.draw[upLv('drawspeed')]; P.powerMult = UPG.power[upLv('power')]; P.quiverMax = UPG.quiver[upLv('quiver')];
+  P.swayK = UPG.sway[upLv('aim')]; P.recoverR = UPG.recover[upLv('recovery')];
+  P.regenInt = UPG.regen[upLv('regen')]; P.maxHp = UPG.maxhp[upLv('maxhp')]; P.armor = UPG.armor[upLv('armor')]; P.stamMax = UPG.stamina[upLv('stamina')];
+}
+/* ---------------- quiver: standard + up to 3 equipped specials ---------------- */
+function arrowAvailable(t) { return t === 0 || LOADOUT.equipped.some((id) => SPECIAL_AT[id] === t); }
+function availTypes() { const a = [0]; for (const id of LOADOUT.equipped) a.push(SPECIAL_AT[id]); return a; }
+function slotType(n) { const id = LOADOUT.equipped[n]; return id ? SPECIAL_AT[id] : -1; }
+function firstLoaded() { for (const t of availTypes()) if (PLAYER.ammo[t] > 0) return t; return 0; }
+let _oooT = -9;
+function outOfArrows() { AUD.deny(); flashQuiver(0); if (GAME.time - _oooT > 2.5) { _oooT = GAME.time; GAME.toast('OUT OF ARROWS · PICK UP SPENT ONES', '#ff6fb4'); } }
+// every wave starts with a full quiver of standard arrows and each equipped special topped up to its allotment
+function refillForWave() {
+  const P = PLAYER; P.ammo[0] = Math.max(P.ammo[0], P.quiverMax);
+  for (const t of availTypes()) if (t) P.ammo[t] = Math.max(P.ammo[t], ALLOT[t]);
+  updateQuiverHUD();
+}
+// supply caches (world.js)
+function supplyRefill() {
+  const P = PLAYER; P.ammo[0] = Math.min(P.quiverMax, P.ammo[0] + 10);
+  for (const t of availTypes()) if (t) P.ammo[t] += Math.ceil(ALLOT[t] / 2);
+  P.hp = Math.min(P.maxHp, P.hp + 15); updateQuiverHUD();
 }
 
 /* ---------------- input ---------------- */
@@ -51,7 +72,8 @@ const gameEl = document.getElementById('game');
 addEventListener('keydown', (e) => {
   const k = e.code; INPUT.keys[k] = true;
   if (GAME.state === 'playing') {
-    const dn = /^Digit([1-7])$/.exec(k); if (dn) selectArrow(+dn[1] - 1);
+    const dn = /^Digit([1-3])$/.exec(k); if (dn) selectSlot(+dn[1] - 1);
+    if (k === 'Backquote') selectArrow(0);
     if (k === 'KeyX') selectArrow(GAME.lastType);
     // grapple: hold Q to preview the anchor and fall risk, release to fire; Q while reeling cuts the rope
     if (k === 'KeyQ' && !e.repeat) { if (HOOK.state === 'reel') hookFire(); else if (HOOK.state === 'idle') { HOOK.aiming = true; HOOK.aimT = 0; } }
@@ -60,6 +82,7 @@ addEventListener('keydown', (e) => {
     if (k === 'KeyE' && GAME.nearTerminal) GAME.openShop();
     if (k === 'KeyN' && GAME.intermission) { GAME.interT = 0; }
   } else if (GAME.state === 'paused' && (k === 'KeyP')) GAME.resume();
+  else if (GAME.state === 'shop' && k === 'Escape') { e.preventDefault(); GAME.closeShop(); }   // back to the street; the countdown keeps running
 });
 addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
 addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
@@ -68,12 +91,17 @@ gameEl.addEventListener('mousedown', (e) => {
   if (GAME.state !== 'playing') return;
   if (!INPUT.locked && !INPUT.freeLook) { requestLock(); return; }
   if (INPUT.freeLook && !INPUT.locked) requestLock(true);
-  if (e.button === 0) { INPUT.mouseDown = true; bowStartDraw(); }
+  if (e.button === 0) { INPUT.mouseDown = true; if (BOW.state === 'ready' && PLAYER.ammo[BOW.type] <= 0) { const t = firstLoaded(); if (t !== BOW.type && PLAYER.ammo[t] > 0) { selectArrow(t); return; } } bowStartDraw(); }
   if (e.button === 2) { bowCancel(); }
 });
 addEventListener('mouseup', (e) => { if (e.button === 0) { INPUT.mouseDown = false; if (GAME.state === 'playing') { const p = bowRelease(); if (p) fireArrow(p); } } });
 gameEl.addEventListener('contextmenu', (e) => e.preventDefault());
-addEventListener('wheel', (e) => { if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1; let t = BOW.nextType >= 0 ? BOW.nextType : BOW.type; const NA = ARROWS.length; for (let i = 0; i < NA; i++) { t = (t + dir + NA) % NA; if (t === 0 || PLAYER.ammo[t] > 0) break; } selectArrow(t); }, { passive: true });
+addEventListener('wheel', (e) => {
+  if (GAME.state !== 'playing') return; const dir = e.deltaY > 0 ? 1 : -1, L = availTypes(), N = L.length;
+  let i = Math.max(0, L.indexOf(BOW.nextType >= 0 ? BOW.nextType : BOW.type));
+  for (let k = 0; k < N; k++) { i = (i + dir + N) % N; if (PLAYER.ammo[L[i]] > 0) break; }
+  selectArrow(L[i]);
+}, { passive: true });
 function requestLock(quiet) {
   try { const r = canvas.requestPointerLock && canvas.requestPointerLock(); if (r && r.catch) r.catch(() => { INPUT.freeLook = true; }); } catch (e) { INPUT.freeLook = true; }
   if (!quiet) setTimeout(() => { if (!INPUT.locked) INPUT.freeLook = true; }, 1500);
@@ -84,42 +112,103 @@ document.addEventListener('pointerlockchange', () => {
   if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
-  if (t < 0 || t >= ARROWS.length) return;
-  if (t !== 0 && PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
+  if (t < 0 || t >= ARROWS.length || !arrowAvailable(t)) return;
+  if (PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
   const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (cur === t) return;
   GAME.lastType = cur; bowSwap(t);
+}
+// keys 1–3: the special in that loadout slot; pressing the active slot again goes back to standard arrows
+function selectSlot(n) {
+  const t = slotType(n); if (t < 0) { AUD.deny(); flashQuiver('e' + n); return; }
+  const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type;
+  selectArrow(cur === t ? 0 : t);
 }
 
 /* ---------------- projectiles ---------------- */
 const PROJ = [];
 const GRAV = 9.5;
 const _cf = [0, 0, 0], _cr = [0, 0, 0], _cu = [0, 0, 0];
-function camBasis() {
-  const cy = Math.cos(PLAYER.yaw), sy = Math.sin(PLAYER.yaw), cp = Math.cos(PLAYER.pitch), sp = Math.sin(PLAYER.pitch);
+function camBasis(swX = 0, swY = 0) {
+  const yaw = PLAYER.yaw + swX, pitch = PLAYER.pitch + swY;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
   _cf[0] = -sy * cp; _cf[1] = sp; _cf[2] = -cy * cp; _cr[0] = cy; _cr[1] = 0; _cr[2] = -sy; _cu[0] = sy * sp; _cu[1] = cp; _cu[2] = cy * sp;
 }
 function fireArrow(power) {
   const type = BOW.type, A = ARROWS[type];
-  if (type !== 0) { PLAYER.ammo[type]--; }
-  camBasis();
-  const eye = [PLAYER.x, PLAYER.y + 1.62 - (PLAYER.sink || 0), PLAYER.z];
+  if (PLAYER.ammo[type] <= 0) return;
+  PLAYER.ammo[type]--;
+  camBasis(PLAYER.swayX, PLAYER.swayY);   // the arrow goes where the swaying crosshair is
+  const eye = [PLAYER.x, PLAYER.y + PLAYER.eyeH - (PLAYER.sink || 0), PLAYER.z];
   const spd = (40 + 64 * power) * A.speed;
-  // tiny spread when not fully drawn
-  const spr = (1 - power) * 0.012 + (BOW.hold > 2.2 ? 0.004 : 0);
-  const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr;
-  const n = type === AT.SCATTER ? 6 : 1, cone = type === AT.SCATTER ? 0.08 : 0;
-  for (let s = 0; s < n; s++) {
-    const jx = dx + (Math.random() - 0.5) * cone * 2, jy = dy + (Math.random() - 0.5) * cone * 1.4, jz = dz + (Math.random() - 0.5) * cone * 2, jl = Math.hypot(jx, jy, jz);
-    PROJ.push({
-      x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
-      vx: jx / jl * spd, vy: jy / jl * spd, vz: jz / jl * spd, type, power, pierce: type === 3 ? 5 : 0, hits: [], age: 0, stuck: false, stuckT: 0, dir: [jx / jl, jy / jl, jz / jl], stuckZ: null,
-      life: type === AT.SCATTER ? 0.24 : 6,   // scatter shards burn out after ~20 m
-    });
-  }
+  const spr = (1 - power) * 0.012;   // tiny spread when not fully drawn
+  const dx = _cf[0] + (Math.random() - 0.5) * spr, dy = _cf[1] + (Math.random() - 0.5) * spr, dz = _cf[2] + (Math.random() - 0.5) * spr, jl = Math.hypot(dx, dy, dz);
+  const a = {
+    x: eye[0] + _cf[0] * 0.4 - _cu[0] * 0.04, y: eye[1] + _cf[1] * 0.4 - _cu[1] * 0.04, z: eye[2] + _cf[2] * 0.4 - _cu[2] * 0.04,
+    vx: dx / jl * spd, vy: dy / jl * spd, vz: dz / jl * spd, type, power, hits: [], age: 0, stuck: false, stuckT: 0, dir: [dx / jl, dy / jl, dz / jl], stuckZ: null, life: 6,
+    pierce: type === AT.PIERCE ? UPG.pierce[upLv('piercer')] : 0,
+    split: type === AT.SCATTER ? UPG.split[upLv('splitter')] : 0, tok: null,
+  };
+  if (type === 0) a.tok = recToken(a);   // standard arrows can be picked up again
+  PROJ.push(a);
   AUD.release(power, type); shake(0.04 + power * 0.05);
   GAME.shots++;
-  if (type !== 0 && PLAYER.ammo[type] <= 0) { GAME.lastType = 0; BOW.nextType = 0; }
+  if (PLAYER.ammo[type] <= 0) { const nx = firstLoaded(); if (nx !== type && PLAYER.ammo[nx] > 0) BOW.nextType = nx; }
   updateQuiverHUD();
+}
+// Splitter: one arrow leaves the bow and breaks into a fan of bolts ~4 m out
+function splitArrow(a) {
+  const n = a.split, wide = upLv('splitter') >= 3, cone = wide ? 0.085 : 0.05, sp = Math.hypot(a.vx, a.vy, a.vz), d = a.dir;
+  const rl = Math.hypot(d[0], d[2]) || 1, rx = -d[2] / rl, rz = d[0] / rl;
+  for (let k = 0; k < n; k++) {
+    const off = (n === 1 ? 0 : (k / (n - 1) - 0.5) * 2) * cone + rand(-0.008, 0.008), up = rand(-0.3, 0.3) * cone;
+    const jx = d[0] + rx * off, jy = d[1] + up, jz = d[2] + rz * off, jl = Math.hypot(jx, jy, jz);
+    PROJ.push({ x: a.x, y: a.y, z: a.z, vx: jx / jl * sp, vy: jy / jl * sp, vz: jz / jl * sp, type: AT.SCATTER, power: a.power, hits: [], age: 0, stuck: false, stuckT: 0, dir: [jx / jl, jy / jl, jz / jl], stuckZ: null, life: 1.2, pierce: 0, split: 0, tok: null });
+  }
+  burst(a.x, a.y, a.z, 10, ARROWS[AT.SCATTER].glow, 3, 0.2, 0.04, 0, 2);
+}
+// level-aware special effects (armory.js UPG); a locked arrow never reaches these, but Lv 1 is the floor anyway
+function arrowDamage(a, A) { return 52 * (0.3 + 0.7 * a.power) * A.dmg * (1 + (PLAYER.powerMult - 1) * a.power) * PLAYER.dmgMult; }
+function blastAt(x, y, z) { const L = Math.max(1, upLv('blast')); explode(x, y, z, UPG.blastR[L], L >= 3); }
+function cryoAt(x, y, z, t) { const c = UPG.cryo[Math.max(1, upLv('cryo'))]; cryoHit(x, y, z, t, c[0], c[1]); }
+function shockAt(x, y, z, t, dmg) { const L = Math.max(1, upLv('shock')); shockChain(x, y, z, t, UPG.shock[L], Math.max(14, dmg * 0.45), L >= 3 ? 1 : 0); }
+function tracerAt(x, z, t) { const L = Math.max(1, upLv('tracer')); tracerMark(x, z, t, UPG.tracer[L], L >= 3 ? 10 : 1.5); }
+
+/* ---------------- arrow recovery ---------------- */
+// one token per standard arrow fired, oldest first. Picking an arrow up spends its token; at Arrow Recovery Lv 4
+// any token still unspent after 10 s brings that arrow home on its own.
+const RECQ = [];
+function recToken(proj) { const k = { t: GAME.time, done: false, proj, z: null }; RECQ.push(k); return k; }
+function dropZombieArrow(z) { const i = z.stuck.findIndex((sa) => sa.type === 0); if (i >= 0) z.stuck.splice(i, 1); }
+function updateRecovery() {
+  const P = PLAYER; let got = 0, back = 0;
+  if (P.ammo[0] < P.quiverMax) {
+    const r = P.recoverR, r2 = r * r, top = r > 1.5 ? 4 : 2.6;
+    for (let i = PROJ.length - 1; i >= 0 && P.ammo[0] + got < P.quiverMax; i--) {
+      const a = PROJ[i]; if (!a.stuck || !a.tok || a.tok.done) continue;
+      const dx = a.x - P.x, dz = a.z - P.z, dy = a.y - P.y; if (dx * dx + dz * dz > r2 || dy < -1 || dy > top) continue;
+      a.tok.done = true; PROJ.splice(i, 1); got++;
+    }
+    const rc = r + 0.6;
+    for (const z of ZOMBIES) {
+      if (!z.dead || !z.quiver || P.ammo[0] + got >= P.quiverMax) continue;
+      if ((z.x - P.x) ** 2 + (z.z - P.z) ** 2 > rc * rc) continue;
+      const n = Math.min(z.quiver, P.quiverMax - P.ammo[0] - got);
+      for (let k = 0; k < n; k++) { const t = z.toks && z.toks.pop(); if (t) t.done = true; dropZombieArrow(z); }
+      z.quiver -= n; got += n;
+    }
+  }
+  const ret = upLv('recovery') >= 4;
+  while (RECQ.length && (RECQ[0].done || GAME.time - RECQ[0].t >= 10)) {
+    const k = RECQ.shift(); if (k.done || !ret) continue;   // below Lv 4 it simply stays where it fell
+    if (P.ammo[0] + got + back >= P.quiverMax) { k.t = GAME.time; RECQ.push(k); break; }   // quiver full: try again later
+    k.done = true; back++;
+    if (k.z) { k.z.quiver = Math.max(0, k.z.quiver - 1); const j = k.z.toks ? k.z.toks.indexOf(k) : -1; if (j >= 0) k.z.toks.splice(j, 1); dropZombieArrow(k.z); }
+    else if (k.proj) { const j = PROJ.indexOf(k.proj); if (j >= 0) PROJ.splice(j, 1); }
+  }
+  if (got || back) {
+    P.ammo[0] += got + back; AUD.quiver(); updateQuiverHUD();
+    GAME.toast(got && back ? `+${got + back} ARROWS` : got ? `+${got} ARROW${got > 1 ? 'S' : ''}` : `+${back} ARROW${back > 1 ? 'S' : ''} RETURNED`, '#dff3ff');
+  }
 }
 const _seg0 = [0, 0, 0], _seg1 = [0, 0, 0], _so = { s: 0 };
 const _trailC = [0, 0, 0];
@@ -127,8 +216,9 @@ const LEG_SEGS = ['hipL', 'knL', 'knL', 'ftL', 'hipR', 'knR', 'knR', 'ftR'];
 function updateProjectiles(dt) {
   for (let i = PROJ.length - 1; i >= 0; i--) {
     const a = PROJ[i];
-    if (a.stuck) { a.stuckT += dt; if (a.stuckT > 14 || (a.stuckZ && a.stuckZ.dead && a.stuckZ.dieT > 4)) PROJ.splice(i, 1); continue; }
+    if (a.stuck) { a.stuckT += dt; if (a.stuckT > (a.tok ? 40 : 14) || (a.stuckZ && a.stuckZ.dead && a.stuckZ.dieT > 4)) PROJ.splice(i, 1); continue; }
     a.age += dt; if (a.age > (a.life || 6)) { PROJ.splice(i, 1); continue; }
+    if (a.split && a.age > 0.04) { splitArrow(a); PROJ.splice(i, 1); continue; }
     _seg0[0] = a.x; _seg0[1] = a.y; _seg0[2] = a.z;
     a.vy -= GRAV * dt * (a.type === 3 ? 0.35 : 1);
     const nx = a.x + a.vx * dt, ny = a.y + a.vy * dt, nz = a.z + a.vz * dt;
@@ -175,13 +265,13 @@ function updateProjectiles(dt) {
     if (!hitKind) { a.x = nx; a.y = ny; a.z = nz; continue; }
     const hx = a.x + (nx - a.x) * best, hy = a.y + (ny - a.y) * best, hz = a.z + (nz - a.z) * best;
     if (hitKind === 'n') {
-      objNestDamage(52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
-      if (a.type === 2) explode(hx, hy, hz); else if (a.type === AT.FROST) frostBurst(hx, hy, hz);
+      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
+      if (a.type === AT.BLAST) blastAt(hx, hy, hz); else if (a.type === AT.FROST) cryoAt(hx, hy, hz, null); else if (a.type === AT.SHOCK) shockAt(hx, hy, hz, null, nd); else if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       PROJ.splice(i, 1); continue;
     }
     if (hitKind === 'z') {
       const z = hitZ; a.hits.push(z);
-      const dmgBase = 52 * (0.3 + 0.7 * a.power) * A.dmg * PLAYER.dmgMult;
+      const dmgBase = arrowDamage(a, A);
       const mult = hitPart === 'head' ? (z.type === 'boss' ? 1.8 : 2.6) : hitPart === 'core' ? 2.2 : 1;
       const dmg = dmgBase * mult;
       const dir = a.dir.slice();
@@ -191,6 +281,7 @@ function updateProjectiles(dt) {
       GAME.hits++;
       // stick arrow into zombie (not rail)
       if (a.type !== 3 && a.type !== 2 && a.type !== AT.SCATTER && a.type !== AT.FROST && z.stuck.length < 8 && hitPart !== 'legs') { const loc = localize(z, hitPart === 'head' ? 'head' : 'body', [hx, hy, hz], dir); if (loc) z.stuck.push({ part: hitPart === 'head' ? 'head' : 'body', lp: loc.lp, ld: loc.ld, type: a.type }); }
+      if (a.tok) { a.tok.proj = null; a.tok.z = z; z.quiver++; (z.toks || (z.toks = [])).push(a.tok); a.tok = null; }   // carried until it drops
       const killed = damageZombie(z, dmg, hitPart, [hx, hy, hz], dir, a.type, a.power);
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
@@ -198,9 +289,11 @@ function updateProjectiles(dt) {
       AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
       if (killed) { GAME.hitMarker(true, true); }
       if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
-      if (a.type === AT.FROST) { frostBurst(hx, hy, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
       if (a.type === AT.TETHER) { tetherFrom(z, hx, hy, hz); }
-      if (a.type === 2) { explode(hx, hy, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.SHOCK) { shockAt(hx, hy, hz, z, dmg); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.TRACER) { tracerAt(hx, hz, z); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.BLAST) { blastAt(hx, hy, hz); PROJ.splice(i, 1); continue; }
       if (a.type === 3 && a.pierce > 0) { a.pierce--; a.x = hx + a.dir[0] * 0.05; a.y = hy + a.dir[1] * 0.05; a.z = hz + a.dir[2] * 0.05; continue; }
       PROJ.splice(i, 1); continue; // arrow now drawn as stuck on zombie
     } else {
@@ -208,12 +301,15 @@ function updateProjectiles(dt) {
       a.stuck = true; a.stuckT = 0;
       hazArrowHit(hx, hy, hz, a.type);
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
-      if (a.type === 2) { explode(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
-      if (a.type === AT.FROST) { frostBurst(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.BLAST) { blastAt(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.FROST) { cryoAt(hx, hy + 0.2, hz, null); PROJ.splice(i, 1); continue; }
+      if (a.type === AT.SHOCK) shockAt(hx, hy + 0.2, hz, null, arrowDamage(a, A));
+      if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
       if (a.type === 1) { FIRES.push({ x: hx, z: hz, t: 4.5 }); AUD.fireIgnite(); }
       AUD.thunk();
-      if (PROJ.filter(p => p.stuck).length > 45) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
+      let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
+      if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
     }
   }
 }
@@ -260,21 +356,24 @@ function updateFires(dt) {
     for (const z of zombieCandidates(f.x - 1.8, f.x + 1.8, f.z - 1.8, f.z + 1.8)) if (!z.dead && Math.hypot(z.x - f.x, z.z - f.z) < 1.8) z.burn = Math.max(z.burn, 2);
   }
 }
-function explode(x, y, z) {
-  const R = 6;
+// R: damage radius (Blast Arrow 2–4 m by level; tanks, the nest and the Warden's death use the full 6 m). knock: hard shove for survivors
+function explode(x, y, z, R = 6, knock = true) {
+  const q = clamp(R / 6, 0.35, 1);   // smaller blasts spend fewer particles
   objBlast(x, y, z, R, 160 * PLAYER.dmgMult);
-  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z)); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9));
-  flashLight(x, y + 1, z, [6, 1.2, 5.5], 26, 0.55);
-  burst(x, y, z, 120, [2.8, 0.5, 2.6], 14, 0.7, 0.3, 2, 2.5);
-  burst(x, y, z, 60, [3, 2.2, 3], 8, 0.35, 0.45, 0, 4);
-  burst(x, y, z, 50, [0.25, 0.18, 0.3], 5, 1.6, 0.9, -0.5, 1.2, 1);
-  for (let k = 0; k < 48; k++) { const a = k / 48 * TAU; emit(x, Math.max(0.2, y * 0.3), z, Math.cos(a) * 18, 0.3, Math.sin(a) * 18, 0.4, [2.5, 0.6, 2.4], 0.3, 0, 4); }
+  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z) + (1 - q) * 14); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9) * (0.5 + 0.5 * q));
+  flashLight(x, y + 1, z, [6, 1.2, 5.5], 26 * (0.4 + 0.6 * q), 0.55);
+  burst(x, y, z, Math.round(120 * q), [2.8, 0.5, 2.6], 14 * q, 0.7, 0.3, 2, 2.5);
+  burst(x, y, z, Math.round(60 * q), [3, 2.2, 3], 8 * q, 0.35, 0.45, 0, 4);
+  burst(x, y, z, Math.round(50 * q), [0.25, 0.18, 0.3], 5, 1.6, 0.9, -0.5, 1.2, 1);
+  const ring = Math.round(48 * q); for (let k = 0; k < ring; k++) { const a = k / ring * TAU; emit(x, Math.max(0.2, y * 0.3), z, Math.cos(a) * 18 * q, 0.3, Math.sin(a) * 18 * q, 0.4, [2.5, 0.6, 2.4], 0.3, 0, 4); }
   for (const zz of zombieCandidates(x - R * 1.4, x + R * 1.4, z - R * 1.4, z + R * 1.4)) {
     if (zz.dead) continue; const d = Math.hypot(zz.x - x, (zz.y + 1) - y, zz.z - z);
     if (d < R * (zz.type === 'boss' ? 1.4 : 1)) { const k = 1 - d / (R * 1.4); const dir = [(zz.x - x) / (d || 1), 0, (zz.z - z) / (d || 1)];
-      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true); if (!killed) { zz.vx += dir[0] * 10 * k; zz.vz += dir[2] * 10 * k; } GAME.hitMarker(false, killed); }
+      const killed = damageZombie(zz, (70 + 110 * k) * PLAYER.dmgMult, 'body', [zz.x, 1.1 * zz.scale, zz.z], dir, 2, 1, true);
+      if (!killed) { const kb = knock ? 12 : 3; zz.vx += dir[0] * kb * k; zz.vz += dir[2] * kb * k; if (knock && zz.type !== 'boss') zz.stumble = Math.max(zz.stumble, 0.8); }
+      GAME.hitMarker(false, killed); }
   }
-  const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < 3.2 && GAME.state === 'playing') PLAYER.hurt(8, x, z);
+  const pd = Math.hypot(PLAYER.x - x, PLAYER.z - z); if (pd < Math.min(3.2, R * 0.6) && GAME.state === 'playing') PLAYER.hurt(8, x, z);
   hazBlast(x, z, R, y);   // fuel tanks in reach go up too
 }
 
@@ -282,8 +381,9 @@ function explode(x, y, z) {
 const PICKUPS = [];
 function dropPickup(x, z, forceType) {
   const r = Math.random();
-  let kind = forceType || (r < 0.55 ? 'ammo' : 'health');
-  const at = kind === 'ammo' ? pick([1, 1, 2, 3, 3, 4, 5, 6, 6]) : 0;
+  const kind = forceType || (r < 0.55 ? 'ammo' : 'health');
+  // arrow drops: standard arrows, or one of the specials you have equipped
+  const sp = availTypes().slice(1), at = kind === 'ammo' && sp.length && Math.random() < 0.45 ? pick(sp) : 0;
   PICKUPS.push({ x, z, kind, at, t: 0 });
 }
 function updatePickups(dt) {
@@ -292,7 +392,8 @@ function updatePickups(dt) {
     if (p.t > 25) { PICKUPS.splice(i, 1); continue; }
     if (GAME.state === 'playing' && Math.hypot(p.x - PLAYER.x, p.z - PLAYER.z) < 1.7) {
       if (p.kind === 'health') { if (PLAYER.hp >= PLAYER.maxHp) continue; const h = Math.round(Math.max(25, PLAYER.maxHp * 0.25)); PLAYER.hp = Math.min(PLAYER.maxHp, PLAYER.hp + h); AUD.heal(); GAME.toast(`+${h} HEALTH`, '#6dff9a'); }
-      else { const n = p.at === 2 || p.at === AT.FROST || p.at === AT.TETHER ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
+      else if (p.at === 0) { const n = Math.min(6, PLAYER.quiverMax - PLAYER.ammo[0]); if (n <= 0) continue; PLAYER.ammo[0] += n; AUD.pickup(); GAME.toast(`+${n} ARROWS`, '#dff3ff'); updateQuiverHUD(); }
+      else { const n = p.at === AT.BLAST || p.at === AT.FROST || p.at === AT.SHOCK ? 2 : 3; PLAYER.ammo[p.at] += n; AUD.pickup(); GAME.toast(`+${n} ${ARROWS[p.at].name.toUpperCase()}`, rgbHex(ARROWS[p.at].color)); updateQuiverHUD(); }
       burst(p.x, 1, p.z, 30, p.kind === 'health' ? [0.4, 2.4, 0.9] : ARROWS[p.at].glow, 4, 0.5, 0.08, 0, 2);
       PICKUPS.splice(i, 1);
     }
@@ -323,15 +424,17 @@ function drawProjectiles() {
 
 /* ---------------- game state ---------------- */
 const GAME = {
-  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, cash: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
+  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
   best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
-    for (const k of ['wave', 'score', 'cash', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
+    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
+    loadoutReset(); RECQ.length = 0; ARCS.length = 0; this.lastType = 0;
     ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
-    PLAYER.up = { draw: 0, dmg: 0, hp: 0, reload: 0, speed: 0 }; applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0; PLAYER.ammo = [Infinity, 4, 2, 4, 2, 2, 3];
+    applyUpgrades(); PLAYER.hp = PLAYER.maxHp; PLAYER.lastHurt = -99; PLAYER.fling = false; PLAYER.peakY = 0; HOOK.state = 'idle'; HOOK.cd = 0;
+    PLAYER.ammo = newAmmo(); PLAYER.ammo[0] = PLAYER.quiverMax; Object.assign(PLAYER, { stam: PLAYER.stamMax, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0 });
     Object.assign(BOW, { draw: 0, state: 'ready', t: 0, type: 0, nextType: -1, hold: 0 });
     this.state = 'playing'; this.startT = this.time; setScreen(null); updateQuiverHUD();
     objReset(); wxReset(); hazReset(); PLAYER.sink = 0;
@@ -339,8 +442,9 @@ const GAME = {
   },
   startWave() {
     if (this.state !== 'playing') return;
-    this.intermission = false; this.clearedShown = false;
+    this.intermission = false; this.clearedShown = false; this.armoryT = 0;
     this.wave++;
+    refillForWave();
     const boss = this.wave % 5 === 0;
     const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
@@ -385,11 +489,17 @@ const GAME = {
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
         this.clearT += dt;
-        if (this.clearT > 0.4 && !this.clearedShown) { this.clearedShown = true; const bonus = 40 + this.wave * 15; this.cash += bonus; this.score += bonus * 5; this.showBanner('WAVE CLEARED', `+¢${bonus} · ${INTERMISSION}s TO RESUPPLY · N TO SKIP`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore(); this.intermission = true; this.interT = INTERMISSION; }
+        if (this.clearT > 0.4 && !this.clearedShown) {
+          this.clearedShown = true; const bonus = 20 + this.wave * 6; this.scrap += bonus; this.score += bonus * 12;
+          this.showBanner('WAVE CLEARED', `+${bonus} SCRAP · ARMORY OPENING`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
+          this.intermission = true; this.interT = INTERMISSION; this.armoryT = 1.8;   // a beat to see the banner, then the Armory opens
+        }
       }
     }
     // 25 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
     if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick && AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
+    if (this.armoryT > 0 && this.state === 'playing' && this.intermission) { this.armoryT -= dt; if (this.armoryT <= 0) this.openShop(); }
+    if (this.state === 'shop') armoryTick();
     if (this.bannerT > 0) this.bannerT -= dt;
     this.hm.t = Math.max(0, this.hm.t - dt);
     for (let i = this.toasts.length - 1; i >= 0; i--) { this.toasts[i].t -= dt; if (this.toasts[i].t <= 0) this.toasts.splice(i, 1); }
@@ -408,8 +518,8 @@ const GAME = {
     this.combo++; this.comboT = 3.5;
     const mult = 1 + Math.min(8, Math.floor(this.combo / 3)) * 0.25;
     const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
-    const cash = z.T.cash * (z.elite ? 2 : 1) + (head ? 5 : 0);
-    this.score += pts; this.cash += cash; this.kills++; if (head) this.headshots++;
+    const scrap = z.T.scrap * (z.elite ? 2 : 1) + (head ? 2 : 0);   // scrap per kill: see ZTYPES in zombies.js
+    this.score += pts; this.scrap += scrap; this.kills++; if (head) this.headshots++;
     AUD.kill();
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
     if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
@@ -422,8 +532,13 @@ const GAME = {
   hitMarker(head, kill) { this.hm.t = 0.18; this.hm.head = !!head; this.hm.kill = !!kill; },
   toast(text, color) { this.toasts.unshift({ text, color, t: 1.6 }); if (this.toasts.length > 4) this.toasts.pop(); },
   showBanner(title, sub, color) { this.banner = { title, sub, color }; this.bannerT = 3; },
-  openShop() { this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; BOW.state = 'ready'; BOW.draw = 0; if (document.exitPointerLock) document.exitPointerLock(); renderShop(); setScreen('shop'); },
-  closeShop() { setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // leaving early keeps the countdown
+  openShop() {
+    if (this.state !== 'playing') return;
+    this.state = 'shop'; this.armoryT = 0; AUD.drawStop(); INPUT.mouseDown = false; INPUT.keys = {}; HOOK.aiming = false; HOOK.aim = null; BOW.state = 'ready'; BOW.draw = 0;
+    if (document.exitPointerLock) document.exitPointerLock(); setScreen('shop'); armoryOpen(); AUD.armory();
+  },
+  closeShop() { if (this.state !== 'shop') return; setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // Esc keeps the countdown running
+  startNow() { this.intermission = false; this.interT = 0; this.closeShop(); },
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; AUD.drawStop(); INPUT.mouseDown = false; if (BOW.state === 'drawing') BOW.state = 'letdown'; setScreen('pause'); drawLogo($('pauseLogo'), 'PAUSED', '#29e7ff'); if (document.exitPointerLock && INPUT.locked) document.exitPointerLock(); },
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
@@ -440,47 +555,24 @@ const GAME = {
   },
 };
 
-/* ---------------- shop ---------------- */
-const SHOP = [
-  { id: 'draw', name: 'Tension Servos', desc: 'Draw the bow faster', max: 6, cost: (l) => Math.round(70 * Math.pow(1.55, l)), level: () => PLAYER.up.draw, buy() { PLAYER.up.draw++; applyUpgrades(); } },
-  { id: 'dmg', name: 'Tungsten Heads', desc: '+16% arrow damage', max: 10, cost: (l) => Math.round(80 * Math.pow(1.5, l)), level: () => PLAYER.up.dmg, buy() { PLAYER.up.dmg++; applyUpgrades(); } },
-  { id: 'reload', name: 'Auto-Quiver', desc: 'Nock the next arrow faster', max: 5, cost: (l) => Math.round(60 * Math.pow(1.6, l)), level: () => PLAYER.up.reload, buy() { PLAYER.up.reload++; applyUpgrades(); } },
-  { id: 'hp', name: 'Dermal Plating', desc: '+25 max health', max: 6, cost: (l) => Math.round(90 * Math.pow(1.55, l)), level: () => PLAYER.up.hp, buy() { PLAYER.up.hp++; applyUpgrades(); PLAYER.hp += 25; } },
-  { id: 'speed', name: 'Kinetic Boots', desc: '+8% move speed', max: 4, cost: (l) => Math.round(70 * Math.pow(1.6, l)), level: () => PLAYER.up.speed, buy() { PLAYER.up.speed++; applyUpgrades(); } },
-  { id: 'heal', name: 'Med Injector', desc: 'Restore full health', cost: () => 45, level: () => 0, can: () => PLAYER.hp < PLAYER.maxHp, buy() { PLAYER.hp = PLAYER.maxHp; } },
-  { id: 'a1', name: 'Incendiary ×4', desc: 'Sets the infected on fire', cost: () => 55, level: () => 0, ammo: 1, buy() { PLAYER.ammo[1] += 4; } },
-  { id: 'a2', name: 'Plasma Charge ×2', desc: 'Explodes on impact', cost: () => 80, level: () => 0, ammo: 2, buy() { PLAYER.ammo[2] += 2; } },
-  { id: 'a3', name: 'Rail Piercer ×4', desc: 'Flat and fast, pierces 5', cost: () => 65, level: () => 0, ammo: 3, buy() { PLAYER.ammo[3] += 4; } },
-  { id: 'a4', name: 'Cryo Burst ×3', desc: 'Freezes a crowd to a crawl', cost: () => 70, level: () => 0, ammo: 4, buy() { PLAYER.ammo[4] += 3; } },
-  { id: 'a5', name: 'Tether ×3', desc: 'Pins its target and two more', cost: () => 60, level: () => 0, ammo: 5, buy() { PLAYER.ammo[5] += 3; } },
-  { id: 'a6', name: 'Scatter ×4', desc: 'Six shards, point blank', cost: () => 50, level: () => 0, ammo: 6, buy() { PLAYER.ammo[6] += 4; } },
-];
-function renderShop() {
-  const el = document.getElementById('shopGrid');
-  document.getElementById('shopCash').textContent = '¢' + GAME.cash.toLocaleString();
-  document.getElementById('shopWave').textContent = `Wave ${GAME.wave} cleared · Next: wave ${GAME.wave + 1}${(GAME.wave + 1) % 5 === 0 ? ' — the Warden' : ''}`;
-  document.getElementById('shopHp').textContent = `${Math.ceil(PLAYER.hp)} / ${PLAYER.maxHp}`;
-  el.innerHTML = '';
-  for (const it of SHOP) {
-    const lvl = it.level(), maxed = it.max && lvl >= it.max, cost = it.cost(lvl), can = !maxed && GAME.cash >= cost && (!it.can || it.can());
-    const b = document.createElement('button'); b.className = 'card' + (it.ammo ? ' ammo a' + it.ammo : '') + (can ? '' : ' off'); b.type = 'button'; b.id = 'shop-' + it.id;
-    const pips = it.max ? `<div class="pips">${Array.from({ length: it.max }, (_, i) => `<i class="${i < lvl ? 'on' : ''}"></i>`).join('')}</div>` : (it.ammo ? `<div class="own">In quiver: ${PLAYER.ammo[it.ammo]}</div>` : `<div class="own">${Math.ceil(PLAYER.hp)} / ${PLAYER.maxHp} HP</div>`);
-    b.innerHTML = `<div class="cname">${it.name}</div><div class="cdesc">${it.desc}</div>${pips}<div class="cost">${maxed ? 'MAXED' : '¢' + cost}</div>`;
-    b.addEventListener('click', () => { if (!can) { AUD.deny(); return; } GAME.cash -= cost; it.buy(); AUD.buy(); renderShop(); updateQuiverHUD(); hudScore(); });
-    el.appendChild(b);
-  }
-}
-
 /* ---------------- HUD (DOM) ---------------- */
 const $ = (id) => document.getElementById(id);
 function rgbHex(c) { return '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join(''); }
-function hudScore() { $('score').textContent = GAME.score.toLocaleString(); $('cash').textContent = '¢' + GAME.cash.toLocaleString(); const m = 1 + Math.min(8, Math.floor(GAME.combo / 3)) * 0.25; $('combo').textContent = GAME.combo >= 3 ? `×${m.toFixed(2)} COMBO` : ''; }
+function hudScore() { $('score').textContent = GAME.score.toLocaleString(); $('scrap').textContent = GAME.scrap.toLocaleString(); const m = 1 + Math.min(8, Math.floor(GAME.combo / 3)) * 0.25; $('combo').textContent = GAME.combo >= 3 ? `×${m.toFixed(2)} COMBO` : ''; }
 function hudWave() { $('waveNum').textContent = GAME.wave; }
+// bottom-right quiver: standard arrows (` key) and the three loadout slots (1–3); rebuilt only when the loadout changes
+let _qSig = '';
 function updateQuiverHUD() {
-  const el = $('quiver'); if (!el.children.length) {
-    ARROWS.forEach((A, i) => { const d = document.createElement('div'); d.className = 'slot'; d.id = 'slot' + i; d.style.setProperty('--c', rgbHex(A.color)); d.innerHTML = `<span class="k">${i + 1}</span><span class="nm">${A.name}</span><span class="ct"></span><span class="bar"></span>`; el.appendChild(d); });
+  const el = $('quiver'), sig = LOADOUT.equipped.join(',');
+  if (sig !== _qSig || !el.children.length) {
+    _qSig = sig;
+    const row = (id, key, A, empty) => `<div class="slot${empty ? ' none' : ''}" id="${id}" style="--c:${A ? rgbHex(A.color) : '#5b6078'}"><span class="k">${key}</span><span class="nm">${A ? A.name : 'Empty slot'}</span><span class="ct"></span><span class="bar"></span></div>`;
+    let h = row('slot0', '`', ARROWS[0]);
+    for (let n = 0; n < SLOT_COUNT; n++) { const t = slotType(n); h += t >= 0 ? row('slot' + t, n + 1, ARROWS[t]) : row('slote' + n, n + 1, null, true); }
+    el.innerHTML = h;
   }
-  ARROWS.forEach((A, i) => { const d = $('slot' + i); const cur = (BOW.nextType >= 0 ? BOW.nextType : BOW.type) === i; d.classList.toggle('sel', cur); d.classList.toggle('empty', i > 0 && PLAYER.ammo[i] <= 0); d.querySelector('.ct').textContent = i === 0 ? '∞' : PLAYER.ammo[i]; });
+  const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type;
+  for (const t of availTypes()) { const d = $('slot' + t); if (!d) continue; d.classList.toggle('sel', cur === t); d.classList.toggle('empty', PLAYER.ammo[t] <= 0); d.querySelector('.ct').textContent = t === 0 ? `${PLAYER.ammo[0]} / ${PLAYER.quiverMax}` : PLAYER.ammo[t]; }
 }
 function flashQuiver(i) { const d = $('slot' + i); if (!d) return; d.classList.remove('deny'); void d.offsetWidth; d.classList.add('deny'); }
 let _lastSel = -1;
@@ -493,9 +585,10 @@ function hudFrame() {
   hudSet('hpFill', 's', `scaleX(${clamp(hpK, 0, 1)})`); hudSet('hpText', 't', String(Math.ceil(PLAYER.hp))); hudSet('hpMax', 't', '/ ' + PLAYER.maxHp);
   hudCls('hp', 'low', hpK < 0.3);
   let alive = 0; for (const z of ZOMBIES) if (!z.dead) alive++;
-  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO SKIP`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
+  if (GAME.intermission) { const t = Math.max(0, Math.ceil(GAME.interT)); hudSet('remain', 't', `NEXT WAVE IN ${t}s · N TO START NOW`); hudCls('remain', 'soon', t <= 5); hudCls('remain', 'count', true); }
   else { hudSet('remain', 't', GAME.wave ? `${alive + GAME.toSpawn} INFECTED` : ''); hudCls('remain', 'soon', false); hudCls('remain', 'count', false); }
   hudCls('hp', 'regen', !!PLAYER.regen);
+  hudSet('stFill', 's', `scaleX(${clamp(PLAYER.stam / PLAYER.stamMax, 0, 1).toFixed(3)})`); hudCls('stam', 'winded', PLAYER.winded); hudCls('stam', 'full', PLAYER.stam >= PLAYER.stamMax);
   const sel = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (sel !== _lastSel) { _lastSel = sel; updateQuiverHUD(); }
   if (GAME.boss) hudSet('bossFill', 's', `scaleX(${clamp(GAME.boss.hp / GAME.boss.maxHp, 0, 1)})`);
 }
@@ -529,6 +622,7 @@ function drawHUD2D(time) {
     hx.fillStyle = 'rgba(8,6,16,0.7)'; hx.fillRect(p[0] - w / 2 - 1, p[1] - 1, w + 2, 5); hx.fillStyle = k > 0.5 ? '#a6ff3a' : k > 0.25 ? '#ffb52e' : '#ff3040'; hx.fillRect(p[0] - w / 2, p[1], w * k, 3);
   }
   hx.globalAlpha = 1;
+  drawMarks(W, H);
   // floating numbers
   hx.textAlign = 'center'; hx.textBaseline = 'middle';
   for (const f of FLOATS) {
@@ -540,6 +634,8 @@ function drawHUD2D(time) {
   hx.globalAlpha = 1;
   // crosshair
   if (GAME.state === 'playing') {
+    // the crosshair rides the aim sway, so what you see is where the arrow goes
+    const ppr = (H / 2) / Math.tan(PLAYER.fov * Math.PI / 360), cx = W / 2 - PLAYER.swayX * ppr, cy = H / 2 - PLAYER.swayY * ppr;
     const d = BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; const gap = lerp(22, 5, d), len = lerp(9, 7, d);
     hx.strokeStyle = col; hx.lineWidth = 2; hx.shadowColor = col; hx.shadowBlur = 8 * d;
     hx.beginPath();
@@ -558,10 +654,10 @@ function drawHUD2D(time) {
       hx.beginPath(); for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { hx.moveTo(cx + sx * r0, cy + sy * r0); hx.lineTo(cx + sx * r1, cy + sy * r1); } hx.stroke(); hx.globalAlpha = 1; }
     // damage direction arcs
     for (const h of PLAYER.hurtDirs) { const rel = h.ang - Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw)); const a = -rel - Math.PI / 2; hx.strokeStyle = `rgba(255,40,70,${clamp(h.t, 0, 1)})`; hx.lineWidth = 6; hx.beginPath(); hx.arc(cx, cy, 120, a - 0.35, a + 0.35); hx.stroke(); }
-    drawHookHUD(hx, cx, cy, W, H);
+    drawHookHUD(hx, W / 2, H / 2, W, H);
     // toasts
     hx.font = '700 15px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif';
-    GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, cx, cy + 78 + i * 20); });
+    GAME.toasts.forEach((t, i) => { hx.globalAlpha = Math.min(1, t.t * 2) * (1 - i * 0.2); hx.fillStyle = t.color; hx.fillText(t.text, W / 2, H / 2 + 78 + i * 20); });
     hx.globalAlpha = 1;
   }
   drawMinimap(hx, W, H, time); drawObjective(hx, W, H); drawFieldObjectiveHUD(hx, W, H);
@@ -574,6 +670,22 @@ function drawHUD2D(time) {
     if (GAME.banner.sub) { hx.font = `700 ${Math.round(h * 0.26)}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; hx.fillStyle = '#e9ecff'; hx.letterSpacing = '4px'; hx.fillText(GAME.banner.sub, cx, H * 0.3 + h * 0.95); hx.letterSpacing = '0px'; }
     hx.globalAlpha = 1;
   }
+}
+// Tracer marks: a neon diamond over every tagged zombie, drawn on the HUD layer so walls never hide it
+function drawMarks(W, H) {
+  let any = false; for (const z of ZOMBIES) if (z.markT > 0 && !z.dead) { any = true; break; }
+  if (!any) return;
+  const col = rgbHex(ARROWS[AT.TRACER].color);
+  hx.strokeStyle = col; hx.fillStyle = col; hx.lineWidth = 2; hx.textAlign = 'center'; hx.font = '700 11px "Quiver Cn", sans-serif';
+  for (const z of ZOMBIES) {
+    if (z.dead || z.markT <= 0) continue;
+    const p = toScreen(z.x, z.y + 1.25 * z.scale * (z.crawl ? 0.35 : 1), z.z, W, H); if (!p) continue;
+    const r = clamp(220 / p[2], 7, 22), a = Math.min(1, z.markT / 0.6);
+    hx.globalAlpha = a * (0.65 + 0.35 * Math.sin(GAME.time * 8 + z.seed));
+    hx.beginPath(); hx.moveTo(p[0], p[1] - r); hx.lineTo(p[0] + r * 0.7, p[1]); hx.lineTo(p[0], p[1] + r); hx.lineTo(p[0] - r * 0.7, p[1]); hx.closePath(); hx.stroke();
+    if (p[2] > 14) { hx.globalAlpha = a * 0.8; hx.fillText(Math.round(p[2]) + ' m', p[0], p[1] - r - 6); }
+  }
+  hx.globalAlpha = 1;
 }
 const HUDVIS = { on: true };
 const DBG = {};
@@ -610,10 +722,16 @@ function updatePlayer(dt) {
   if (K.KeyW || K.ArrowUp) fz -= 1; if (K.KeyS || K.ArrowDown) fz += 1; if (K.KeyA || K.ArrowLeft) fx -= 1; if (K.KeyD || K.ArrowRight) fx += 1;
   const l = Math.hypot(fx, fz); if (l > 0) { fx /= l; fz /= l; }
   const drawing = BOW.state === 'drawing';
-  const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing;
+  // crouch (hold C): lower and slower, and with Steady Aim Lv 4 the bow stops swaying
+  P.crouch = lerp(P.crouch, K.KeyC && P.grounded && HOOK.state === 'idle' ? 1 : 0, Math.min(1, dt * 10)); P.eyeH = EYE - CROUCH_DROP * P.crouch;
+  // sprint stamina: drains while sprinting, refills after a short breather; run it dry and you're winded until 30%
+  if (P.winded && P.stam >= P.stamMax * 0.3) P.winded = false;
+  const sprint = (K.ShiftLeft || K.ShiftRight) && fz < 0 && !drawing && P.crouch < 0.3 && !P.winded && P.stam > 0;
+  if (sprint && l > 0) { P.stam -= dt; P.stamT = 0; if (P.stam <= 0) { P.stam = 0; P.winded = true; } }
+  else { P.stamT += dt; if (P.stamT > 0.8) P.stam = Math.min(P.stamMax, P.stam + dt * P.stamMax / 4); }
   const water = P.y < 0.05 ? waterAt(P.x, P.z) : 0; P.wading = water > 0;   // knee-deep in the koi pond, or the Metro's flooded track beds
   P.sink = lerp(P.sink || 0, P.wading ? 0.26 : 0, Math.min(1, dt * 6));
-  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
+  const spd = 5.4 * P.speedMult * (sprint ? 1.55 : 1) * (drawing ? 0.55 : 1) * (1 - 0.5 * P.crouch) * (water === 1 ? 0.62 : water === 2 ? 0.7 : 1);
   const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw);
   const wx = (fx * cy + fz * sy) * spd, wz = (-fx * sy + fz * cy) * spd;
   const hooked = updateHook(dt);   // while reeling in, the grapple owns the movement
@@ -621,7 +739,7 @@ function updatePlayer(dt) {
     const acc = P.grounded ? 12 : P.fling ? 0.8 : 3;   // flung off the hook: keep the momentum
     P.vx = lerp(P.vx, wx, Math.min(1, acc * dt)); P.vz = lerp(P.vz, wz, Math.min(1, acc * dt));
     P.x += P.vx * dt; P.z += P.vz * dt;
-    if (K.Space && P.grounded) { P.vy = 6.6; P.grounded = false; }
+    if (K.Space && P.grounded && P.crouch < 0.3) { P.vy = 6.6; P.grounded = false; }
     P.vy -= 20 * dt; P.y += P.vy * dt;
   }
   if (!P.grounded) P.peakY = Math.max(P.peakY ?? P.y, P.y);
@@ -639,6 +757,10 @@ function updatePlayer(dt) {
     if (P.x > 104) { P.x = Math.max(P.x, 108.4); P.z = Math.min(P.z, 143.6); } else P.x = clamp(P.x, -59, 59);
   }
   const hs = Math.hypot(P.vx, P.vz);
+  // aim sway at draw: grows if you hold a full draw too long; Steady Aim scales it down
+  { const dk = BOW.state === 'drawing' ? easeOut(BOW.draw) : 0, hold = BOW.hold > 2.2 ? Math.min(1, (BOW.hold - 2.2) / 2) : 0;
+    const amp = upLv('aim') >= 4 && P.crouch > 0.8 ? 0 : (0.0045 + 0.007 * hold) * dk * P.swayK * (1 + Math.min(1, hs / 5) * 0.6), t = GAME.time;
+    P.swayX = amp * (Math.sin(t * 1.15) * 0.75 + Math.sin(t * 2.7 + 1.3) * 0.25); P.swayY = amp * (Math.sin(t * 1.6 + 2.1) * 0.6 + Math.sin(t * 0.85 + 0.4) * 0.4); }
   BOW.walkAmt = lerp(BOW.walkAmt, P.grounded ? clamp(hs / 5.4, 0, 1.3) : 0, Math.min(1, dt * 8));
   BOW.sprintAmt = lerp(BOW.sprintAmt, sprint && hs > 3 ? 1 : 0, Math.min(1, dt * 6));
   const ph0 = BOW.walkPhase; BOW.walkPhase += dt * hs * 1.6 * (1 + BOW.sprintAmt * 0.35);
@@ -648,11 +770,10 @@ function updatePlayer(dt) {
   P.dmgFlash = Math.max(0, P.dmgFlash - dt * 1.4);
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }
   P.vmIn = Math.min(1, P.vmIn + dt * 2.5);
-  // slow regen: kicks in 6 s after the last hit, 2.5 HP/s, and only up to 50% of max health.
-  // Pickups, the Med Injector and Dermal Plating are still the only way back to full.
-  const regenCap = P.maxHp * REGEN.cap;
-  P.regen = GAME.state === 'playing' && !P.dead && P.hp < regenCap && GAME.time - P.lastHurt > REGEN.delay;
-  if (P.regen) P.hp = Math.min(regenCap, P.hp + REGEN.rate * dt);
+  // slow regen, on purpose: 6 s after the last hit, 1 HP every 4 s (Slow Regen: down to every 2.5 s)
+  P.regen = GAME.state === 'playing' && !P.dead && P.hp < P.maxHp && GAME.time - P.lastHurt > REGEN.delay;
+  if (P.regen) P.hp = Math.min(P.maxHp, P.hp + dt / P.regenInt);
+  if (GAME.state === 'playing' && !P.dead) updateRecovery();
   if (P.hp / P.maxHp < 0.3) { P.beat -= dt; if (P.beat <= 0) { P.beat = 0.9; AUD.heartbeat(); } }
 }
 
@@ -674,7 +795,7 @@ function step(dt) {
       // Other modes retain the original 45/90 m thresholds.
       const animNear2 = SETTINGS.laptop ? 900 : 2025, animFar2 = SETTINGS.laptop ? 3600 : 8100;
       if (z.rig && z.state !== 'dying' && ((zd2 > animFar2 && phase % 4) || (zd2 > animNear2 && phase % 2))) continue;
-      poseZombieRig(z, z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
+      poseZombieRig(z, z.chill > 0 && z.chillK <= 0 && !z.dead ? 0 : z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateArcs(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
@@ -707,16 +828,15 @@ function frame(now) {
   if (GAME.noLoop) return;
   const c0 = performance.now();
   if (!GAME.frozen) step(dt);
-  render(GAME.time);
-  if (GAME.state !== 'title') hudFrame();
-  drawHUD2D(GAME.time);
+  // the Armory is an opaque full-screen board: skip the 3D frame and the HUD entirely while it's up (no GPU work at all)
+  if (GAME.state !== 'shop') { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
   profFrame(performance.now() - c0);
 }
 
 /* ---------------- render ---------------- */
 function setCamera(time) {
   const P = PLAYER;
-  let x = P.x, y = P.y + 1.62 - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
+  let x = P.x, y = P.y + P.eyeH - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
   if (GAME.state === 'title' || GAME.attract) {
     const a = time * 0.06; x = Math.sin(a) * 19; z = Math.cos(a) * 19; y = 3.2 + Math.sin(time * 0.2) * 0.6; yaw = a + 0.35; pitch = 0.1; roll = 0;
     if (GAME.camOverride) ({ x, y, z, yaw, pitch, roll } = GAME.camOverride);
@@ -745,7 +865,7 @@ function render(time) {
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
-  drawProjectiles(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHazards(time); drawHook();
+  drawProjectiles(); drawArcs(); drawZProj(); drawPickups(time); drawSupplies(time); drawFires(time); drawObjectives(time); drawHazards(time); drawHook();
   if (GAME.state === 'playing' || GAME.state === 'paused' || GAME.state === 'shop' || (GAME.state === 'over' && PLAYER.deathT < 0.6) || GAME.showBowInTitle) drawBowViewmodel(camM, time, PLAYER);
   render3(time, W, H, fov, cam);
 }
@@ -757,7 +877,7 @@ function wireUI() {
   $('quitBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
   $('againBtn').addEventListener('click', () => { AUD.click(); ZOMBIES.length = 0; GAME.newGame(); requestLock(); });
   $('menuBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
-  $('nextWaveBtn').addEventListener('click', () => { AUD.click(); GAME.closeShop(); });
+  armoryWire();
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
@@ -797,6 +917,8 @@ async function boot() {
   await loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0'));
   gpuCheck();
   wireUI();
+  // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
+  try { for (const f of ['400 20px "Chakra Petch"', '500 20px "Chakra Petch"', '600 20px "Chakra Petch"', '700 20px "Chakra Petch"', '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 20px "IBM Plex Mono"']) document.fonts.load(f).catch(() => { }); } catch (e) { }
   toTitle();
   render(GAME.time); warmShaders();   // build the post chain, then compile everything before the first real frame
   $('loading').hidden = true;
@@ -817,13 +939,13 @@ window.NQ = {
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   AUD,
-  bowStartDraw, bowRelease, fireArrow, selectArrow, SHOP, renderShop, camBasis,
+  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
-  shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + 1.62), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
+  shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };
 boot();

@@ -35,9 +35,9 @@ function objStart(type) {
 function objFinish(ok) {
   const o = OBJ.cur; if (!o) return; const w = GAME.wave;
   if (ok) {
-    const cash = (o.type === 'nest' ? 90 : 70) + w * 14;
-    GAME.cash += cash; GAME.score += cash * 6; hudScore();
-    GAME.showBanner(o.type === 'nest' ? 'NEST DESTROYED' : 'UPLINK SECURED', `+¢${cash} · SUPPLIES DROPPED`, OBJ_COL[o.type]);
+    const scrap = (o.type === 'nest' ? 50 : 40) + w * 6;
+    GAME.scrap += scrap; GAME.score += scrap * 14; hudScore();
+    GAME.showBanner(o.type === 'nest' ? 'NEST DESTROYED' : 'UPLINK SECURED', `+${scrap} SCRAP · SUPPLIES DROPPED`, OBJ_COL[o.type]);
     for (let k = 0; k < 3; k++) dropPickup(o.x + rand(-2, 2), o.z + rand(-2, 2), k === 0 ? 'health' : 'ammo');
     AUD.cleared();
   } else GAME.showBanner('OBJECTIVE FAILED', 'THE UPLINK WENT DARK', '#ff3040');

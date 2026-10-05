@@ -68,6 +68,8 @@ const AUD = {
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
     if (type === 5) { this.tone('square', 300, 1400, 0.12, 0.05); }
     if (type === 6) { this.burst('lowpass', 1400, 300, 1, 0.3, 0.3); this.tone('square', 120, 50, 0.15, 0.1); }
+    if (type === 7) { this.tone('sawtooth', 1600, 3200, 0.12, 0.04); this.burst('highpass', 5000, 7000, 3, 0.12, 0.08); }
+    if (type === 8) { this.tone('sine', 2200, 2600, 0.1, 0.05); }
   },
   nock() { if (!this.ctx) return; const t = this.now(); this.burst('bandpass', 2500, 2500, 6, 0.05, 0.12); this.tone('square', 1800, 1700, 0.03, 0.03, this.sfx, t + 0.02); },
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
@@ -97,6 +99,12 @@ const AUD = {
   click() { if (!this.ctx) return; this.tone('square', 1400, 1400, 0.03, 0.04); },
   buy() { if (!this.ctx) return; const t = this.now(); this.tone('square', 740, 740, 0.06, 0.05); this.tone('square', 1480, 1480, 0.1, 0.05, this.sfx, t + 0.06); },
   deny() { if (!this.ctx) return; this.tone('square', 180, 140, 0.15, 0.06); },
+  // Shock Arrow arc: a crackle that gets denser with every zombie in the chain
+  zap(pan, n = 1) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); for (let i = 0; i < Math.min(5, n + 1); i++) { this.burst('highpass', 3500, 1800, 4, 0.08, 0.16, o, t + i * 0.045); this.tone('square', 90 + i * 25, 60, 0.07, 0.05, o, t + i * 0.045); } },
+  // Tracer tag: a short rising ping
+  tag(pan) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); this.tone('sine', 1400, 2100, 0.09, 0.07, o); this.tone('sine', 2100, 2100, 0.12, 0.05, o, t + 0.08); },
+  // armory: purchase confirmation already exists (buy); a soft panel-open chirp
+  armory() { if (!this.ctx) return; const t = this.now(); [392, 523, 784].forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.06, this.sfx, t + i * 0.07)); },
   swap() { if (!this.ctx) return; this.tone('triangle', 500, 900, 0.07, 0.06); },
   waveHorn(boss) {
     if (!this.ctx) return; const c = this.ctx, t = this.now(), d = boss ? 3.2 : 2.2;
