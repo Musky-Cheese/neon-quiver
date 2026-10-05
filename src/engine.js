@@ -206,7 +206,11 @@ attribute vec2 nqm;
 uniform float uTime, uWind;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 #if !defined(NQ_Z) && !defined(NQ_VM) && !defined(NQ_INST)
+#ifdef NQ_CARDS
+  if (true) {   // flower cards sway like the foliage
+#else
   if (nqm.y > 13.5 && nqm.y < 14.5) {   // foliage: a slow lean downwind (+x, like the rain) plus a quick leaf flutter, both from the weather
+#endif
     vec3 wp = transformed; float hk = smoothstep(1.2, 4.5, wp.y);
     float lean = uWind * (0.55 + 0.45 * sin(uTime * 0.8 + wp.x * 0.11 + wp.z * 0.09));
     transformed.x += lean * 0.16 * hk;

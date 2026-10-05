@@ -279,7 +279,14 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
       const sh = 0.62 + 0.28 * inner + 0.2 * hk, tint = R();
       const c = tint < 0.14 ? [1.0 * sh, 0.8 * sh, 0.88 * sh] : tint > 0.9 ? [0.84 * sh, 0.34 * sh, 0.5 * sh] : [blossom[0] * sh, blossom[1] * sh, blossom[2] * sh];
       const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u);
-      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * r(1.05, 1.35), sz * r(0.65, 0.82), sz * r(1.05, 1.35), 0.5, r(0, 99), c, 1.1 + 0.9 * inner, 14, 6, 4, 1);
+      // a small dark core keeps the canopy from reading hollow; the flowers themselves are alpha cards round it
+      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * 0.48, sz * 0.36, sz * 0.48, 0.5, r(0, 99), [c[0] * 0.2, c[1] * 0.14, c[2] * 0.17], 0.08, 14, 6, 4, 1);
+      for (let k = 0; k < 9; k++) {
+        const ux = r(-1, 1), uy = r(-0.7, 0.9), uz = r(-1, 1);
+        let nx = (px - cx) * 0.5 + ux, ny = 0.7 + uy, nz = (pz - cz) * 0.5 + uz; const nl = Math.hypot(nx, ny, nz) || 1;
+        WORLD.blossoms.push(px + ux * sz * 0.95, py + uy * sz * 0.7, pz + uz * sz * 0.95, nx / nl, ny / nl, nz / nl,
+          sz * r(0.95, 1.45), c[0], c[1], c[2], 0.75 + 0.75 * inner, (R() * 4) | 0);
+      }
       if (i % 5 === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
     }
   }

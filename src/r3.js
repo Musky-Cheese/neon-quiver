@@ -573,6 +573,81 @@ async function loadHeroSakuras() {
   } catch (e) { console.warn('hero sakura load failed', e); }
 }
 
+/* ---------------- sakura flower cards ----------------
+   The canopies are thousands of small alpha-tested cards, each painted with a little bunch of five-petal flowers
+   (a canvas atlas of four variants drawn at load), lit by the world shader with the blossom's own soft glow and
+   swaying with the foliage wind. Shadows come out flower-shaped too (three.js alpha-tests the shadow pass). */
+function blossomAtlas() {
+  const S = 512, H = S / 2, cv = document.createElement('canvas'); cv.width = cv.height = S;
+  const c = cv.getContext('2d'); let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let v = 0; v < 4; v++) {
+    const ox = (v % 2) * H, oy = (v >> 1) * H, n = 7 + (v % 2) * 3;
+    c.save(); c.beginPath(); c.rect(ox + 2, oy + 2, H - 4, H - 4); c.clip();
+    // a few twig strokes behind the flowers
+    c.strokeStyle = 'rgb(46,26,24)'; c.lineCap = 'round';
+    for (let t = 0; t < 2; t++) { c.lineWidth = 3 + rnd() * 3; c.beginPath(); c.moveTo(ox + H * (0.15 + rnd() * 0.2), oy + H * (0.8 + rnd() * 0.15)); c.quadraticCurveTo(ox + H * (0.3 + rnd() * 0.4), oy + H * (0.45 + rnd() * 0.2), ox + H * (0.6 + rnd() * 0.3), oy + H * (0.12 + rnd() * 0.2)); c.stroke(); }
+    for (let f = 0; f < n; f++) {
+      const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * H * 0.3, fx = ox + H / 2 + Math.cos(a) * d, fy = oy + H / 2 + Math.sin(a) * d;
+      const R0 = H * (0.1 + rnd() * 0.06), rot = rnd() * Math.PI, pale = rnd();
+      const outer = pale < 0.25 ? [255, 238, 244] : pale > 0.85 ? [236, 120, 168] : [255, 183, 208], inner = [214, 92, 140];
+      if (rnd() < 0.18) {   // a closed bud
+        c.fillStyle = `rgb(${inner})`; c.beginPath(); c.ellipse(fx, fy, R0 * 0.32, R0 * 0.48, rot, 0, Math.PI * 2); c.fill(); continue;
+      }
+      for (let p = 0; p < 5; p++) {
+        const pa = rot + p / 5 * Math.PI * 2, px = fx + Math.cos(pa) * R0 * 0.52, py = fy + Math.sin(pa) * R0 * 0.52;
+        const g = c.createRadialGradient(fx, fy, R0 * 0.05, fx, fy, R0 * 1.05);
+        g.addColorStop(0, `rgb(${inner})`); g.addColorStop(0.45, `rgb(${outer.map((x, i) => (x + inner[i]) / 2 | 0)})`); g.addColorStop(1, `rgb(${outer})`);
+        c.fillStyle = g; c.save(); c.translate(px, py); c.rotate(pa);
+        c.beginPath(); c.moveTo(-R0 * 0.5, 0);   // petal with the cherry's notched tip
+        c.bezierCurveTo(-R0 * 0.45, -R0 * 0.55, R0 * 0.35, -R0 * 0.55, R0 * 0.55, -R0 * 0.12);
+        c.lineTo(R0 * 0.42, 0); c.lineTo(R0 * 0.55, R0 * 0.12);
+        c.bezierCurveTo(R0 * 0.35, R0 * 0.55, -R0 * 0.45, R0 * 0.55, -R0 * 0.5, 0); c.fill(); c.restore();
+      }
+      c.fillStyle = 'rgb(150,40,80)'; c.beginPath(); c.arc(fx, fy, R0 * 0.16, 0, Math.PI * 2); c.fill();
+      c.fillStyle = 'rgb(255,226,150)';
+      for (let k = 0; k < 7; k++) { const sa = k / 7 * Math.PI * 2 + rot; c.beginPath(); c.arc(fx + Math.cos(sa) * R0 * 0.27, fy + Math.sin(sa) * R0 * 0.27, R0 * 0.045, 0, Math.PI * 2); c.fill(); }
+    }
+    c.restore();
+  }
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter; return tex;
+}
+function buildBlossoms() {
+  const B = WORLD.blossoms, N = B.length / 12; if (!N) return;
+  const mat = nqMaterial('static'); mat.map = blossomAtlas(); mat.alphaTest = 0.42; mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
+  mat.defines.NQ_CARDS = 1; mat.needsUpdate = true;
+  const cells = new Map(), CELL = 64;
+  for (let i = 0; i < N; i++) { const k = Math.floor(B[i * 12] / CELL) + ',' + Math.floor(B[i * 12 + 2] / CELL); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(i); }
+  const t = new THREE.Vector3(), b = new THREE.Vector3(), n = new THREE.Vector3(), up = new THREE.Vector3();
+  for (const list of cells.values()) {
+    const m = list.length, P = new Float32Array(m * 12), Nn = new Float32Array(m * 12), UV = new Float32Array(m * 8), C = new Float32Array(m * 12), Q = new Float32Array(m * 8), I = new Uint32Array(m * 6);
+    list.forEach((ci, j) => {
+      const o = ci * 12; n.set(B[o + 3], B[o + 4], B[o + 5]);
+      up.set(0, 1, 0); if (Math.abs(n.y) > 0.9) up.set(1, 0, 0);
+      t.crossVectors(up, n).normalize(); b.crossVectors(n, t);
+      const ang = (B[o] * 12.9898 + B[o + 2] * 78.233) % 6.283, ca = Math.cos(ang), sa = Math.sin(ang), h = B[o + 6] / 2;
+      const v = B[o + 11], u0 = (v % 2) * 0.5, v0 = (v >> 1) * 0.5;
+      const corners = [[-1, -1, 0, 0], [1, -1, 1, 0], [1, 1, 1, 1], [-1, 1, 0, 1]];
+      corners.forEach(([cx, cy, uu, vv], k) => {
+        const rx = (cx * ca - cy * sa) * h, ry = (cx * sa + cy * ca) * h, q = (j * 4 + k);
+        P[q * 3] = B[o] + t.x * rx + b.x * ry; P[q * 3 + 1] = B[o + 1] + t.y * rx + b.y * ry; P[q * 3 + 2] = B[o + 2] + t.z * rx + b.z * ry;
+        Nn[q * 3] = n.x; Nn[q * 3 + 1] = n.y; Nn[q * 3 + 2] = n.z;
+        UV[q * 2] = u0 + 0.01 + uu * 0.48; UV[q * 2 + 1] = v0 + 0.01 + vv * 0.48;
+        C[q * 3] = Math.min(1, B[o + 7] * 1.05); C[q * 3 + 1] = Math.min(1, B[o + 8] * 1.05); C[q * 3 + 2] = Math.min(1, B[o + 9] * 1.05);
+        Q[q * 2] = B[o + 10] * 0.55; Q[q * 2 + 1] = 0;
+      });
+      I.set([j * 4, j * 4 + 1, j * 4 + 2, j * 4, j * 4 + 2, j * 4 + 3], j * 6);
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(P, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(Nn, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(UV, 2)); geo.setAttribute('color', new THREE.BufferAttribute(C, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(Q, 2));
+    geo.setIndex(new THREE.BufferAttribute(I, 1)); geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, mat); mesh.name = 'blossoms'; mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; mesh.userData.streamRadius = 300; mesh.userData.streamLap = FAR.lap.props;
+    scene.add(mesh); WORLD_MESHES.push(mesh);
+  }
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (FAR._lap !== FAR.laptop) { FAR._lap = FAR.laptop; force = true; }   // Laptop toggled: re-resolve every radius now
@@ -599,6 +674,7 @@ function buildWorld3() {
   addWorldChunks(WORLD.meshGarden, true, true, 'garden');
   addWorldChunks(WORLD.meshForest, false, true, 'forest');
   addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
+  buildBlossoms();
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);

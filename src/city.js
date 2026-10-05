@@ -9,6 +9,7 @@ const WORLD = {
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
+  blossoms: [], // flat list, 12 floats per flower card: x, y, z, nx, ny, nz, size, r, g, b, glow, variant (r3.js buildBlossoms)
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
   glass: [],       // {m, c} see-through shopfront panes (r3.js draws them blended)
@@ -357,7 +358,7 @@ function buildCity() {
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
     const pg = g, keep = {}; g = new Geo();
-    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
+    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
     try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
