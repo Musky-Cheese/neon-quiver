@@ -973,6 +973,7 @@ async function boot() {
   await Promise.all([
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
     loadHeroSakuras(),
+    loadMeshyCars(),
   ]);
   gpuCheck();
   wireUI();

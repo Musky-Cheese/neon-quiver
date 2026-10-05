@@ -648,6 +648,42 @@ function buildBlossoms() {
   }
 }
 
+/* ---------------- Meshy wrecked cars ----------------
+   Two downloaded models (sedan, van), geometry only, one instanced draw each. Every car gets its own paint colour
+   through instanceColor; tyres, sills and the undertray (the bottom 0.48 m) are baked dark rubber/trim, the rest is
+   the world shader's car paint (material 11: wet clear-coat, streaks, rain beading). */
+async function loadMeshyCars() {
+  const spots = WORLD.carSpots || []; if (!spots.length) return;
+  const loader = new GLTFLoader(), V = typeof CARS_VER === 'string' ? CARS_VER : '0';
+  for (const kind of ['sedan', 'van']) {
+    const list = spots.filter(s => s.kind === kind); if (!list.length) continue;
+    try {
+      const gltf = await loader.loadAsync('models/car_' + kind + '.glb?v=' + V);
+      let src = null; gltf.scene.traverse(o => { if (!src && o.isMesh) src = o.geometry; });
+      const geo = src.clone(); geo.rotateY(-Math.PI / 2);   // modelled along +x; the game's cars run along z
+      if (!geo.attributes.normal) geo.computeVertexNormals();
+      const pos = geo.attributes.position, n = pos.count, col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
+      for (let i = 0; i < n; i++) {
+        const y = pos.getY(i), low = y < 0.48;
+        const c = low ? 0.1 : 1; col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = c;
+        nqm[i * 2] = 0; nqm[i * 2 + 1] = low ? 15 : 11;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+      const mat = nqMaterial('static'), cars = new THREE.InstancedMesh(geo, mat, list.length), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+      list.forEach((s, i) => {
+        q.setFromEuler(e.set(s.roll || 0, s.ry, (s.roll || 0) * 0.6, 'YXZ'));
+        m.compose(new THREE.Vector3(s.x, 0, s.z), q, new THREE.Vector3(1, 1, 1)); cars.setMatrixAt(i, m);
+        cars.setColorAt(i, new THREE.Color(s.paint[0], s.paint[1], s.paint[2]));
+      });
+      cars.computeBoundingSphere(); geo.boundingSphere = cars.boundingSphere.clone();
+      cars.name = 'meshy-cars-' + kind; cars.castShadow = true; cars.receiveShadow = true;
+      cars.userData.streamRadius = 1e5; cars.instanceMatrix.needsUpdate = true; cars.instanceColor.needsUpdate = true;
+      scene.add(cars); WORLD_MESHES.push(cars);
+    } catch (err) { console.warn('car load failed', kind, err); }
+  }
+  updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (FAR._lap !== FAR.laptop) { FAR._lap = FAR.laptop; force = true; }   // Laptop toggled: re-resolve every radius now

@@ -228,6 +228,9 @@ uniform float uTime, uWind;`)
   int pi = int(part + 0.5); if (uHide[pi] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
 #else
   vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
+#ifdef USE_INSTANCING_COLOR
+  vNqC.rgb *= instanceColor;   // per-instance paint (Meshy cars)
+#endif
 #endif
 #ifdef NQ_INST
   vITint = iTint; vIEmit = iEmit; vISkin = iSkin;

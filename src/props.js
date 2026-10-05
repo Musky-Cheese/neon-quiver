@@ -19,7 +19,16 @@ function pFoot(x, z, ry, lx0, lx1, lz0, lz1, y1) {
 }
 
 /* ---------- crashed hover-car: sculpted body, glass cabin, hover pods, damage ---------- */
+/* Wrecked cars are Meshy models now (r3.js loadMeshyCars): every spot that used to get a procedural car records a
+   spot instead. The old builder still runs into a throwaway mesh so it rolls the same dice and the rest of the
+   city's random layout doesn't shift; its collision circles stay, its pod lights don't. */
+const CAR_PAINTS = [[0.55, 0.06, 0.07], [0.06, 0.18, 0.5], [0.62, 0.62, 0.6], [0.75, 0.52, 0.04], [0.07, 0.3, 0.14], [0.6, 0.22, 0.04], [0.33, 0.34, 0.36], [0.04, 0.04, 0.05], [0.32, 0.06, 0.4], [0.05, 0.38, 0.42]];
 function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
+  const h = WORLD.halos.length; propHoverCarProc(new Geo(), R, x, z, ry, paint, variant); WORLD.halos.length = h;
+  const n = WORLD.carSpots.length, k = ((Math.floor(x * 7.31) * 73856093) ^ (Math.floor(z * 3.17) * 19349663)) >>> 0;
+  WORLD.carSpots.push({ x, z, ry, kind: (n % 3 === 1) ? 'van' : 'sedan', paint: CAR_PAINTS[(n * 3 + k) % CAR_PAINTS.length], roll: ((k >> 8) % 100 - 50) / 1400 });
+}
+function propHoverCarProc(g, R, x, z, ry, paint, variant = 0) {
   const P = M4.trs(PM.a, x, 0, z, 0.06, ry, 0.08, 1, 1, 1), W = M4.create(); W.set(P);
   const part = (lx, ly, lz, sx, sy, sz, r, c, e, mat, lry = 0, lrx = 0, lrz = 0, taper = null, s = 2) => g.rbox(pChild(W, lx, ly, lz, lry, lrx, lrz), sx, sy, sz, r, c, e, mat, s, taper);
   const glass = [0.05, 0.08, 0.1], trim = [0.06, 0.06, 0.07];
