@@ -31,7 +31,7 @@ function tankAt(x, y, z, pad) {
 function tankIgnite(t, fuse, cookAt) {
   if (!t.alive) return;
   if (t.fuse > 0 && t.fuse <= fuse) return;
-  if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.panOf(t.x, t.z), 1 - d / 80); }
+  if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.at(t.x, t.z), 1 - d / 80); }
   t.fuse = fuse; if (cookAt) t.cook = cookAt;
 }
 // an arrow struck the world at x, y, z: an Incendiary head in a tank wall starts it cooking

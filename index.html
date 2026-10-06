@@ -119,6 +119,8 @@ button, select, input { font-family: var(--f); }
 .settings { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 12px; letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; }
 .settings label { display: flex; gap: 8px; align-items: center; }
 .settings input[type=range] { accent-color: var(--mag); width: 110px; }
+.settings.audio { display: grid; grid-template-columns: repeat(2, max-content); }
+.settings.audio label { justify-content: space-between; }
 .settings select { background: #120d22; color: var(--ink); border: 1px solid var(--line); padding: 5px 8px; font-size: 12px; letter-spacing: 0.1em; }
 .linkbtn { appearance: none; background: none; border: 1px solid var(--line); color: var(--ink); padding: 6px 10px; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
 .linkbtn:hover, .linkbtn:focus-visible { border-color: var(--cyan); color: var(--cyan); outline: none; }
@@ -295,6 +297,12 @@ button, select, input { font-family: var(--f); }
         <label for="quality">Quality <select id="quality"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
+      <div class="settings audio">
+        <label for="volMaster">Volume <input id="volMaster" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volSfx">Effects <input id="volSfx" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volMusic">Music <input id="volMusic" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volAmb">Ambience <input id="volAmb" type="range" min="0" max="1" step="0.05" value="1"></label>
+      </div>
       <div class="bests">
         <div><span class="lbl">Best score</span><b id="bestScore">—</b></div>
         <div><span class="lbl">Best wave</span><b id="bestWave">—</b></div>
@@ -337,6 +345,12 @@ button, select, input { font-family: var(--f); }
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
         <label for="quality2">Quality <select id="quality2"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
+      </div>
+      <div class="settings audio" style="justify-content:center">
+        <label for="volMaster2">Volume <input id="volMaster2" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volSfx2">Effects <input id="volSfx2" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volMusic2">Music <input id="volMusic2" type="range" min="0" max="1" step="0.05" value="1"></label>
+        <label for="volAmb2">Ambience <input id="volAmb2" type="range" min="0" max="1" step="0.05" value="1"></label>
       </div>
     </div>
   </section>
@@ -2708,17 +2722,40 @@ function segText(ctx, text, x, y, h, opts = {}) {
 /* ============================================================
    Synth audio: SFX + ambient + music, all generated
    ============================================================ */
+function fillPink(d) {   // Paul Kellet's pink noise filter
+  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+  for (let i = 0; i < d.length; i++) {
+    const w = Math.random() * 2 - 1;
+    b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
+    b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
+    d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+  }
+}
 const AUD = {
-  ctx: null, master: null, sfx: null, music: null, amb: null, musicOn: true, musicScreen: true, noise: null, drawNode: null, started: false,
+  ctx: null, master: null, sfx: null, ui: null, music: null, amb: null, musicOn: true, musicScreen: true, noise: null, pink: null, drawNode: null, started: false,
+  vol: { master: 1, sfx: 1, music: 1, amb: 1 },   // player volume sliders, 0..1
+  lis: { x: 0, y: 1.6, z: 0 },                       // last listener position, for the distance filter
+  _pv: 1, _vv: 1,                                    // per-sound pitch / volume variation (see the wrapper at the bottom)
   init() {
     if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
     let AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const c = this.ctx = new AC();
-    const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.connect(c.destination);
-    this.master = c.createGain(); this.master.gain.value = 0.8; this.master.connect(comp);
-    this.sfx = c.createGain(); this.sfx.gain.value = 0.9; this.sfx.connect(this.master);
+    // bus compressor glues the mix; a soft clipper after it rounds off the peaks when a wave piles sounds on top of each
+    // other (linear below 0.8, so normal levels pass untouched, then a tanh knee that never exceeds 1)
+    const lim = c.createWaveShaper(), cv = new Float32Array(2049);
+    for (let i = 0; i < cv.length; i++) { const x = i / 1024 - 1, a = Math.abs(x); cv[i] = Math.sign(x) * (a < 0.8 ? a : 0.8 + 0.2 * Math.tanh((a - 0.8) / 0.2)); }
+    lim.curve = cv; lim.oversample = '2x'; lim.connect(c.destination);
+    const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.006; comp.release.value = 0.2; comp.connect(lim);
+    this.master = c.createGain(); this.master.connect(comp);
+    this.sfx = c.createGain(); this.sfx.connect(this.master);
+    this.ui = c.createGain(); this.ui.connect(this.master);   // menu / pickup blips: dry, no reverb
     this.music = c.createGain(); this.music.gain.value = 0.0; this.music.connect(this.master);
-    this.amb = c.createGain(); this.amb.gain.value = 0.35; this.amb.connect(this.master);
+    this.amb = c.createGain(); this.amb.connect(this.master);
+    // reverb: one convolver fed by sends from the world SFX and ambience buses (post-volume, so the sliders scale it too)
+    this.verb = c.createConvolver(); this.verb.buffer = this.makeIR(1.8, 3); this.verb.connect(this.master);
+    const ss = c.createGain(); ss.gain.value = 0.22; this.sfx.connect(ss); ss.connect(this.verb);
+    const as = c.createGain(); as.gain.value = 0.3; this.amb.connect(as); as.connect(this.verb);
+    this.applyVol(true);
     // delay send for music
     this.delay = c.createDelay(1); this.delay.delayTime.value = 0.375; const fb = c.createGain(); fb.gain.value = 0.35;
     const dl = c.createBiquadFilter(); dl.type = 'lowpass'; dl.frequency.value = 2200;
@@ -2726,22 +2763,62 @@ const AUD = {
     const len = c.sampleRate * 2; const buf = c.createBuffer(1, len, c.sampleRate); const d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.noise = buf;
+    const pb = c.createBuffer(1, len, c.sampleRate); fillPink(pb.getChannelData(0)); this.pink = pb;
     this.startAmbient(); this.startMusic();
   },
   now() { return this.ctx ? this.ctx.currentTime : 0; },
-  noiseSrc() { const s = this.ctx.createBufferSource(); s.buffer = this.noise; s.loop = true; s.loopStart = Math.random(); return s; },
+  noiseSrc(pink) { const s = this.ctx.createBufferSource(); s.buffer = pink ? this.pink : this.noise; s.loop = true; s.loopStart = Math.random(); return s; },
+  // a room-ish impulse response: a few early reflections, then a decaying noise tail that loses its top end as it dies
+  makeIR(dur, decay) {
+    const c = this.ctx, sr = c.sampleRate, n = Math.floor(sr * dur), b = c.createBuffer(2, n, sr);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = b.getChannelData(ch); let lp = 0;
+      for (let i = 0; i < n; i++) { const k = i / n, a = 0.9 - 0.75 * k; lp += (Math.random() * 2 - 1 - lp) * a; d[i] = i < sr * 0.012 ? 0 : lp * Math.pow(1 - k, decay); }
+      for (const [ms, g] of [[11, 0.5], [19, 0.35], [27, 0.3], [41, 0.22], [53, 0.16]]) d[Math.floor(sr * (ms + ch * 3.5) / 1000)] += g * (Math.random() < 0.5 ? -1 : 1);
+    }
+    return b;
+  },
+  applyVol(now) {   // now: jump straight to the levels (at startup) instead of a short glide
+    if (!this.ctx) return; const t = this.now(), v = this.vol;
+    const set = (g, x) => { if (now) g.gain.value = x; else g.gain.setTargetAtTime(x, t, 0.03); };
+    set(this.master, 0.75 * v.master); set(this.sfx, 0.9 * v.sfx); set(this.ui, 0.9 * v.sfx); set(this.amb, 0.35 * v.amb);
+    this.applyMusic();
+  },
+  setVolume(k, x) { this.vol[k] = clamp(+x, 0, 1); this.applyVol(); },
+  // the player's ears: called every frame with the eye position and view yaw (forward is -z rotated by yaw, as for the camera)
+  listen(x, y, z, yaw) {
+    if (!this.ctx) return; const L = this.ctx.listener; this.lis.x = x; this.lis.y = y; this.lis.z = z;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    if (L.positionX) { L.positionX.value = x; L.positionY.value = y; L.positionZ.value = z; L.forwardX.value = fx; L.forwardY.value = 0; L.forwardZ.value = fz; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
+    else { L.setPosition(x, y, z); L.setOrientation(fx, 0, fz, 0, 1, 0); }
+  },
+  // a 3D source at world point p {x, y, z}: HRTF panning (front / back / above), gentle distance falloff, and
+  // air absorption so far-off sounds come in muffled
+  at(p) {
+    const c = this.ctx; if (!c.createPanner) return this.sfx;
+    const pn = c.createPanner(); pn.panningModel = 'HRTF'; pn.distanceModel = 'inverse'; pn.refDistance = 6; pn.rolloffFactor = 0.5; pn.maxDistance = 300;
+    if (pn.positionX) { pn.positionX.value = p.x; pn.positionY.value = p.y; pn.positionZ.value = p.z; } else pn.setPosition(p.x, p.y, p.z);
+    const L = this.lis, d = Math.hypot(p.x - L.x, p.y - L.y, p.z - L.z);
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = clamp(20000 / (1 + d / 10), 1500, 20000); lp.Q.value = 0.5;
+    lp.connect(pn); pn.connect(this.sfx); return lp;
+  },
   env(g, t, a, peak, dcy, end = 0.0001) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(end, t + a + dcy); },
-  out(pan) {
+  out(pan) {   // pan: undefined (centred), a number -1..1 (stereo), or a world position {x, y, z} (3D)
+    if (pan && typeof pan === 'object') return this.at(pan);
     if (pan === undefined || !this.ctx.createStereoPanner) return this.sfx;
     const p = this.ctx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); p.connect(this.sfx); return p;
   },
   tone(type, f0, f1, dur, vol, dest, t = this.now(), a = 0.005) {
-    const c = this.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
+    const c = this.ctx; f0 *= this._pv; f1 *= this._pv; vol *= this._vv; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t);
     if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
     const g = c.createGain(); this.env(g, t, a, vol, dur); o.connect(g); g.connect(dest || this.sfx); o.start(t); o.stop(t + a + dur + 0.05); return o;
   },
   burst(fType, f0, f1, q, dur, vol, dest, t = this.now(), a = 0.004) {
-    const c = this.ctx; const s = this.noiseSrc(); const f = c.createBiquadFilter(); f.type = fType; f.Q.value = q;
+    const c = this.ctx; f0 *= this._pv; f1 *= this._pv; vol *= this._vv;
+    // low, filtered noise uses the pink buffer (warmer, less fizzy); the gain keeps it level with what white noise gave
+    const pink = fType === 'lowpass' || (fType === 'bandpass' && f0 < 1200);
+    if (pink) vol *= fType === 'lowpass' ? Math.pow(f0 / 1300, 0.4) : Math.pow(f0 / 210, 0.47);
+    const s = this.noiseSrc(pink); const f = c.createBiquadFilter(); f.type = fType; f.Q.value = q;
     f.frequency.setValueAtTime(f0, t); if (f1 !== f0) f.frequency.exponentialRampToValueAtTime(Math.max(f1, 20), t + dur);
     const g = c.createGain(); this.env(g, t, a, vol, dur); s.connect(f); f.connect(g); g.connect(dest || this.sfx); s.start(t, Math.random()); s.stop(t + a + dur + 0.05);
   },
@@ -2784,7 +2861,7 @@ const AUD = {
   thunk() { if (!this.ctx) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2); this.tone('triangle', 300, 120, 0.06, 0.1); },
   step(k = 1) { if (!this.ctx) return; this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
   land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
-  kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04); this.tone('square', 990, 990, 0.08, 0.04, this.sfx, this.now() + 0.05); },
+  kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04, this.ui); this.tone('square', 990, 990, 0.08, 0.04, this.ui, this.now() + 0.05); },
   explode(dist) {
     if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);
     this.burst('lowpass', 2400, 90, 0.8, 1.2, 0.9 * v); this.tone('sine', 110, 28, 0.9, 0.9 * v); this.burst('highpass', 4000, 2000, 0.5, 0.2, 0.2 * v);
@@ -2801,17 +2878,17 @@ const AUD = {
   roar() { if (!this.ctx) return; this.groan(0, 0.5, 0.45); this.groan(0, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4); },
   slam() { if (!this.ctx) return; this.tone('sine', 70, 25, 0.8, 1.0); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8); },
   hurt() { if (!this.ctx) return; this.tone('square', 160, 90, 0.12, 0.1); this.burst('lowpass', 600, 200, 1, 0.15, 0.3); this.tone('sine', 55, 40, 0.3, 0.4); },
-  pickup() { if (!this.ctx) return; const t = this.now(); [880, 1175, 1568].forEach((f, i) => this.tone('triangle', f, f, 0.12, 0.08, this.sfx, t + i * 0.06)); },
-  heal() { if (!this.ctx) return; const t = this.now(); [523, 659, 784, 1047].forEach((f, i) => this.tone('sine', f, f, 0.2, 0.08, this.sfx, t + i * 0.05)); },
-  click() { if (!this.ctx) return; this.tone('square', 1400, 1400, 0.03, 0.04); },
-  buy() { if (!this.ctx) return; const t = this.now(); this.tone('square', 740, 740, 0.06, 0.05); this.tone('square', 1480, 1480, 0.1, 0.05, this.sfx, t + 0.06); },
-  deny() { if (!this.ctx) return; this.tone('square', 180, 140, 0.15, 0.06); },
+  pickup() { if (!this.ctx) return; const t = this.now(); [880, 1175, 1568].forEach((f, i) => this.tone('triangle', f, f, 0.12, 0.08, this.ui, t + i * 0.06)); },
+  heal() { if (!this.ctx) return; const t = this.now(); [523, 659, 784, 1047].forEach((f, i) => this.tone('sine', f, f, 0.2, 0.08, this.ui, t + i * 0.05)); },
+  click() { if (!this.ctx) return; this.tone('square', 1400, 1400, 0.03, 0.04, this.ui); },
+  buy() { if (!this.ctx) return; const t = this.now(); this.tone('square', 740, 740, 0.06, 0.05, this.ui); this.tone('square', 1480, 1480, 0.1, 0.05, this.ui, t + 0.06); },
+  deny() { if (!this.ctx) return; this.tone('square', 180, 140, 0.15, 0.06, this.ui); },
   // Shock Arrow arc: a crackle that gets denser with every zombie in the chain
   zap(pan, n = 1) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); for (let i = 0; i < Math.min(5, n + 1); i++) { this.burst('highpass', 3500, 1800, 4, 0.08, 0.16, o, t + i * 0.045); this.tone('square', 90 + i * 25, 60, 0.07, 0.05, o, t + i * 0.045); } },
   // Tracer tag: a short rising ping
   tag(pan) { if (!this.ctx) return; const o = this.out(pan), t = this.now(); this.tone('sine', 1400, 2100, 0.09, 0.07, o); this.tone('sine', 2100, 2100, 0.12, 0.05, o, t + 0.08); },
   // armory: purchase confirmation already exists (buy); a soft panel-open chirp
-  armory() { if (!this.ctx) return; const t = this.now(); [392, 523, 784].forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.06, this.sfx, t + i * 0.07)); },
+  armory() { if (!this.ctx) return; const t = this.now(); [392, 523, 784].forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.06, this.ui, t + i * 0.07)); },
   swap() { if (!this.ctx) return; this.tone('triangle', 500, 900, 0.07, 0.06); },
   waveHorn(boss) {
     if (!this.ctx) return; const c = this.ctx, t = this.now(), d = boss ? 3.2 : 2.2;
@@ -2850,13 +2927,7 @@ const AUD = {
   startRain() {
     const c = this.ctx, sr = c.sampleRate, len = sr * 12;
     const buf = c.createBuffer(1, len, sr), d = buf.getChannelData(0);
-    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-    for (let i = 0; i < len; i++) {   // pink-ish noise: softer and more natural than white
-      const w = Math.random() * 2 - 1;
-      b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
-      b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
-      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
-    }
+    fillPink(d);   // pink-ish noise: softer and more natural than white
     const xf = Math.floor(sr * 0.6);   // crossfade the loop seam so the repeat can't be heard
     for (let i = 0; i < xf; i++) { const k = i / xf; d[i] = d[i] * k + d[len - xf + i] * (1 - k); }
     this.rainBuf = buf; this.rainLen = len - xf;
@@ -2925,21 +2996,21 @@ const AUD = {
     }
     this.tone('sine', rand(45, 65), 28, 3.5, 0.25 * v, this.amb, t + 0.1, 0.2);
   },
-  tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.sfx, t); },
-  frost(pan) { if (!this.ctx) return; this.burst('highpass', 5000, 2500, 3, 0.6, 0.25); this.tone('sine', 2600, 900, 0.5, 0.05); },
+  tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.ui, t); },
+  frost(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('highpass', 5000, 2500, 3, 0.6, 0.25, o); this.tone('sine', 2600, 900, 0.5, 0.05, o); },
   tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
   spit(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 700, 1800, 2, 0.22, 0.22, o); this.tone('sawtooth', 240, 90, 0.2, 0.12, o); },
   scream(pan) { if (!this.ctx) return; const o = this.out(pan); this.groan(pan, 0.4, 1.3); this.burst('highpass', 2200, 4200, 3, 0.5, 0.22, o); },
   pounce(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 1400, 300, 1, 0.18, 0.3, o); this.tone('sine', 90, 45, 0.14, 0.2, o); },
-  cleared() { if (!this.ctx) return; const t = this.now(); [392, 523, 659, 784].forEach((f, i) => this.tone('square', f, f, 0.25, 0.05, this.sfx, t + i * 0.09)); },
-  gameOver() { if (!this.ctx) return; const t = this.now(); [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.98, 0.5, 0.08, this.sfx, t + i * 0.28)); },
+  cleared() { if (!this.ctx) return; const t = this.now(); [392, 523, 659, 784].forEach((f, i) => this.tone('square', f, f, 0.25, 0.05, this.ui, t + i * 0.09)); },
+  gameOver() { if (!this.ctx) return; const t = this.now(); [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.98, 0.5, 0.08, this.ui, t + i * 0.28)); },
   heartbeat() { if (!this.ctx) return; const t = this.now(); this.tone('sine', 60, 40, 0.12, 0.35, this.sfx, t); this.tone('sine', 55, 38, 0.12, 0.25, this.sfx, t + 0.18); },
   // ---------------- ambient ----------------
   startAmbient() {
     const c = this.ctx;
     this.startRain();
     // wind: a low hollow howl that rises in gusts, storms and snow
-    const wn = this.noiseSrc(), wf = c.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 420; wf.Q.value = 1.4; const wg = c.createGain(); wg.gain.value = 0; wn.connect(wf); wf.connect(wg); wg.connect(this.amb); wn.start(); this.windG = wg; this.windF = wf;
+    const wn = this.noiseSrc(true), wf = c.createBiquadFilter(); wf.type = 'bandpass'; wf.frequency.value = 420; wf.Q.value = 1.4; const wg = c.createGain(); wg.gain.value = 0; const wc = c.createGain(); wc.gain.value = Math.pow(420 / 210, 0.47); wn.connect(wf); wf.connect(wc); wc.connect(wg); wg.connect(this.amb); wn.start(); this.windG = wg; this.windF = wf;
     const r2 = this.noiseSrc(); const rf2 = c.createBiquadFilter(); rf2.type = 'lowpass'; rf2.frequency.value = 260; const rg2 = c.createGain(); rg2.gain.value = 0.25; r2.connect(rf2); rf2.connect(rg2); rg2.connect(this.amb); r2.start();
     [41.2, 41.7, 61.8].forEach(f => { const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 160; const g = c.createGain(); g.gain.value = 0.05; o.connect(lp); lp.connect(g); g.connect(this.amb); o.start(); });
     // occasional distant siren
@@ -2985,10 +3056,18 @@ const AUD = {
     };
     setInterval(sched, 40);
   },
-  applyMusic() { if (!this.ctx) return; const t = this.now(); this.music.gain.cancelScheduledValues(t); this.music.gain.setTargetAtTime(this.musicOn && this.musicScreen ? 0.55 : 0, t, 0.4); },
+  applyMusic() { if (!this.ctx) return; const t = this.now(); this.music.gain.cancelScheduledValues(t); this.music.gain.setTargetAtTime(this.musicOn && this.musicScreen ? 0.55 * this.vol.music : 0, t, 0.4); },
   setMusic(on) { this.musicOn = !!on; this.applyMusic(); },
   setMusicScreen(on) { this.musicScreen = !!on; this.applyMusic(); },
 };
+// Every play of these gets its own slight pitch and level, so repeated hits, steps and shots don't sound copy-pasted.
+// [name, pitch spread, volume spread]; all layers of one play shift together.
+for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
+  ['explode', 0.06, 0.1], ['fireIgnite', 0.08, 0.15], ['hurt', 0.06, 0.12], ['slam', 0.05, 0.1], ['spit', 0.08, 0.15], ['pounce', 0.08, 0.15], ['zap', 0.06, 0.15],
+  ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['tether', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
+  const f = AUD[k];
+  AUD[k] = function (...a) { this._pv = rand(1 - p, 1 + p); this._vv = rand(1 - v, 1 + v * 0.4); try { return f.apply(this, a); } finally { this._pv = this._vv = 1; } };
+}
 
 /* ============================================================
    Weather: the sky never sits still. Dry spells, drizzle, steady rain, full
@@ -5289,7 +5368,7 @@ function updateZombies(dt, time) {
       }
     }
     z.groan -= dt;
-    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), z.type === 'brute' ? 0.7 : z.type === 'runner' ? 1.3 : 1); z.jaw = 1; }
+    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), z.type === 'brute' ? 0.7 : z.type === 'runner' ? 1.3 : 1); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
     z.atkCd -= dt;
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
@@ -5318,7 +5397,7 @@ function cryoHit(x, y, z, target, slowK, dur) {
   for (let k = 0; k < 26; k++) { const a = Math.random() * TAU, v = rand(1, 4); emit(x, y, z, Math.cos(a) * v, rand(0.5, 2.5), Math.sin(a) * v, rand(0.4, 0.8), [1.2, 2.4, 3.6], rand(0.04, 0.1), 2, 2, 0.1); }
   flashLight(x, Math.max(0.6, y), z, [1.4, 2.8, 4], 7, 0.35);
   for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 2) f.t = 0;
-  AUD.frost(PLAYER.panOf(x, z));
+  AUD.frost(PLAYER.at(x, z));
   hazFrost(x, z);   // still ices over flood water and cools a cooking fuel tank
 }
 // Shock Arrow: current arcs from the struck zombie (or the impact point) to the nearest unhit neighbour, n hops.
@@ -5345,7 +5424,7 @@ function shockChain(x, y, z, first, hops, dmg, stun) {
   }
   if (ARCS.length > 24) ARCS.splice(0, ARCS.length - 24);
   flashLight(x, Math.max(0.8, y), z, [1.6, 2, 5], 9, 0.25);
-  AUD.zap(PLAYER.panOf(x, z), hit.length);
+  AUD.zap(PLAYER.at(x, z), hit.length);
 }
 // arcs are drawn as a few jittered glowing segments for a fraction of a second (no extra lights, no geometry)
 function updateArcs(dt) {
@@ -5373,7 +5452,7 @@ function tracerMark(x, z, target, dur, radius) {
     o.markT = Math.max(o.markT, dur); n++;
   }
   burst(x, 1, z, 14, ARROWS[AT.TRACER].glow, 3, 0.4, 0.05, 0, 2);
-  AUD.tag(PLAYER.panOf(x, z));
+  AUD.tag(PLAYER.at(x, z));
   return n;
 }
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
@@ -5431,7 +5510,7 @@ function spitAt(z, P) {
   const dx = P.x - ox, dz = P.z - oz, dist = Math.hypot(dx, dz) || 1e-3, spd = 13, t = dist / spd;
   const vx = dx / t, vz = dz / t, vy = ((P.y || 0) + 1.1 - oy) / t + 0.5 * 9.5 * t;
   ZPROJ.push({ x: ox, y: oy, z: oz, vx, vy, vz, t: 0, life: 3, dmg: 9 * (1 + Math.max(0, GAME.wave - 1) * 0.02) });
-  AUD.spit(PLAYER.panOf(z.x, z.z));
+  AUD.spit(PLAYER.at(z.x, z.z));
   emit(ox, oy, oz, vx * 0.08, vy * 0.08 + 1, vz * 0.08, 0.3, [0.4, 0.9, 0.15], 0.06, 0, 1, 0.4);
 }
 function updateZProj(dt) {
@@ -5472,11 +5551,11 @@ function updateSpitter(z, dt, P) {
     if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; spitAt(z, P); z.spitCd = rand(2.6, 4.2); }
     if (z.atkT >= 1) z.state = 'walk';
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.05); z.jaw = 1; }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.05); z.jaw = 1; }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 function screamPulse(z) {
-  AUD.scream(PLAYER.panOf(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
+  AUD.scream(PLAYER.at(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
   for (const o of zombieCandidates(z.x - 9, z.x + 9, z.z - 9, z.z + 9)) { if (o === z || o.dead || o.state === 'drop' || o.type === 'boss') continue; if (Math.hypot(o.x - z.x, o.z - z.z) < 9) o.buffT = Math.max(o.buffT, 6); }
   for (let k = 0; k < 40; k++) { const a = Math.random() * TAU, v = rand(2, 6); emit(z.x, 1.4 * z.scale, z.z, Math.cos(a) * v, rand(0.5, 2), Math.sin(a) * v, 0.6, [0.9, 0.25, 1], 0.06, 1, 2, 0.2); }
 }
@@ -5503,7 +5582,7 @@ function updateScreamer(z, dt, P) {
     if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
     if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.4, 0.8); }
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 40) { z.groan = rand(5, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.15); z.jaw = Math.max(z.jaw, 0.6); }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 40) { z.groan = rand(5, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.15); z.jaw = Math.max(z.jaw, 0.6); }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 function findClimbWall(z) {
@@ -5533,7 +5612,7 @@ function updateClimber(z, dt, P) {
     z.climbCd -= dt;
     if (z.climbCd <= 0 && dist > 7 && dist < 26) {
       const wall = findClimbWall(z);
-      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.panOf(z.x, z.z), 0.12, 1.3); }
+      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.at(z.x, z.z), 0.12, 1.3); }
       else z.climbCd = rand(2, 4);
     }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
@@ -5555,7 +5634,7 @@ function updateClimber(z, dt, P) {
       z.climbState = 'pounce'; z.pounceT = 0;
       const spd = Math.min(d / 0.9, 14);
       z.dvx = dx / d * spd; z.dvz = dz / d * spd; z.dvy = 3.5;
-      AUD.pounce(PLAYER.panOf(z.x, z.z));
+      AUD.pounce(PLAYER.at(z.x, z.z));
     }
   } else if (z.climbState === 'pounce') {
     z.pounceT += dt; z.dvy -= 16 * dt;
@@ -5568,7 +5647,7 @@ function updateClimber(z, dt, P) {
       if (pd < 2.1 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * 1.3, z.x, z.z);
     }
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 8); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.15 - dist / 300, 0.03, 0.15), 1.25); z.jaw = 1; }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 8); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.15 - dist / 300, 0.03, 0.15), 1.25); z.jaw = 1; }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 
@@ -5915,7 +5994,7 @@ function tankAt(x, y, z, pad) {
 function tankIgnite(t, fuse, cookAt) {
   if (!t.alive) return;
   if (t.fuse > 0 && t.fuse <= fuse) return;
-  if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.panOf(t.x, t.z), 1 - d / 80); }
+  if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.at(t.x, t.z), 1 - d / 80); }
   t.fuse = fuse; if (cookAt) t.cook = cookAt;
 }
 // an arrow struck the world at x, y, z: an Incendiary head in a tank wall starts it cooking
@@ -7926,7 +8005,7 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
+const SETTINGS = { sens: 1, music: true, volMaster: 1, volSfx: 1, volMusic: 1, volAmb: 1, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const SAVED_SETTINGS = loadLS('nq_settings', {});
@@ -7934,6 +8013,8 @@ Object.assign(SETTINGS, SAVED_SETTINGS);
 if ('quality' in SAVED_SETTINGS && !('auto' in SAVED_SETTINGS)) SETTINGS.auto = false;   // players who picked a quality before Auto existed keep their pick
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
+const VOLS = [['volMaster', 'master'], ['volSfx', 'sfx'], ['volMusic', 'music'], ['volAmb', 'amb']];
+for (const [k, b] of VOLS) AUD.vol[b] = clamp(+SETTINGS[k] || 0, 0, 1);
 
 /* ---------------- player ---------------- */
 const REGEN = { delay: 6 };   // out of combat = 6 s without taking a hit; the rate (1 HP every 4 s at base) comes from the armory
@@ -7945,6 +8026,8 @@ const PLAYER = {
   hp: 100, maxHp: 100, speedMult: 1, drawTime: 1, reloadTime: 0.62, dmgMult: 1, powerMult: 1, armor: 0, quiverMax: 20, regenInt: 4, swayK: 1, recoverR: 1.3,
   stam: 5, stamMax: 5, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0, ammo: newAmmo(),
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
+  // where a sound happens, for AUD's 3D panner (height defaults to roughly head level)
+  at(x, z, y) { return { x, y: y === undefined ? this.y + 1.4 : y, z }; },
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
@@ -8180,7 +8263,7 @@ function updateProjectiles(dt) {
     if (!hitKind) { a.x = nx; a.y = ny; a.z = nz; continue; }
     const hx = a.x + (nx - a.x) * best, hy = a.y + (ny - a.y) * best, hz = a.z + (nz - a.z) * best;
     if (hitKind === 'n') {
-      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
+      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.at(hx, hz, hy));
       if (a.type === AT.BLAST) blastAt(hx, hy, hz); else if (a.type === AT.FROST) cryoAt(hx, hy, hz, null); else if (a.type === AT.SHOCK) shockAt(hx, hy, hz, null, nd); else if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       PROJ.splice(i, 1); continue;
     }
@@ -8201,7 +8284,7 @@ function updateProjectiles(dt) {
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
-      AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
+      AUD.hit(hitPart !== 'body', PLAYER.at(hx, hz, hy));
       if (killed) { GAME.hitMarker(true, true); }
       if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
       if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
@@ -8698,6 +8781,7 @@ const camM = M4.create();
 function step(dt) {
   GAME.time += dt; STEPN.n++;
   const t = GAME.time;
+  AUD.listen(PLAYER.x, PLAYER.y + PLAYER.eyeH, PLAYER.z, PLAYER.yaw);
   if (GAME.state === 'playing') { updatePlayer(dt); updateBow(dt, INPUT); }
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
@@ -8838,6 +8922,9 @@ function wireUI() {
   $('menuBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
   armoryWire();
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
+  for (const [k, b] of VOLS) for (const id of [k, k + '2']) { const s = $(id); s.value = SETTINGS[k];
+    s.addEventListener('input', () => { AUD.init(); SETTINGS[k] = +s.value; $(k).value = $(k + '2').value = s.value; AUD.setVolume(b, s.value); saveLS('nq_settings', SETTINGS); });
+    if (b === 'sfx' || b === 'master') s.addEventListener('change', () => AUD.thunk()); }   // a sample hit to judge the level by
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   // 'L' is the Laptop level: a deliberately cheaper pipeline for integrated graphics (r3.js).

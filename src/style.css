@@ -93,6 +93,8 @@ button, select, input { font-family: var(--f); }
 .settings { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 12px; letter-spacing: 0.14em; color: var(--dim); text-transform: uppercase; }
 .settings label { display: flex; gap: 8px; align-items: center; }
 .settings input[type=range] { accent-color: var(--mag); width: 110px; }
+.settings.audio { display: grid; grid-template-columns: repeat(2, max-content); }
+.settings.audio label { justify-content: space-between; }
 .settings select { background: #120d22; color: var(--ink); border: 1px solid var(--line); padding: 5px 8px; font-size: 12px; letter-spacing: 0.1em; }
 .linkbtn { appearance: none; background: none; border: 1px solid var(--line); color: var(--ink); padding: 6px 10px; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
 .linkbtn:hover, .linkbtn:focus-visible { border-color: var(--cyan); color: var(--cyan); outline: none; }
