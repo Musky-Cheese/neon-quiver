@@ -649,9 +649,78 @@ function buildBlossoms() {
 }
 
 /* ---------------- Meshy wrecked cars ----------------
-   Two downloaded models (sedan, van), geometry only, one instanced draw each. Every car gets its own paint colour
-   through instanceColor; tyres, sills and the undertray (the bottom 0.48 m) are baked dark rubber/trim, the rest is
-   the world shader's car paint (material 11: wet clear-coat, streaks, rain beading). */
+   Two downloaded models (sedan, van), geometry only, one instanced draw each, split into parts by carParts(). Every
+   car gets its own paint colour through instanceColor (paint only); glass, tyres, chrome and lamps keep their own. */
+/* Meshy cars arrive as one grey shell. carParts() smooths the clustering lumps out of it (Taubin smoothing of the
+   positions, then of the normals) and splits it per triangle into parts by where they sit on the car: tyres, hubs,
+   glass, bumpers, lamps, dark trim and paint. Every triangle gets its own vertices so material ids never blend across
+   an edge (blended ids were the jagged bright seam along the sills). Paint is material 25, the aged-wreck paint; its
+   nqm.x carries a baked wear mask (wheel arches, sills) that the shader turns into rust. Units: metres, model frame. */
+const CAR_LAYOUT = {
+  sedan: { wx: [-1.54, 1.21], wy: 0.38, wr: 0.37, glass: [-1.02, 1.68, 1.03, 1.43], top: 1.47,
+    bumpF: [-2.12, 0.2, 0.56], bumpR: [2.08, 0.2, 0.53], chrome: true,
+    head: [-2.1, 0.56, 0.86, 0.42], tail: [2.12, 0.55, 0.85, 0.42] },
+  van: { wx: [-1.69, 1.62], wy: 0.4, wr: 0.4, glass: [-2.62, -0.78, 1.28, 2.25], top: 9,
+    bumpF: [-2.42, 0.2, 0.72], bumpR: [2.48, 0.2, 0.6], chrome: false,
+    head: [-2.38, 0.74, 1.05, 0.45], tail: [2.55, 0.65, 1.5, 0.82] },
+};
+function carParts(src, kind) {
+  const L = CAR_LAYOUT[kind], idx = src.index.array, P = Float32Array.from(src.attributes.position.array), nv = P.length / 3, nt = idx.length / 3;
+  // vertex neighbours (CSR) from the triangle edges
+  const deg = new Uint32Array(nv + 1);
+  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { deg[idx[t * 3 + k] + 1] += 2; }
+  for (let i = 0; i < nv; i++) deg[i + 1] += deg[i];
+  const nb = new Uint32Array(deg[nv]), fill = deg.slice(0, nv);
+  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = idx[t * 3 + k], b = idx[t * 3 + (k + 1) % 3], c = idx[t * 3 + (k + 2) % 3]; nb[fill[a]++] = b; nb[fill[a]++] = c; }
+  const relax = (A, f) => { const o = new Float32Array(A.length);
+    for (let i = 0; i < nv; i++) { let x = 0, y = 0, z = 0; const n = deg[i + 1] - deg[i]; if (!n) { o.set(A.subarray(i * 3, i * 3 + 3), i * 3); continue; }
+      for (let j = deg[i]; j < deg[i + 1]; j++) { const v = nb[j] * 3; x += A[v]; y += A[v + 1]; z += A[v + 2]; }
+      o[i * 3] = A[i * 3] + f * (x / n - A[i * 3]); o[i * 3 + 1] = A[i * 3 + 1] + f * (y / n - A[i * 3 + 1]); o[i * 3 + 2] = A[i * 3 + 2] + f * (z / n - A[i * 3 + 2]); }
+    A.set(o); };
+  const ground = new Uint8Array(nv); for (let i = 0; i < nv; i++) ground[i] = P[i * 3 + 1] < 0.02;
+  for (let it = 0; it < 4; it++) { relax(P, 0.5); relax(P, -0.53); }   // Taubin: removes the lumps without shrinking the body
+  for (let i = 0; i < nv; i++) if (ground[i]) P[i * 3 + 1] = Math.min(P[i * 3 + 1], 0.005);
+  const g0 = new THREE.BufferGeometry(); g0.setAttribute('position', new THREE.BufferAttribute(P, 3)); g0.setIndex(new THREE.BufferAttribute(idx, 1)); g0.computeVertexNormals();
+  const Nn = g0.attributes.normal.array; for (let it = 0; it < 3; it++) relax(Nn, 0.6);
+  for (let i = 0; i < nv; i++) { const l = Math.hypot(Nn[i * 3], Nn[i * 3 + 1], Nn[i * 3 + 2]) || 1; Nn[i * 3] /= l; Nn[i * 3 + 1] /= l; Nn[i * 3 + 2] /= l; }
+  let hw = 0; for (let i = 0; i < nv; i++) hw = Math.max(hw, Math.abs(P[i * 3 + 2]));
+  const wheelD = (x, y) => Math.min(Math.hypot(x - L.wx[0], y - L.wy), Math.hypot(x - L.wx[1], y - L.wy));
+  // part table: [r, g, b, material id]
+  const PAINT = [1, 1, 1, 25], TYRE = [0.035, 0.035, 0.037, 15], HUB = [0.3, 0.3, 0.29, 4], GLASS = [0.24, 0.29, 0.32, 10],
+    CHROME = [0.48, 0.47, 0.45, 4], TRIM = [0.055, 0.055, 0.06, 15], HEAD = [0.75, 0.72, 0.62, 10], TAIL = [0.6, 0.05, 0.035, 10], RACK = [0.12, 0.12, 0.13, 4];
+  const part = (cx, cy, cz, fx, fy, fz) => {
+    const az = Math.abs(cz), d = wheelD(cx, cy);
+    if (d < L.wr * 1.03 && cy < L.wy + L.wr) return (d < L.wr * 0.56 && az > hw - 0.3 && Math.abs(fz) > 0.45) ? HUB : TYRE;
+    if (cy > L.top) return RACK;
+    const G = L.glass; if (cx > G[0] && cx < G[1] && cy > G[2] && cy < G[3] && fy < 0.9) return GLASS;
+    const H = L.head; if (cx < H[0] && cy > H[1] && cy < H[2] && az > H[3] && fx < -0.3) return HEAD;
+    const T = L.tail; if (cx > T[0] && cy > T[1] && cy < T[2] && az > T[3] && fx > 0.3) return TAIL;
+    const bF = L.bumpF, bR = L.bumpR;
+    if ((cx < bF[0] && cy > bF[1] && cy < bF[2]) || (cx > bR[0] && cy > bR[1] && cy < bR[2])) return L.chrome ? CHROME : TRIM;
+    if (cy < 0.3 || fy < -0.6) return TRIM;   // rockers, undertray, anything facing the road
+    return PAINT;
+  };
+  const n3 = nt * 3, oP = new Float32Array(n3 * 3), oN = new Float32Array(n3 * 3), oC = new Float32Array(n3 * 3), oQ = new Float32Array(n3 * 2);
+  for (let t = 0; t < nt; t++) {
+    const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx; const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
+    const q = part((P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3, fx, fy, fz);
+    for (let k = 0; k < 3; k++) {
+      const v = idx[t * 3 + k] * 3, o = t * 3 + k;
+      oP[o * 3] = P[v]; oP[o * 3 + 1] = P[v + 1]; oP[o * 3 + 2] = P[v + 2]; oN[o * 3] = Nn[v]; oN[o * 3 + 1] = Nn[v + 1]; oN[o * 3 + 2] = Nn[v + 2];
+      oC[o * 3] = q[0]; oC[o * 3 + 1] = q[1]; oC[o * 3 + 2] = q[2]; oQ[o * 2 + 1] = q[3];
+      if (q === PAINT) {   // wear: rust gathers around the wheel arches and along the sills
+        const arch = Math.max(0, Math.min(1, (L.wr + 0.32 - wheelD(P[v], P[v + 1])) / 0.28)), sill = Math.max(0, Math.min(1, (0.62 - P[v + 1]) / 0.3));
+        oQ[o * 2] = Math.max(arch, sill * 0.8);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(oP, 3)); geo.setAttribute('normal', new THREE.BufferAttribute(oN, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(oC, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(oQ, 2));
+  return geo;
+}
 async function loadMeshyCars() {
   const spots = WORLD.carSpots || []; if (!spots.length) return;
   const loader = new GLTFLoader(), V = typeof CARS_VER === 'string' ? CARS_VER : '0';
@@ -660,15 +729,7 @@ async function loadMeshyCars() {
     try {
       const gltf = await loader.loadAsync('models/car_' + kind + '.glb?v=' + V);
       let src = null; gltf.scene.traverse(o => { if (!src && o.isMesh) src = o.geometry; });
-      const geo = src.clone(); geo.rotateY(-Math.PI / 2);   // modelled along +x; the game's cars run along z
-      if (!geo.attributes.normal) geo.computeVertexNormals();
-      const pos = geo.attributes.position, n = pos.count, col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
-      for (let i = 0; i < n; i++) {
-        const y = pos.getY(i), low = y < 0.48;
-        const c = low ? 0.1 : 1; col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = c;
-        nqm[i * 2] = 0; nqm[i * 2 + 1] = low ? 15 : 11;
-      }
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+      const geo = carParts(src, kind); geo.rotateY(-Math.PI / 2);   // modelled along +x (front at -x); the game's cars run along z
       const mat = nqMaterial('static'), cars = new THREE.InstancedMesh(geo, mat, list.length), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
       list.forEach((s, i) => {
         q.setFromEuler(e.set(s.roll || 0, s.ry, (s.roll || 0) * 0.6, 'YXZ'));
