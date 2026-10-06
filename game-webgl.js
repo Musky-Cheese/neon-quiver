@@ -6319,7 +6319,8 @@ function buildSigns() {
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
     fogMat(mat);
-    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
+    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index;
+    for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
@@ -6396,7 +6397,8 @@ void main(){ vec4 v = modelViewMatrix*vec4(position,1.); gl_Position = projectio
 void main(){ vec2 c = gl_PointCoord-0.5; float d = length(c); float a = smoothstep(0.5,0.0,d);
   if (vBlend > 0.5) { float s = smoothstep(0.5,0.3,d)*vC.a; gl_FragColor = vec4(vC.rgb*s, s); } else { a *= a; gl_FragColor = vec4(vC.rgb*a*vC.a, 0.); } }`,
 });
-const partPoints = new THREE.Points(partGeo, partMat); partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
+const partPoints = new THREE.Points(partGeo, partMat);
+partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
 
 const rainGeo = (function () {
   const p = new Float32Array(RAIN_N * 2 * 3), a = new Float32Array(RAIN_N * 2 * 2);
@@ -6440,7 +6442,8 @@ void main(){ float S = 24.; float rnd = fract(aP2.x * 7.31 + position.x * 0.137 
   gl_PointSize = vK > 0. ? clamp(uPx * (0.07 + 0.07 * fract(rnd * 5.3)) / max(-mv.z, 0.1) * 1000., 1.5, 16. * uPx) : 0.; }`,
   fragmentShader: `precision mediump float; varying float vK; uniform float uAlpha; uniform vec3 uCol; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.12, d) * vK * uAlpha; gl_FragColor = vec4(uCol * a, 0.); }`,
 });
-const snowPts = new THREE.Points(rainGeo, snowMat); snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
+const snowPts = new THREE.Points(rainGeo, snowMat);
+snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -7370,7 +7373,7 @@ function applyQuality3(q) {
 // Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
 // Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
 function warmShaders() {
-  const t0 = performance.now(), before = renderer.info.programs.length;
+  const t0 = performance.now(), progs = () => NQ_GPU === 'webgpu' ? renderer.info.memory.programs : renderer.info.programs.length, before = progs();
   const g = new THREE.BufferGeometry(), n = 3;
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
@@ -7386,8 +7389,8 @@ function warmShaders() {
     renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
     renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
-  R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
+  finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }
 
 /* ---------------- per-frame sync + render ---------------- */
@@ -7422,7 +7425,8 @@ function render3(time, W, H, fov, cam) {
   updateLights3(cam);
   // dynamic geometry
   flushList(WORLD_ITEMS, false); flushList(VM_ITEMS, true);
-  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
+  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8);
+  partGeo.setDrawRange(0, PART.n);
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
   updateEnv(cam);

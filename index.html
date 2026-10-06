@@ -503,7 +503,7 @@ button, select, input { font-family: var(--f); }
    writes the import map for that build, then loads game-webgpu.js or game-webgl.js. Only one ever downloads.
    ============================================================ */
 (function () {
-  var BUNDLES = {"webgl": "game-webgl.js?v=d481ed69f1", "webgpu": "game-webgpu.js?v=b7e37b4876"};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
+  var BUNDLES = {"webgl": "game-webgl.js?v=282d067340", "webgpu": "game-webgpu.js?v=a004c1623f"};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
   // The WebGPU build is a partial port (roadmap Phase 2: the shared material, sky, cones, mirror and post chain): it
   // is offered, but Classic stays the preselected choice until the port is complete. Flip this when it is, and rename the storage key so everyone is asked again.
   var WEBGPU_PREVIEW = true, KEY = 'nq_renderer';

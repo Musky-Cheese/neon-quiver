@@ -155,9 +155,6 @@ function signArray(texs) {
   return arr;
 }
 function buildSigns() {
-//#if webgpu
-  return;   // preview: GL texture-array upload + GLSL sign shader, not ported yet
-//#endif
   const groups = new Map();
   for (const s of WORLD.signs) {
     const k = s.tex.image.width + 'x' + s.tex.image.height + (s.add ? '+' : '');
@@ -167,10 +164,19 @@ function buildSigns() {
   }
   for (const g of groups.values()) {
     const n = g.list.length;
+//#if webgl
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
       vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
+//#else
+    const mat = signMaterialGPU(signArrayGPU(g.texs), g.add);
+//#endif
     fogMat(mat);
-    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
+//#if webgl
+    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index;
+//#else
+    const geo = new THREE.BufferGeometry(); geo.index = PLANE.index;   // WebGPU reads an InstancedBufferGeometry's own instanceCount, not the mesh's count
+//#endif
+    for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
@@ -206,7 +212,11 @@ ${FOG_GLSL}
 void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-NQ_FOGD(d)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
+//#if webgl
     const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+//#else
+    const mat = decalMaterialGPU(DECAL_TEX[v]);
+//#endif
     fogMat(mat);
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
@@ -233,6 +243,7 @@ function syncDecals() {
 }
 
 /* ---------------- particles + rain ---------------- */
+//#if webgl
 const partGeo = new THREE.BufferGeometry();
 const partBuf = new THREE.InterleavedBuffer(PART.data, 8); partBuf.setUsage(THREE.DynamicDrawUsage);
 partGeo.setAttribute('position', new THREE.InterleavedBufferAttribute(partBuf, 3, 0));
@@ -247,13 +258,18 @@ void main(){ vec4 v = modelViewMatrix*vec4(position,1.); gl_Position = projectio
 void main(){ vec2 c = gl_PointCoord-0.5; float d = length(c); float a = smoothstep(0.5,0.0,d);
   if (vBlend > 0.5) { float s = smoothstep(0.5,0.3,d)*vC.a; gl_FragColor = vec4(vC.rgb*s, s); } else { a *= a; gl_FragColor = vec4(vC.rgb*a*vC.a, 0.); } }`,
 });
-const partPoints = new THREE.Points(partGeo, partMat); partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
+const partPoints = new THREE.Points(partGeo, partMat);
+//#else
+const partPoints = particlesGPU(PART.data), partBuf = partPoints.userData.buf, partGeo = partPoints.geometry, partMat = partPoints.material;
+//#endif
+partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
 
 const rainGeo = (function () {
   const p = new Float32Array(RAIN_N * 2 * 3), a = new Float32Array(RAIN_N * 2 * 2);
   for (let i = 0; i < RAIN_N; i++) { const x = Math.random() * 50, z = Math.random() * 50, y = Math.random() * 36, s = Math.random(); for (let e = 0; e < 2; e++) { const o = i * 2 + e; p[o * 3] = x; p[o * 3 + 1] = z; p[o * 3 + 2] = y; a[o * 2] = s; a[o * 2 + 1] = e; } }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
+//#if webgl
 const rainMat = new THREE.ShaderMaterial({
   uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0.7 }, uWind: { value: 0.4 } }, transparent: true, depthWrite: false,
   blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -274,8 +290,12 @@ void main(){ float S = 50.;
   gl_Position = projectionMatrix*viewMatrix*vec4(p,1.); }`,
   fragmentShader: `precision mediump float; varying float vA, vK; uniform float uAlpha; uniform vec3 uRainCol; void main(){ gl_FragColor = vec4(uRainCol*uAlpha*(0.3+vA*0.7)*vK, 0.); }`,
 });
+//#else
+const rainMat = rainGPU(rainGeo);
+//#endif
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
+//#if webgl
 const snowMat = new THREE.ShaderMaterial({
   uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.9 }, uCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0 }, uWind: { value: 0.3 }, uPx: { value: 1 } },
   transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -291,7 +311,11 @@ void main(){ float S = 24.; float rnd = fract(aP2.x * 7.31 + position.x * 0.137 
   gl_PointSize = vK > 0. ? clamp(uPx * (0.07 + 0.07 * fract(rnd * 5.3)) / max(-mv.z, 0.1) * 1000., 1.5, 16. * uPx) : 0.; }`,
   fragmentShader: `precision mediump float; varying float vK; uniform float uAlpha; uniform vec3 uCol; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.12, d) * vK * uAlpha; gl_FragColor = vec4(uCol * a, 0.); }`,
 });
-const snowPts = new THREE.Points(rainGeo, snowMat); snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
+const snowPts = new THREE.Points(rainGeo, snowMat);
+//#else
+const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
+//#endif
+snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -804,6 +828,7 @@ function buildWorld3() {
 function buildGlass() {
   if (!WORLD.glass.length) return;
   const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
+//#if webgl
   const mat = new THREE.ShaderMaterial({
     uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
     transparent: true, depthWrite: false, vertexColors: true,
@@ -825,6 +850,9 @@ void main(){
   float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-NQ_FOGD(d))) * 0.8, 0., 1.));
   gl_FragColor = vec4(col, a);
 }` });
+//#else
+  const mat = glassMaterialGPU();
+//#endif
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
     if (i === 0) fogMat(mat);
@@ -999,6 +1027,7 @@ function buildVolumes() {
     const m = new THREE.Mesh(g, coneMat); m.name = 'cones'; m.renderOrder = 8; m.frustumCulled = true; m.matrixAutoUpdate = false;
     scene.add(m); CONES.push(m);
   }
+//#if webgl
   const mat = new THREE.ShaderMaterial({
     uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U), transparent: true, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -1008,6 +1037,9 @@ void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position
 ${FOG_GLSL}
 
 void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-NQ_FOGD(vD) * 0.4), 0.); }` });
+//#else
+  const mat = haloMaterialGPU(VOL_U);
+//#endif
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -1262,10 +1294,7 @@ function applyQuality3(q) {
 // Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
 // Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
 function warmShaders() {
-//#if webgpu
-  R3.warm = { programs: 0, ms: 0 }; return;   // preview: pipelines build on first use
-//#endif
-  const t0 = performance.now(), before = renderer.info.programs.length;
+  const t0 = performance.now(), progs = () => NQ_GPU === 'webgpu' ? renderer.info.memory.programs : renderer.info.programs.length, before = progs();
   const g = new THREE.BufferGeometry(), n = 3;
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
@@ -1278,11 +1307,18 @@ function warmShaders() {
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {
+//#if webgl
     renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
     renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
+//#else
+    // WebGPU builds a pipeline per pass (mirror, world, bow, shadows, AO prepass) the first time it draws a material:
+    // draw one frame now with every stand-in in it, plus a spark and a smoke puff for the particle pipeline
+    emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
+    R3.warming = true; render(GAME.time);
+//#endif
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
-  R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
+  finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }
 
 /* ---------------- per-frame sync + render ---------------- */
@@ -1322,11 +1358,15 @@ function render3(time, W, H, fov, cam) {
   updateLights3(cam);
   // dynamic geometry
   flushList(WORLD_ITEMS, false); flushList(VM_ITEMS, true);
-  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
+  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8);
+//#if webgl
+  partGeo.setDrawRange(0, PART.n);
+//#else
+  partGeo.instanceCount = PART.n;   // 0 skips the draw
+//#endif
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
 //#if webgpu
-  gpuUnported();   // before the env capture renders the scene too
   GPU_PROF.tag = 'env map';
 //#endif
   updateEnv(cam);
@@ -1352,14 +1392,8 @@ function render3(time, W, H, fov, cam) {
   try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
 //#if webgpu
-/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ----
-   Not ported yet (Phase 3) and kept off this renderer: the GLSL signs, decals, particles, rain, snow, halos and
-   shopfront glass. They sit on a layer no camera draws. */
-const _clr = new THREE.Color(); let _unportedN = -1;
-function gpuUnported() {
-  if (scene.children.length === _unportedN) return; _unportedN = scene.children.length;
-  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.layers.set(31); });
-}
+/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ---- */
+const _clr = new THREE.Color();
 function renderGPU(T, W, H, time) {
   if (!GPOST.pipe || GPOST.key !== SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0)) buildPostGPU(SETTINGS.quality, !!SETTINGS.laptop);
   gpuSyncTextures();
@@ -1368,7 +1402,7 @@ function renderGPU(T, W, H, time) {
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
-  vmCamera.layers.set(VM_ITEMS.n > 0 && !DBG.noVM ? LAYER_VM : 30);
+  vmCamera.layers.set((VM_ITEMS.n > 0 && !DBG.noVM) || R3.warming ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
     GPU_PROF.tag = 'reflection';
