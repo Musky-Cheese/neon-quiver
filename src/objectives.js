@@ -40,7 +40,7 @@ function objStart(type) {
     const s = navSpawnPoint(32, 60), brute = Math.random() < 0.55;
     const a = makeElite(spawnZombie(brute ? 'brute' : 'runner', s[0], s[1], w));
     a.hp *= brute ? 1 : 3.5; a.maxHp = a.hp; a.scale *= 1.1; a.speed *= brute ? 1.15 : 1.05; a.eyes = [2.8, 1.9, 0.25];
-    a.alpha = pick(ALPHA_NAMES); a.markT = 1e9;   // tagged through walls for as long as the bounty stands
+    a.alpha = pick(ALPHA_NAMES); a.mzAlpha = true; a.markT = 1e9;   // tagged through walls for as long as the bounty stands
     OBJ.cur = { type, x: a.x, z: a.z, a, limit: 90, t: 0, spawnT: 6 };
     GAME.showBanner('BOUNTY', `${a.alpha} LEADS THE PACK · TAKE IT DOWN IN 90s`, OBJ_COL.bounty);
     AUD.groan(PLAYER.at(a.x, a.z), 0.3, 0.55);
@@ -169,7 +169,7 @@ function drawObjectives(time) {
   } else if (o.type === 'bounty') {
     // a gold halo turning over the Alpha's head
     const a = o.a; if (!a || a.dead) return; const k = 0.7 + 0.3 * Math.sin(time * 6);
-    drawItem(MESH.ring, M4.trs(poolM(), a.x, a.y + 2.35 * a.scale, a.z, 0, time * 1.5, 0, 0.4 * a.scale, 1, 0.4 * a.scale), [1, 0.8, 0.2], [3 * k, 2.1 * k, 0.3 * k]);
+    drawItem(MESH.ring, M4.trs(poolM(), a.head[0], a.head[1] + 0.4, a.head[2], 0, time * 1.5, 0, 0.32 * a.scale, 1, 0.32 * a.scale), [1, 0.8, 0.2], [3 * k, 2.1 * k, 0.3 * k]);
   } else {
     // the crate: olive steel with amber light strips and a blinking beacon; a canopy above it while it falls
     const y = o.y, bl = Math.sin(time * 9) > 0 ? 1 : 0.15, f = o.prog / o.need, sw = o.landed ? 0 : Math.sin(time * 1.3) * 0.08;

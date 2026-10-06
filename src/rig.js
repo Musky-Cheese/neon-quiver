@@ -116,7 +116,8 @@ async function loadMeshyZombies(pick) {   // pick(name) -> bool: load a subset (
   for (const t of list) if (MZ[t]) { const b = t.split('_')[0]; (MZ_BY[b] || (MZ_BY[b] = [])).push(t); }
 }
 // each body keeps its model for life: chosen from its seed, so a crowd mixes every outfit the breed has
-function mzFor(z) { const l = MZ_BY[z.type]; if (!l) return null; return MZ[l[Math.floor(((z.seed * 9.173) % 1 + 1) % 1 * l.length) % l.length]]; }
+// a bounty's Alpha wears its own scan (models/mz_alpha.glb) once that has streamed in; until then, its breed's
+function mzFor(z) { const l = (z.mzAlpha && MZ_BY.alpha) || MZ_BY[z.type]; if (!l) return null; return MZ[l[Math.floor(((z.seed * 9.173) % 1 + 1) % 1 * l.length) % l.length]]; }
 
 function makeRig(z) {
   const mz = mzFor(z);
