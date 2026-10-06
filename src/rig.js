@@ -71,6 +71,49 @@ function zGeometry(key) {
   return (ZRIG.geos[key] = g);
 }
 
+/* ---------- Meshy zombies: textured, auto-rigged models folded onto this skeleton (tools/meshy_zombie.py) ----------
+   One model per breed (models/mz_<type>.glb). Same 13 bones, same clips: position tracks are re-based onto the new
+   rest pose so longer or shorter legs still plant the feet. Breeds without a model keep the sculpted parts. */
+const MZ = {};
+async function loadMeshyZombies() {
+  if (!ZRIG.ready || typeof MZ_TYPES === 'undefined' || !MZ_TYPES.length || (window.__NQ_RIG_URL || '').endsWith('.json')) return;
+  const logical = (n) => n.replace(/_\d+$/, '').replace(/\./g, '');
+  const oldRest = {}; ZRIG.rootTemplate.traverse(o => { if (o.isBone) oldRest[logical(o.name)] = o.position.clone(); });
+  await Promise.all(MZ_TYPES.map(async (t) => {
+    try {
+      const g = await new GLTFLoader().loadAsync('models/mz_' + t + '.glb?v=' + MZ_VER);
+      let sm = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isSkinnedMesh && !sm) sm = o; });
+      if (!sm) return;
+      const geo = sm.geometry;
+      if (geo.attributes._part) { geo.setAttribute('part', geo.attributes._part); geo.deleteAttribute('_part'); }
+      if (geo.attributes.skinIndex.array.constructor !== Uint16Array) geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(Uint16Array.from(geo.attributes.skinIndex.array), 4));
+      geo.computeBoundingSphere();
+      const skel = sm.skeleton; let root = skel.bones[0]; while (root.parent && root.parent.isBone) root = root.parent;
+      const byLogical = {}, newRest = {}; skel.bones.forEach(b => { byLogical[logical(b.name)] = b.name; newRest[logical(b.name)] = b.position.clone(); });
+      const clips = {};
+      for (const k in ZRIG.clips) {
+        const src = ZRIG.clips[k], tracks = [];
+        for (const tr of src.tracks) {
+          const dot = tr.name.lastIndexOf('.'), node = logical(tr.name.slice(0, dot)), prop = tr.name.slice(dot + 1);
+          if (!byLogical[node]) continue;
+          const c = tr.clone(); c.name = byLogical[node] + '.' + prop;
+          if (prop === 'position' && oldRest[node] && newRest[node]) {
+            const d = newRest[node].clone().sub(oldRest[node]);
+            for (let i = 0; i < c.values.length; i += 3) { c.values[i] += d.x; c.values[i + 1] += d.y; c.values[i + 2] += d.z; }
+          }
+          tracks.push(c);
+        }
+        const c = new THREE.AnimationClip(k, src.duration, tracks); c.userData = src.userData; clips[k] = c;
+      }
+      const m = sm.material, nq = (g.parser.json.extras || {}).nq || {};
+      for (const tx of [m.map, m.normalMap]) if (tx) { tx.anisotropy = 4; tx.needsUpdate = true; }
+      MZ[t] = { geo, rootTemplate: root, boneNames: skel.bones.map(b => b.name), inverses: skel.boneInverses.map(x => x.clone()), bindMatrix: sm.bindMatrix.clone(),
+        logicalOf: Object.fromEntries(skel.bones.map(b => [b.name, logical(b.name)])), map: m.map, normalMap: m.normalMap, nq, clips, hipD: (newRest.pelvis ? newRest.pelvis.y : 0.95) - 0.95 };
+    } catch (e) { console.warn('meshy zombie unavailable:', t, e); }
+  }));
+}
+function mzFor(z) { return MZ[z.type] || null; }
+
 function zDepthMat(own) {
   const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
   dm.onBeforeCompile = (sh) => {
@@ -83,25 +126,28 @@ function zDepthMat(own) {
 }
 
 function makeRig(z) {
-  const key = zVariant(z);
+  const mz = mzFor(z);
+  const key = mz ? 'mz|' + z.type : zVariant(z);
   const pool = ZRIG.pool[key] || (ZRIG.pool[key] = []);
   let r = pool.pop();
   if (!r) {
     const mat = nqMaterial('zombie');
-    const mesh = new THREE.SkinnedMesh(zGeometry(key), mat);
+    if (mz) { mat.defines.NQ_ZTEX = 1; mat.map = mz.map; mat.normalMap = mz.normalMap; mat.normalScale.set(1, 1); mat.customProgramCacheKey = () => 'nq-zombie-tex'; }
+    const mesh = new THREE.SkinnedMesh(mz ? mz.geo : zGeometry(key), mat);
     mesh.name = 'zmesh'; mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 2.2); mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.customDepthMaterial = zDepthMat(mat.userData.u);
-    const root = ZRIG.rootTemplate.clone(true);
+    const T = mz || ZRIG;
+    const root = T.rootTemplate.clone(true);
     const byName = {}; root.traverse(o => { if (o.isBone) byName[o.name] = o; });
-    const bones = ZRIG.boneNames.map(n => byName[n]);
+    const bones = T.boneNames.map(n => byName[n]);
     mesh.add(root);
-    mesh.bind(new THREE.Skeleton(bones, ZRIG.inverses), ZRIG.bindMatrix);
-    const B = {}; for (const b of bones) B[ZRIG.logicalOf[b.name]] = b;
+    mesh.bind(new THREE.Skeleton(bones, T.inverses), T.bindMatrix);
+    const B = {}; for (const b of bones) B[T.logicalOf[b.name]] = b;
     B.shoulderL = B.shoulderL || B['shoulder.L']; // defensive
     const mixer = new THREE.AnimationMixer(mesh);
     // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
     const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
-    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1 };
+    r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1, mz, clips: mz ? mz.clips : ZRIG.clips };
     // three refreshes a skeleton (and re-uploads its bone texture) once per render call - reflection, world, bow pass...
     // The bones only move in poseZombieRig, so recompute them only when a new pose has been made since the last time.
     const rr = r; mesh.skeleton.update = function () { if (rr.skelN === rr.poseN) return; rr.skelN = rr.poseN; THREE.Skeleton.prototype.update.call(this); };
@@ -125,7 +171,7 @@ function syncRigs() {
 
 function zAction(r, name) {
   let a = r.actions[name];
-  if (!a) { a = r.actions[name] = r.mixer.clipAction(ZRIG.clips[name]); a.setLoop(ZRIG.clips[name].userData.loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = true; }
+  if (!a) { const c = r.clips[name]; a = r.actions[name] = r.mixer.clipAction(c); a.setLoop(c.userData.loop ? THREE.LoopRepeat : THREE.LoopOnce, Infinity); a.clampWhenFinished = true; }
   return a;
 }
 const LOCO = { walker: 'walk', runner: 'run', brute: 'heavy', boss: 'boss_walk', spitter: 'walk', screamer: 'walk', climber: 'run' };
@@ -174,7 +220,8 @@ function poseZombieRig(z, dt, time) {
   const R = z.R;
   // body shape per breed (the mixer rewrites scale every update)
   B.pelvis.scale.setScalar(1); B.spine.scale.setScalar(1); B.neck.scale.setScalar(1); B.shoulderL.scale.setScalar(1); B.shoulderR.scale.setScalar(1); B.elbowL.scale.setScalar(1); B.elbowR.scale.setScalar(1);
-  if (z.type === 'brute') { B.pelvis.scale.set(1.28, 1, 1.28); B.spine.scale.set(1.18, 1, 1.18); B.neck.scale.set(0.78, 0.92, 0.78); B.shoulderL.scale.set(1.12, 1, 1.12); B.shoulderR.scale.set(1.12, 1, 1.12); }
+  if (r.mz) { }
+  else if (z.type === 'brute') { B.pelvis.scale.set(1.28, 1, 1.28); B.spine.scale.set(1.18, 1, 1.18); B.neck.scale.set(0.78, 0.92, 0.78); B.shoulderL.scale.set(1.12, 1, 1.12); B.shoulderR.scale.set(1.12, 1, 1.12); }
   else if (z.type === 'boss') { B.pelvis.scale.set(0.96, 1, 0.96); B.spine.scale.set(1.42, 1, 1.28); B.neck.scale.set(0.68, 0.82, 0.68); B.shoulderL.scale.set(1.32, 1.04, 1.25); B.shoulderR.scale.set(1.45, 1.08, 1.36); B.elbowR.scale.set(1.55, 1.18, 1.55); }
   else if (z.type === 'runner') { B.pelvis.scale.set(0.82, 1.04, 0.82); B.spine.scale.set(0.78, 1.12, 0.84); B.neck.scale.set(1.05, 0.94, 1.05); B.shoulderL.scale.set(0.82, 1.14, 0.82); B.shoulderR.scale.set(0.82, 1.14, 0.82); B.elbowL.scale.set(0.78, 1.14, 0.78); B.elbowR.scale.set(0.78, 1.14, 0.78); }
   const dying = z.state === 'dying';
@@ -195,7 +242,7 @@ function poseZombieRig(z, dt, time) {
   }
   if (w > 0) {
     // physics-driven death pose (pins, crumples, falls) takes over from the clip
-    blendRot(B.pelvis, w, P.pelRx, P.twist, 0); B.pelvis.position.x *= 1 - w; B.pelvis.position.z *= 1 - w; B.pelvis.position.y = lerp(B.pelvis.position.y, P.hipY, w);
+    blendRot(B.pelvis, w, P.pelRx, P.twist, 0); B.pelvis.position.x *= 1 - w; B.pelvis.position.z *= 1 - w; B.pelvis.position.y = lerp(B.pelvis.position.y, P.hipY + (r.mz ? r.mz.hipD * clamp(P.hipY / 0.95, 0, 1) : 0), w);
     blendRot(B.spine, w, P.lean, -P.twist * 1.5 + P.torYaw, P.spRz);
     blendRot(B.neck, w, P.headRx, 0, P.roll); blendRot(B.jaw, w, P.jaw, 0, 0);
     blendRot(B.shoulderL, w, P.shL, 0, -P.spread); blendRot(B.shoulderR, w, P.shR, 0, P.spread);
@@ -211,11 +258,19 @@ function poseZombieRig(z, dt, time) {
   m.updateMatrixWorld(true); r.poseN++;
   // ---------- hit volumes from the skeleton ----------
   const hs = z.type === 'boss' ? 0.85 : 1;
+  const nq = r.mz && r.mz.nq.head ? r.mz.nq : null;
+  if (nq) {
+    M4.pt(B.neck.matrixWorld.elements, nq.head[0], nq.head[1], nq.head[2], z.head);
+    M4.pt(B.pelvis.matrixWorld.elements, 0, 0, 0, z.a); M4.pt(B.spine.matrixWorld.elements, nq.chest[0], nq.chest[1], nq.chest[2], z.b);
+    M4.pt(B.spine.matrixWorld.elements, nq.core[0], nq.core[1], nq.core[2], z.core);
+  } else {
   M4.pt(B.neck.matrixWorld.elements, 0, 0.155 * (z.type === 'boss' ? 1 : hs), 0.01, z.head);
   M4.pt(B.pelvis.matrixWorld.elements, 0, 0, 0, z.a); M4.pt(B.spine.matrixWorld.elements, 0, 0.5, 0, z.b);
   M4.pt(B.spine.matrixWorld.elements, 0, 0.32, 0.14, z.core);
-  M4.pt(B.hipL.matrixWorld.elements, 0, 0, 0, z.hipL); M4.pt(B.kneeL.matrixWorld.elements, 0, 0, 0, z.knL); M4.pt(B.kneeL.matrixWorld.elements, 0, -0.42, 0, z.ftL);
-  M4.pt(B.hipR.matrixWorld.elements, 0, 0, 0, z.hipR); M4.pt(B.kneeR.matrixWorld.elements, 0, 0, 0, z.knR); M4.pt(B.kneeR.matrixWorld.elements, 0, -0.42, 0, z.ftR);
+  }
+  const fy = nq ? nq.foot[1] : -0.42;
+  M4.pt(B.hipL.matrixWorld.elements, 0, 0, 0, z.hipL); M4.pt(B.kneeL.matrixWorld.elements, 0, 0, 0, z.knL); M4.pt(B.kneeL.matrixWorld.elements, 0, fy, 0, z.ftL);
+  M4.pt(B.hipR.matrixWorld.elements, 0, 0, 0, z.hipR); M4.pt(B.kneeR.matrixWorld.elements, 0, 0, 0, z.knR); M4.pt(B.kneeR.matrixWorld.elements, 0, fy, 0, z.ftR);
   return r;
 }
 
@@ -295,11 +350,19 @@ function drawZombieRig(z, time) {
   else if (T === 'walker' || T === 'spitter' || T === 'screamer') { u.uPT.value[9].set(0.72, 0.66, 0.54); u.uPS.value[9].set(0.25, 0.035, 0.04); u.uPE.value[9].set(e[0] * 0.11, e[1] * 0.045, e[2] * 0.035); }
   else if (T === 'runner' || T === 'climber') { setV(u.uPT.value[9], skin, 0.72); setV(u.uPS.value[9], skin, 0.58); u.uPE.value[9].set(0.04, 0.13, 0.035); }
   else { u.uPT.value[9].set(0.28, 0.025, 0.035); u.uPS.value[9].set(0.12, 0.018, 0.025); u.uPE.value[9].set(0.18, 0.012, 0.02); }
+  if (r.mz) {   // textured scans: a per-body tone (no two shades of rot alike) and the Cryo frost, read by the NQ_ZTEX shader branch
+    const h1 = (z.seed * 13.71) % 1, h2 = (z.seed * 7.13 + 0.37) % 1, k = 0.88 + 0.2 * h1;
+    for (let i = 0; i < ZPARTS; i++) { u.uPT.value[i].set(k * (0.96 + 0.08 * h2), k, k * (1.04 - 0.08 * h2)); u.uPS.value[i].set(ice, 0, 0); }
+  }
   u.uHide.value[5] = z.headless ? 1 : 0; u.uHide.value[6] = z.headless || z.jawGone ? 1 : 0; u.uHide.value[8] = z.headless || z.helmetGone ? 1 : 0;
   u.uFlash.value = fl; u.uSeed.value = z.seed;
   r.mesh.visible = true;
   // ---------- rigid extras attached to bones ----------
   const neck = B.neck.matrixWorld.elements, spine = B.spine.matrixWorld.elements;
+  if (r.mz && r.mz.nq.eyes && !z.headless) {
+    const E = r.mz.nq.eyes, g = (dying ? 0.15 : 1) * (T === 'boss' ? 2.2 : z.elite ? 1.5 : 1.1);
+    for (const sx of [-1, 1]) part(neck, E[0] * sx, E[1], E[2], 0.0105, 0.0075, 0.006, [0.05, 0.02, 0.01], [e[0] * 3.2 * g, e[1] * 3.2 * g, e[2] * 3.2 * g], 0, MESH.sphere);
+  }
   if (!z.headless) { if (z.jawGone) part(neck, 0, 0.07, 0.05, 0.1, 0.03, 0.07, [0.3, 0.02, 0.02], null, 0); }
   else part(neck, 0, 0.0, 0.02, 0.1, 0.04, 0.1, [0.3, 0.03, 0.03], null, 0);
   if (T === 'boss') {

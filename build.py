@@ -1,4 +1,4 @@
-import base64, os, shutil, hashlib
+import base64, os, shutil, hashlib, json
 root = os.path.dirname(os.path.abspath(__file__))
 S = lambda f: open(os.path.join(root, 'src', f)).read()
 fonts = ''
@@ -22,8 +22,10 @@ import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
 SAKURA_VER = hashlib.sha1(open(os.path.join(root, 'models', 'sakura.glb'), 'rb').read()).hexdigest()[:10]
 CARS_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'models', f), 'rb').read() for f in ('car_sedan.glb', 'car_van.glb'))).hexdigest()[:10]
+MZ_FILES = sorted(f for f in os.listdir(os.path.join(root, 'models')) if f.startswith('mz_') and f.endswith('.glb'))
+MZ_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'models', f), 'rb').read() for f in MZ_FILES)).hexdigest()[:10]
 TEX_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'textures', f), 'rb').read() for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg', 'albedo_half.jpg', 'normal_half.jpg', 'orm_half.jpg'))).hexdigest()[:10]
-js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const SAKURA_VER = "%s"; // Meshy hero-tree cache key\n' % SAKURA_VER + 'const CARS_VER = "%s";   // Meshy car models cache key\n' % CARS_VER + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'game.js'])
+js = IMPORTS + 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const SAKURA_VER = "%s"; // Meshy hero-tree cache key\n' % SAKURA_VER + 'const CARS_VER = "%s";   // Meshy car models cache key\n' % CARS_VER + 'const MZ_VER = "%s";     // Meshy zombie models cache key\n' % MZ_VER + 'const MZ_TYPES = %s;\n' % json.dumps([f[3:-4] for f in MZ_FILES]) + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER + '\n'.join(S(f) for f in ['models.js', 'engine.js', 'props.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'game.js'])
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'
