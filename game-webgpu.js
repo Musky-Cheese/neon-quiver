@@ -1,6 +1,9 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { ao } from 'three/addons/tsl/display/GTAONode.js';
+import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 const NQ_GPU = "webgpu";   // which bundle this is (build.py)
 const RIG_VER = "b5137a2697";   // content hash: a new model always busts the browser cache
 const SAKURA_VER = "3dce9e4243"; // Meshy hero-tree cache key
@@ -121,15 +124,16 @@ if (typeof GPUTexture !== 'undefined') {
 // WebGPU build: a real adapter + device, or back to Classic (src/boot.js reloads into game-webgl.js and says why).
 // three's WebGPURenderer quietly drops to its own WebGL2 backend when WebGPU is missing: that counts as a failure here.
 try {
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance' });
+  const trackTimestamp = new URLSearchParams(location.search).has('prof');   // ?prof=1: per-pass GPU timing (r3.js profiler)
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp });
   renderer.onDeviceLost = (info) => gpuDeviceLost(info);   // game.js: before the game is up this falls back, after it pauses and explains
   await renderer.init();
   if (!renderer.backend.isWebGPUBackend) throw new Error('WebGPU unavailable: the browser only offered WebGL2');
 } catch (e) { if (window.NQ_BOOT && window.NQ_BOOT.fallback(e)) await new Promise(() => { }); throw e; }   // reloading: stop here quietly
 renderer.setPixelRatio(1);
 renderer.autoClear = false;
-renderer.outputColorSpace = THREE.SRGBColorSpace;   // preview: no grade pass yet, so three's own tone curve + sRGB out
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma
+renderer.toneMapping = THREE.NoToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
@@ -193,569 +197,6 @@ function farDefines(m) {   // NQ_FAR: Fast / Balanced / Laptop, NQ_FOGFAR: Lapto
   if (fog) d.NQ_FOGFAR = 1; else delete d.NQ_FOGFAR;
   m.needsUpdate = true; return true;
 }
-function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
-  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 });
-  m.defines = {};
-  m.userData.farOK = kind === 'static' || kind === 'inst';   // detail fade is for the city; bodies and the bow stay as they are
-  FAR_MATS.push(m); farDefines(m);
-  if (kind === 'inst' || kind === 'vm') m.defines.NQ_INST = 1;
-  if (kind === 'vm') m.defines.NQ_VM = 1;
-  if (kind === 'zombie') m.defines.NQ_Z = 1;
-  const own = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Float32Array(ZPARTS) }, uFlash: { value: 0 }, uSeed: { value: 0 } } : {};
-  m.userData.u = own;
-  m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, NQU, own);
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>
-varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
-#ifdef NQ_INST
-attribute vec4 iTint; attribute vec3 iEmit; attribute vec3 iSkin; varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
-#endif
-#ifdef NQ_Z
-attribute float part; uniform float uHide[${ZPARTS}]; varying float vPart; varying vec3 vNqL;
-#else
-attribute vec2 nqm;
-#endif
-uniform float uTime, uWind;`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
-#if !defined(NQ_Z) && !defined(NQ_VM) && !defined(NQ_INST)
-#ifdef NQ_CARDS
-  if (true) {   // flower cards sway like the foliage
-#else
-  if (nqm.y > 13.5 && nqm.y < 14.5) {   // foliage: a slow lean downwind (+x, like the rain) plus a quick leaf flutter, both from the weather
-#endif
-    vec3 wp = transformed; float hk = smoothstep(1.2, 4.5, wp.y);
-    float lean = uWind * (0.55 + 0.45 * sin(uTime * 0.8 + wp.x * 0.11 + wp.z * 0.09));
-    transformed.x += lean * 0.16 * hk;
-    transformed += vec3(sin(uTime * 6.3 + wp.y * 4.1 + wp.x * 2.7), sin(uTime * 5.1 + wp.z * 3.3) * 0.5, cos(uTime * 5.7 + wp.x * 3.9)) * 0.014 * (0.35 + uWind) * hk;
-  }
-#endif`)
-      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
-{ vec4 w = vec4(transformed, 1.0); vec3 wn = objectNormal;
-#ifdef USE_INSTANCING
-  w = instanceMatrix * w; wn = mat3(instanceMatrix) * wn;
-#endif
-  w = modelMatrix * w; vNqW = w.xyz; vNqN = normalize(mat3(modelMatrix) * wn); }
-#ifdef NQ_Z
-  vNqC = vec4(color); vNqM = vec2(color.a, 6.0); vPart = part;
-#ifdef NQ_ZTEX
-  vNqM.y = 25.0;   // Meshy scan: colour comes from the texture
-#endif
-  vNqL = position;   // bind-pose position: decay patterns stick to the body
-  int pi = int(part + 0.5); if (uHide[pi] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
-#else
-  vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
-#ifdef USE_INSTANCING_COLOR
-  if (nqm.y > 24.5 && nqm.y < 25.5) vNqC.rgb *= instanceColor;   // per-instance paint (Meshy cars): paint only, not glass or tyres
-#endif
-#endif
-#ifdef NQ_INST
-  vITint = iTint; vIEmit = iEmit; vISkin = iSkin;
-#endif`);
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>
-varying vec3 vNqW; varying vec3 vNqN; varying vec4 vNqC; varying vec2 vNqM;
-uniform float uTime, uNeon, uWin, uWinWarm, uGrid, uDyn, uDynVM, uWet, uFogDen, uEnvK, uReflOn, uRain; uniform vec3 uFogCol, uRimCol; uniform sampler2D uRefl; uniform vec2 uRes;
-uniform sampler2D uOcc; uniform vec4 uOccB; uniform sampler2D uIndoor; uniform float uAirK;
-uniform float uTexOn, uSnowCov, uZFill, uZRim;
-${NOISE_GLSL}
-#ifdef NQ_FAR
-// Fast / Balanced / Laptop only (r3.js FAR). 0 everywhere inside the near zone; past it, fine detail fades to its
-// mean (it is under a pixel there anyway). Without NQ_FAR the shader compiles exactly as it always did.
-uniform vec3 uFar;
-float nqFar = 0.;
-float vnf(vec2 p) { return nqFar <= 0. ? vn(p) : nqFar >= 1. ? 0.5 : mix(vn(p), 0.5, nqFar); }
-#else
-#define vnf vn
-#endif
-#ifdef NQ_FOGFAR
-uniform vec2 uFogFar;   // Laptop: extra fog past a start distance
-#endif
-// does a point/spot light (view-space position, colour, range cutoff) reach this fragment at all?
-bool nqLightOn(vec3 p, vec3 c, float r, vec3 g) { vec3 d = p - g; return c != vec3(0.) && (r <= 0. || dot(d, d) < r * r); }
-#if !defined(NQ_Z) && !defined(NQ_VM)
-uniform sampler2DArray uTexA, uTexN, uTexR; uniform vec4 uTexM[8]; uniform vec2 uTexS[8];
-// triplanar sample of one layer: colour, AO + roughness, and a whiteout-blended world-space normal
-void nqTri(float L, vec3 W, vec3 N, float sc, out vec3 a, out vec2 ro, out vec3 n) {
-  vec3 w = pow(abs(N), vec3(4.)); w /= (w.x + w.y + w.z);
-  vec2 ux = W.zy * sc, uy = W.xz * sc, uz = W.xy * sc;
-  vec3 nx = vec3(0.), ny = vec3(0.), nz = vec3(0.); a = vec3(0.); ro = vec2(0.);
-  if (w.x > 0.02) { a += texture(uTexA, vec3(ux, L)).rgb * w.x; ro += texture(uTexR, vec3(ux, L)).rg * w.x; nx = texture(uTexN, vec3(ux, L)).rgb * 2. - 1.; }
-  if (w.y > 0.02) { a += texture(uTexA, vec3(uy, L)).rgb * w.y; ro += texture(uTexR, vec3(uy, L)).rg * w.y; ny = texture(uTexN, vec3(uy, L)).rgb * 2. - 1.; }
-  if (w.z > 0.02) { a += texture(uTexA, vec3(uz, L)).rgb * w.z; ro += texture(uTexR, vec3(uz, L)).rg * w.z; nz = texture(uTexN, vec3(uz, L)).rgb * 2. - 1.; }
-  a /= max(w.x * step(0.02, w.x) + w.y * step(0.02, w.y) + w.z * step(0.02, w.z), 1e-3);
-  nx = vec3(nx.xy + N.zy, abs(nx.z) * N.x); ny = vec3(ny.xy + N.xz, abs(ny.z) * N.y); nz = vec3(nz.xy + N.xy, abs(nz.z) * N.z);
-  n = normalize(nx.zyx * w.x + ny.xzy * w.y + nz.xyz * w.z);
-}
-#endif
-// rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
-float nqRipple(vec2 p, float t) {
-  vec2 id = floor(p), f = fract(p) - 0.5; float h = 0.;
-  for (int k = 0; k < 2; k++) {
-    float fk = float(k); vec2 o = vec2(h21(id + fk * 7.1), h21(id + 13.7 + fk)) - 0.5;
-    float ph = fract(t * (0.8 + 0.4 * h21(id + fk * 2.3)) + h21(id * 1.7 + fk * 3.3));
-    float d = length(f - o * 0.5), r = ph * 0.42;
-    h += sin((d - r) * 70.) * smoothstep(0.07, 0., abs(d - r)) * (1. - ph) * (1. - ph);
-  }
-  return h;
-}
-// bricks in facade space (x along the wall, y up): colour variation + mortar mask
-vec2 nqBrick(vec2 fc) {
-  vec2 b = fc / vec2(0.62, 0.24); b.x += step(1., mod(floor(b.y), 2.)) * 0.5;
-  vec2 f = fract(b), fw = max(fwidth(b), vec2(1e-3)) * 1.5;
-  float m = 1. - smoothstep(0.06, 0.06 + fw.x, min(f.x, 1. - f.x)) * smoothstep(0.1, 0.1 + fw.y, min(f.y, 1. - f.y));
-  return vec2(h21(floor(b)), m);
-}
-#ifdef NQ_INST
-varying vec4 vITint; varying vec3 vIEmit; varying vec3 vISkin;
-#endif
-#ifdef NQ_Z
-varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec3 uPS[${ZPARTS}]; uniform vec3 uPE[${ZPARTS}]; uniform float uFlash, uSeed;
-#endif
-`)
-      .replace('#include <color_fragment>', `
-  vec3 tint = vec3(1.0), skin = vec3(0.5), iemit = vec3(0.0); float flash = 0.0;
-#ifdef NQ_INST
-  tint = vITint.rgb; flash = vITint.a; iemit = vIEmit; skin = vISkin;
-#endif
-#ifdef NQ_Z
-  { int pi = int(vPart + 0.5); tint = uPT[pi]; skin = uPS[pi]; iemit = uPE[pi]; flash = uFlash; }
-#endif
-#ifdef NQ_VM
-  float dynK = uDynVM;
-#else
-  float dynK = uDyn;
-#endif
-  float mat = vNqM.y;
-#if defined(NQ_FAR) && !defined(NQ_Z) && !defined(NQ_VM)
-  if (uFar.z > 0.5) nqFar = smoothstep(uFar.x, uFar.y, length(vNqW - cameraPosition));
-#endif
-  vec3 base = vNqC.rgb * tint;
-#ifdef USE_MAP
-  vec3 nqTex = texture2D(map, vMapUv).rgb;   // downloaded (Meshy) models carry their own colour texture
-  base *= nqTex;
-#endif
-  vec3 emis = base * vNqM.x * uNeon + iemit * dynK;
-#ifdef NQ_MAPGLOW
-  {   // the model's painted neon (saturated cyan/teal texels) lights up like the city's signs
-    float cy = smoothstep(0.06, 0.22, min(nqTex.g, nqTex.b) - nqTex.r) * smoothstep(0.12, 0.35, max(nqTex.g, nqTex.b));
-    emis += nqTex * cy * NQ_MAPGLOW * uNeon;
-  }
-#endif
-  float rough = 0.72, metal = 0.0, rimK = 0.0, envK = uEnvK;
-  float bumpH = 0.0, wetRefl = 0.0;
-  float nqTL = -1., nqTS = 0.;   // Ultra texture layer + strength, chosen per material below
-  vec3 N0 = normalize(vNqN);
-  // baked occlusion: how much open sky this spot sees (alley floors, wall bases and corners go dark).
-  // Step out of the surface first so a wall samples the street in front of it, then fade up the wall.
-  float nqOcc = 1.0, nqIn = 0.0;
-#if !defined(NQ_Z) && !defined(NQ_VM)
-  if (uOccB.z > 0.0) {
-    vec2 ouv = (vNqW.xz + N0.xz * 0.4 - uOccB.xy) * uOccB.zw;
-    float a = texture2D(uOcc, ouv).r;
-    a = mix(a, 1.0, smoothstep(0.0, 14.0, vNqW.y) * a);
-    nqOcc = mix(a, 1.0, step(0.5, N0.y) * step(1.2, vNqW.y));   // roofs and ledges look at the sky
-    // inside a walk-in room: dry, sheltered, evenly lit (the sky map knows nothing of ceilings)
-    nqIn = step(0.5, texture2D(uIndoor, (vNqW.xz + N0.xz * 0.3 - uOccB.xy) * uOccB.zw).r) * step(vNqW.y, 4.5);
-    nqOcc = mix(nqOcc, 0.82, nqIn);
-  }
-#endif
-  float wetK = uWet * (1. - nqIn);
-  vec2 fcW = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
-  // rain streaks running down walls: darker, glossier stripes that fade toward the top
-  // (only the materials below that use it pay for the two noise lookups: facades, corrugated, glass, car paint, cast concrete)
-  float streak = 0.;
-  if ((mat > 0.5 && mat < 1.5) || (mat > 7.5 && mat < 11.5) || (mat > 15.5 && mat < 16.5))
-    streak = vn(vec2(fcW.x * 3.1, fcW.y * 0.08 - uTime * 0.02)) * vnf(vec2(fcW.x * 11.7, fcW.y * 0.3)) * (1. - nqIn);
-  if ((mat > 0.5 && mat < 1.5) || (mat > 8.5 && mat < 9.5)) {   // facades with windows (concrete panels or brick)
-    if (abs(N0.y) < 0.5) {
-      vec2 fc = abs(N0.x) > 0.5 ? vec2(vNqW.z, vNqW.y) : vec2(vNqW.x, vNqW.y);
-      vec2 cell = fc / vec2(2.4, 3.3); vec2 id = floor(cell); vec2 f = fract(cell);
-      float win = step(0.16,f.x)*step(f.x,0.84)*step(0.22,f.y)*step(f.y,0.78);
-      float bseed = h21(floor(vNqW.xz/37.) + N0.xz*3.1);
-      float seed = h21(id*1.37 + bseed*91.);
-      float floorLit = step(0.968, h21(vec2(id.y * 1.7 + 0.3, bseed * 53.1))) * step(4.5, vNqW.y);   // an office floor someone left on
-      float lit = max(step(0.82 - bseed*0.1, seed), floorLit) * step(1.2, vNqW.y);   // dead city: most rooms still dark
-      float flick = step(0.997, h21(id + floor(uTime*4.)));
-      vec3 wc = seed > 0.93 ? vec3(1.0,0.25,0.6) : seed > 0.84 ? vec3(0.25,0.85,1.0) : vec3(1.0,0.68,0.38);
-      wc = mix(wc, vec3(1.0,0.66,0.36)*(0.7+0.6*h21(id+3.7)), uWinWarm);
-      float tv = step(0.78, h21(id + 8.8)) * (1. - floorLit);   // a TV still playing to an empty room
-      wc = mix(wc, vec3(0.36, 0.6, 1.0) * (0.45 + 0.55 * vn(vec2(uTime * 4.7 + seed * 40., seed * 9.))), tv);
-      wc = mix(wc, vec3(0.8, 0.9, 1.0), floorLit);
-      // inside the glass: a room gradient, mullions, and some blinds half drawn
-      float mull = max(1. - smoothstep(0.0, 0.012, abs(f.x - 0.5)), 1. - smoothstep(0.0, 0.015, abs(f.y - 0.62)));
-      float blind = h21(id + 5.3) < 0.35 ? step(0.5, fract(f.y * 18.)) * step(1. - h21(id + 9.1) * 0.8, 1. - f.y) : 0.;
-      float room = (0.45 + 0.55 * smoothstep(0.2, 0.8, f.y)) * (0.4 + 0.6 * h21(id + 1.9));
-      if (lit * win > 0.5) {   // interior mapping: trace the view ray into a box room behind the glass
-#ifdef NQ_FAR
-       float roomFar = 0.5 * (0.55 + 0.45 * h21(id + 1.9));   // far away: the room's average brightness, no trace
-       if (nqFar < 1.) {
-#endif
-        vec3 V = normalize(vNqW - cameraPosition);
-        vec3 d = vec3(abs(N0.x) > 0.5 ? V.z : V.x, V.y, max(-dot(V, N0), 0.05));
-        vec2 rs = vec2(2.4, 3.3); vec2 p = f * rs; float dep = 2.2 + 1.6 * h21(id + 2.3);
-        float tx = (d.x > 0. ? rs.x - p.x : -p.x) / (abs(d.x) < 1e-4 ? 1e-4 : d.x);
-        float ty = (d.y > 0. ? rs.y - p.y : -p.y) / (abs(d.y) < 1e-4 ? 1e-4 : d.y);
-        float tz = dep / d.z; float t = min(min(tx, ty), tz);
-        vec3 hp = vec3(p, 0.) + d * t; float sh;
-        if (t == tz) {         // back wall with a piece of furniture or a figure in silhouette
-          float fx = hp.x / rs.x, ft = h21(id + 4.4);
-          float furn = step(abs(fx - 0.3 - ft * 0.4), 0.12 + ft * 0.15) * step(hp.y, 0.9 + ft * 1.1);
-          sh = mix(0.62, 0.08, furn);
-        } else if (t == ty) sh = d.y > 0. ? 1.0 : 0.3 * (0.7 + 0.3 * vn(hp.xz * 3.));   // ceiling light / floor
-        else sh = 0.42;        // side walls
-        sh *= 0.55 + 0.45 * smoothstep(0., dep, dep - hp.z * 0.6);   // falls off toward the back
-        room = sh * (0.55 + 0.45 * h21(id + 1.9));
-#ifdef NQ_FAR
-        if (nqFar > 0.) room = mix(room, roomFar, nqFar);
-       } else room = roomFar;
-#endif
-      }
-      float wk = win * lit * (1. - flick) * (1. - mull * 0.85) * (1. - blind * 0.7) * room;
-      emis += wk * wc * uWin * (mat > 8.5 ? 0.7 : 1.0);
-      vec3 wall;
-      if (mat > 8.5) {        // brick tenements
-        vec2 br = uTexOn > 0.5 ? vec2(0.5, 0.) : nqBrick(fc);
-        wall = base * (0.75 + 0.5 * br.x) * (1. - br.y * 0.55);
-        bumpH = -br.y * 0.012;
-      } else {                // concrete panels: seams every floor and bay, blotchy weathering
-        float seam = max(1. - smoothstep(0., 0.035, abs(f.y - 0.02)), 1. - smoothstep(0., 0.02, abs(f.x - 0.02)));
-        float panel = 0.8 + 0.25 * vn(fc * vec2(0.9, 0.35) + bseed * 17.) + 0.1 * vn(fc * 4.3);
-        wall = base * panel * (1. - seam * 0.45);
-        bumpH = -seam * 0.01;
-      }
-      // dirty water runs down from every sill; sheltered walls collect more soot
-      float sill = step(0.16, f.x) * step(f.x, 0.84) * step(f.y, 0.22) * smoothstep(0.0, 0.22, f.y) * (0.3 + 0.7 * vnf(vec2(fc.x * 14., id.y * 3.1)));
-      float grime = smoothstep(4., 0., fc.y) * 0.35 + streak * 0.5 + sill * 0.55 + (1. - nqOcc) * 0.45;
-      wall *= 1. - clamp(grime, 0., 1.4) * 0.5;
-      base = mix(wall, vec3(0.015,0.02,0.04), win);
-      bumpH -= win * 0.03;
-      rough = mix(mix(0.85, 0.45, streak * wetK), 0.08, win); metal = win*0.2; envK = uEnvK*mix(0.6 + streak, 1.6, win);
-      nqTL = mat > 8.5 ? 2. : 1.; nqTS = 0.9 * (1. - win);
-    } else if (mat > 8.5) { base *= 0.8; }
-  } else if (mat > 1.5 && mat < 2.5) {      // plaza tiles, wet
-    vec2 q = vNqW.xz/4.; vec2 gd = abs(fract(q-0.5)-0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
-    vec2 l2 = 1. - smoothstep(vec2(0.012), vec2(0.012)+fw*1.5, gd);
-    float line = max(l2.x,l2.y) * (0.35 + 0.65*clamp(0.02/max(fw.x,fw.y),0.,1.));
-    float pud = max(smoothstep(0.52,0.66, vn(vNqW.xz*0.18)), smoothstep(0.8, 0.5, nqOcc) * 0.75);   // water pools along wall bases
-    float tileV = 0.9 + 0.2*h21(floor(q));
-    emis += vec3(0.1,0.55,1.0)*line*uGrid*(1.-pud*0.6);
-    float stain = vn(vNqW.xz * 0.7) * 0.25 + vn(vNqW.xz * 3.7) * 0.12;
-    base = mix(base*tileV*(1.-line*0.5)*(1. - stain), base*0.35, pud);
-    bumpH = -line * 0.01 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
-    rough = mix(0.62, mix(0.62, 0.04, clamp(wetK, 0., 1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
-    wetRefl = mix(0.22, 1.0, pud) * clamp(wetK, 0., 1.);   // the whole wet surface mirrors a little, puddles fully
-    nqTL = 5.; nqTS = 0.75 * (1. - pud * 0.7);
-  } else if (mat > 2.5 && mat < 3.5) {      // asphalt
-    float pud = max(smoothstep(0.5,0.7, vn(vNqW.xz*0.12)), smoothstep(0.8, 0.5, nqOcc) * 0.8);     // gutters stay wet
-    float lane = step(abs(vNqW.x),0.12)*step(0.5,fract(vNqW.z/6.))*step(abs(vNqW.x),6.);
-    float lane2 = step(abs(vNqW.z),0.12)*step(0.5,fract(vNqW.x/6.))*step(abs(vNqW.z),6.);
-    emis += vec3(1.0,0.75,0.3)*(lane+lane2)*uGrid*0.55*step(40.5,max(abs(vNqW.x),abs(vNqW.z)));
-    float grain = vn(vNqW.xz*3.1), fine = vnf(vNqW.xz*23.);
-    float crack = smoothstep(0.02, 0., abs(vn(vNqW.xz*0.9) - 0.5)) * 0.6;
-    base *= (1.-pud*0.6) * (0.78 + 0.3*grain + 0.1*fine) * (1. - crack * 0.5);
-    {   // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
-      float wild = smoothstep(128., 162., vNqW.z) * step(abs(vNqW.x), 40.);
-      float grav = wild * smoothstep(0.35, 0.6, vn(vNqW.xz * 0.35) * (1. - wild * 0.4) + wild * 0.55);
-      base = mix(base * (1. - crack * wild), vec3(0.12, 0.105, 0.085) * (0.55 + 0.7 * fine) * (0.7 + 0.5 * grain), grav);
-      pud *= 1. - grav * 0.7; bumpH += grav * fine * 0.006;
-    }
-    bumpH = fine * 0.0025 - crack * 0.006 + pud * nqRipple(vNqW.xz * 2.2, uTime) * 0.002 * uRain;
-    rough = mix(0.85, mix(0.8, 0.05, clamp(wetK,0.,1.)), pud); envK = uEnvK*(1.0 + pud*0.6*wetK);
-    wetRefl = mix(0.2, 1.0, pud) * clamp(wetK, 0., 1.);
-    nqTL = 0.; nqTS = 0.9 * (1. - pud * 0.75);
-  } else if (mat > 3.5 && mat < 4.5) {      // brushed metal
-    float br = vnf(vec2(fcW.x * 60., fcW.y * 1.5));
-    rough = 0.3 + br * 0.15; metal = 0.65; rimK = 1.0; bumpH = br * 0.0015;
-    base *= 0.9 + 0.2 * vn(vNqW.xz * 2.1 + vNqW.y);
-  } else if (mat > 7.5 && mat < 8.5) {      // corrugated / painted steel: ribs, rust, scratches
-    float along = abs(N0.y) > 0.5 ? vNqW.x : fcW.x;
-    float rib = sin(along * 25.1);
-    float rust = smoothstep(0.55, 0.8, vn(fcW * 1.3 + N0.xz * 5.) + streak * 0.4);
-    base = mix(base * (0.85 + 0.15 * rib), vec3(0.16, 0.07, 0.03), rust * 0.7) * (1. - smoothstep(1.5, 0., vNqW.y) * 0.25);
-    bumpH = rib * 0.006; rough = mix(0.5, 0.85, rust); metal = 0.45 * (1. - rust); rimK = 1.0;
-    nqTL = 3.; nqTS = 0.55;
-  } else if (mat > 9.5 && mat < 10.5) {     // glass: dark, glossy, streaked with rain
-    base *= 0.35; rough = 0.04 + streak * 0.14 * wetK; metal = 0.0; envK = uEnvK * 2.4; rimK = 0.6; bumpH = streak * 0.0015;
-  } else if (mat > 10.5 && mat < 11.5) {    // car paint: clear coat, fine scratches, road grime low down
-    float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
-    float dirt = smoothstep(0.95, 0.15, vNqW.y) * (0.45 + 0.55 * vn(vNqW.xz * 3. + vNqW.y * 2.));
-    base = mix(base, vec3(0.05, 0.045, 0.04), dirt * 0.65) + scr * 0.1;
-    rough = mix(0.24, 0.75, dirt) + streak * 0.05 * wetK; metal = mix(0.3, 0.05, dirt); envK = uEnvK * mix(1.8, 0.6, dirt); rimK = 1.0; bumpH = -scr * 0.0008;
-  } else if (mat > 11.5 && mat < 12.5) {    // bark: deep ridges, moss creeping up from the planter
-    float rid = abs(vnf(vNqW.xz * 11. + vNqW.y * 1.7) - 0.5) * 2.;
-    float moss = smoothstep(1.6, 0.4, vNqW.y) * vn(vNqW.xz * 5. + vNqW.y * 4.);
-    base = mix(base * (0.55 + 0.6 * rid), vec3(0.05, 0.09, 0.03), moss * 0.7);
-    bumpH = rid * 0.012; rough = 0.92; rimK = 0.4;
-  } else if (mat > 12.5 && mat < 13.5) {    // wood slats: grain, darker and slicker when wet
-    float gr = vn(vec2((vNqW.x + vNqW.z) * 3.1, vNqW.y * 40.)) * 0.5 + vnf(vNqW.xz * 23.) * 0.5;
-    base *= (0.7 + 0.45 * gr) * mix(1., 0.72, wetK * step(0.5, N0.y));
-    bumpH = gr * 0.002; rough = mix(0.62, 0.35, wetK * step(0.5, N0.y)); rimK = 0.5;
-  } else if (mat > 13.5 && mat < 14.5) {    // foliage: mottled leaves, light glowing through the canopy
-    // individual leaves / petals: a cellular pattern laid on the dominant plane of the canopy surface
-    bool pinkF = base.r > base.g * 1.35;
-    vec3 an = abs(N0); vec2 lp = an.y > max(an.x, an.z) ? vNqW.xz : an.x > an.z ? vNqW.zy : vNqW.xy;
-    lp = lp * (pinkF ? 13. : 9.) + vec2(vn(vNqW.xz * 2.1), vn(vNqW.zy * 2.3)) * 1.5;
-    vec2 li = floor(lp), lf = fract(lp); float F1 = 9., F2 = 9.; vec2 cid = li;
-    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-      vec2 o = vec2(float(i), float(j)); vec2 pc = o + vec2(h21(li + o), h21(li + o + 7.1)) * 0.85 + 0.075;
-      float dd = length(pc - lf); if (dd < F1) { F2 = F1; F1 = dd; cid = li + o; } else if (dd < F2) F2 = dd;
-    }
-    float edgeL = smoothstep(0.0, 0.14, F2 - F1), hv = h21(cid * 1.31), dome = 1. - clamp(F1 * 1.6, 0., 1.);
-    // ragged silhouette: leaves at grazing angles fall away between the gaps
-    float ndv = abs(dot(N0, normalize(cameraPosition - vNqW)));
-    if (F2 - F1 < 0.1 + (1. - ndv) * 0.25 && ndv < 0.45 && vn(vNqW.xz * 3.3 + vNqW.y * 2.9) > 0.3) discard;
-    float clump = vn(vNqW.xz * 1.4 + vNqW.y * 1.7);
-    if (pinkF) base = mix(base, mix(vec3(1., 0.78, 0.86), vec3(0.86, 0.36, 0.55), hv), 0.65) * (0.62 + 0.45 * clump);   // white to deep pink petals
-    else base *= mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv) * (0.55 + 0.6 * clump);                           // dark to sunlit, yellowing leaves
-    base *= mix(0.62 + 0.3 * clump, 1.0, edgeL) * (0.8 + 0.3 * dome);
-    if (pinkF) { base *= vec3(1.12, 0.95, 1.02); emis += base * (0.1 + 0.16 * dome) * (0.6 + 0.4 * clump); }   // petals glow softly, as if lit through
-    emis += base * uNeon * 0.3; rough = mix(0.7, 0.4, dome); rimK = 1.4;
-    emis += base * (1. - ndv) * (1. - ndv) * (0.25 + 0.6 * uNeon) * (pinkF ? 1.3 : 0.8);   // thin leaves and petals let the city light through at the edges
-    bumpH = dome * 0.012 - (1. - edgeL) * 0.006;
-  } else if (mat > 14.5 && mat < 15.5) {    // moulded plastic / rubber
-    base *= 0.88 + 0.22 * vn(vNqW.xz * 4. + vNqW.y * 3.); rough = 0.55; metal = 0.0; rimK = 0.7;
-  } else if (mat > 15.5 && mat < 16.5) {    // cast concrete: aggregate, pits, wet tops
-    float ag = vn(vNqW.xz * 1.7 + vNqW.y * 1.3) * 0.25 + vnf(vNqW.xz * 9. + vNqW.y * 7.) * 0.12;
-    float pit = smoothstep(0.78, 0.9, vnf(vNqW.xz * 31. + vNqW.y * 29.));
-    float top = step(0.5, N0.y);
-    base *= (0.78 + ag) * (1. - pit * 0.35) * (1. - streak * 0.2 * (1. - top)) * mix(1., 0.7, wetK * top);
-    bumpH = -pit * 0.004 + ag * 0.004; rough = mix(0.92, 0.4, wetK * top * 0.8); rimK = 0.3;
-    nqTL = 7.; nqTS = 0.85;
-  } else if (mat > 16.5 && mat < 17.5) {    // moss lawn strewn with fallen blossom
-    float n1 = vn(vNqW.xz * 0.9), n2 = vn(vNqW.xz * 7.3), n3 = vnf(vNqW.xz * 31.);
-    base *= 0.6 + 0.5 * n1 + 0.25 * n2 - 0.15 * n3;
-    float pet = smoothstep(0.8, 0.9, vn(vNqW.xz * 5.1 + 3.7)) * smoothstep(0.3, 0.6, vn(vNqW.xz * 0.4 + 9.1));
-    base = mix(base, vec3(0.75, 0.32, 0.45), pet * 0.85);
-    emis += vec3(0.6, 0.18, 0.3) * pet * 0.08 * uNeon;
-    bumpH = n3 * 0.004 + n2 * 0.006; rough = mix(0.9, 0.55, clamp(wetK, 0., 1.) * 0.6); rimK = 0.2;
-  } else if (mat > 18.5 && mat < 19.5) {    // overgrown lawn: patchy weeds, bare mud, wet sheen
-    float n1 = vn(vNqW.xz * 0.7), n2 = vn(vNqW.xz * 6.1), n3 = vnf(vNqW.xz * 27.);
-    base *= 0.5 + 0.6 * n1 + 0.3 * n2 - 0.15 * n3;
-    base = mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(vNqW.xz * 0.35 + 4.2)) * 0.8);
-    bumpH = n3 * 0.005 + n2 * 0.006; rough = mix(0.92, 0.6, clamp(wetK, 0., 1.) * 0.5); rimK = 0.2;
-  } else if (mat > 22.5 && mat < 23.5) {    // harbour: black oily water, long swell, rain rings, a rainbow fuel sheen
-    float sw = sin(vNqW.x * 0.35 + uTime * 0.7) * 0.5 + sin(vNqW.z * 0.23 - uTime * 0.5) * 0.5;
-    float oil = smoothstep(0.55, 0.8, vn(vNqW.xz * 0.08 + vec2(uTime * 0.01, 0.)));
-    base = vec3(0.008, 0.014, 0.016) + (0.5 + 0.5 * cos(6.2831 * (vn(vNqW.xz * 0.4) + vec3(0., 0.33, 0.67)))) * 0.03 * oil;
-    bumpH = nqRipple(vNqW.xz * 1.6, uTime) * 0.003 * max(uRain, 0.2) + sw * 0.03 + (vn(vNqW.xz * 0.9 + uTime * 0.15) - 0.5) * 0.02;
-    rough = 0.05; metal = 0.0; envK = uEnvK * 1.8; rimK = 0.0; wetRefl = 0.9;
-  } else if (mat > 17.5 && mat < 18.5) {    // koi pond: black mirror water, rain rings, drifting petals, koi below
-    float pet = smoothstep(0.86, 0.93, vn(vNqW.xz * 4.3 + vec2(uTime * 0.05, 0.)));
-    vec2 kp = vNqW.xz * 0.6 + vec2(sin(uTime * 0.3), cos(uTime * 0.23)) * 1.5;
-    float koi = smoothstep(0.9, 0.96, vn(kp * 1.7));
-    base = mix(vec3(0.01, 0.03, 0.035), vec3(0.8, 0.35, 0.5), pet);
-    emis += vec3(1.0, 0.35, 0.08) * koi * 0.18 * (1. - pet);
-    bumpH = nqRipple(vNqW.xz * 2.2, uTime) * 0.003 * max(uRain, 0.25) + (vn(vNqW.xz * 1.3 + uTime * 0.2) - 0.5) * 0.004;
-    rough = mix(0.03, 0.6, pet); metal = 0.0; envK = uEnvK * 1.6; rimK = 0.0;
-    wetRefl = mix(0.85, 0.08, pet);
-#ifdef NQ_ZTEX
-  } else if (mat > 24.5 && mat < 25.5) {    // Meshy-scanned zombie: the texture carries skin, clothes and gore
-    // uPT = per-zombie tone, uPS.x = frost (Cryo Burst) set by rig.js drawZombieRig
-    vec3 tx = nqTex, q = vNqL * 7. + uSeed;
-    float lum = dot(tx, vec3(0.3, 0.55, 0.15));
-    float bl = smoothstep(0.05, 0.18, tx.r - max(tx.g, tx.b) * 1.35) * (1. - smoothstep(0.12, 0.3, max(tx.g, tx.b)));   // deep, saturated red only: open wounds, not brown stains
-    base = tx * tint * (0.86 + 0.28 * vn(q.xy * 0.9 + q.z * 0.4));                 // grime breaks up the scan's even tone
-    float mud = (1. - smoothstep(0.05, 0.75, vNqL.y)) * (0.45 + 0.55 * vn(q.xz * 0.9 + 2.7));
-    base = mix(base * (1. - 0.3 * mud), vec3(0.075, 0.06, 0.045), mud * 0.3);       // street filth up the shins
-    base = mix(base, (lum * 1.5 + 0.06) * vec3(0.42, 0.62, 0.8), skin.x);              // frost
-    rough = mix(0.74, 0.18, bl); metal = 0.0; rimK = mix(0.6, 1.35, bl);
-    float soak = clamp(wetK, 0., 1.);
-    rough = mix(rough, rough * 0.7, soak); base *= 1. - 0.15 * soak;
-    emis = vec3(0.5, 0.07, 0.045) * bl * bl * (0.22 + 0.14 * vn(q.xy * 5. + q.z)) * (1. - skin.x);   // wounds glow faintly, like the sculpts
-#endif
-  } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
-    float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;
-    base = mix(skin, tint, clm);
-#ifdef NQ_Z
-    bl = smoothstep(0.3, 0.95, bl);     // blood in stains and runs, not a wash over everything
-    base = mix(base, vec3(0.085,0.01,0.007), bl*0.85);
-#else
-    base = mix(base, vec3(0.13,0.008,0.006), bl*0.92);
-#endif
-    base *= ao;
-    emis = iemit * vNqM.x * dynK;
-    float armour = step(6.5, mat);
-#ifdef NQ_Z
-    armour = step(6.5, vPart) * step(vPart, 8.5);
-#endif
-    rough = mix(mix(mix(0.62, 0.88, clm), 0.25, bl), 0.55, armour); metal = armour * 0.08; rimK = 0.6;
-#ifdef NQ_Z
-    {   // decay: mottled skin, dark veins, wet wounds; grimy clothes torn open to the skin beneath
-      vec3 q = vNqL * 7. + uSeed; float skinM = (1. - clm) * (1. - armour);
-      float mott = vn(q.xy * 1.3 + q.z * 0.7);
-      float vein = smoothstep(0.03, 0.0, abs(vn(q.xz * 2.1 + q.y * 0.6) - 0.5)) * skinM * smoothstep(0.4, 0.7, vn(q.xy * 0.7 + 3.3));
-      float wound = smoothstep(0.68, 0.78, vn(q.yz * 0.8 + 7.3)) * (1. - armour);
-      float tear = smoothstep(0.8, 0.86, vn(q.xy * 1.6 + 3.1)) * clm * (1. - armour);
-      float face = step(4.5, vPart) * step(vPart, 6.5);
-      base *= mix(1., ao * ao, face * 0.85);                                   // deep sockets, mouth and nostrils actually read as holes
-      float lum = dot(base, vec3(0.3, 0.55, 0.15));
-      base = mix(base, lum * vec3(0.86, 0.97, 0.8), skinM * 0.4);                // grey-green pallor: dead, not just pale
-      base = mix(base, base * vec3(0.78, 0.72, 0.82) * (0.65 + 0.6 * mott), skinM * 0.85);
-      base = mix(base, base * vec3(0.38, 0.3, 0.45), vein * 0.8);
-      base = mix(base, lum * vec3(0.9, 1.0, 0.85), clm * 0.26 * (1. - armour));        // clothes: faded, filthy, nothing saturated survives
-      base = mix(base, mix(skin * ao * 0.45, vec3(0.09, 0.012, 0.008) * ao, 0.35), tear);   // rips show dark, bloodied skin
-      base *= 1. - clm * (1. - tear) * 0.4 * vn(q.xz * 3. + 1.7);
-      base = mix(base, vec3(0.16, 0.015, 0.012) * ao, wound * 0.9);
-      // old blood dries brown-black; fresh stays wet and red
-      float dry = smoothstep(0.25, 0.6, vn(q.xy * 2.3 + 5.1));
-      base = mix(base, vec3(0.07, 0.025, 0.018) * ao, bl * dry * 0.65);
-      // grime from the street: mud and filth climbing the legs, heaviest on shoes and cuffs
-      float mud = (1. - smoothstep(0.05, 0.8, vNqL.y)) * (0.45 + 0.55 * vn(q.xz * 0.9 + 2.7));
-      base = mix(base * (1. - 0.35 * mud), vec3(0.075, 0.06, 0.045) * ao, mud * 0.4 * (0.4 + 0.6 * clm));
-      // livor mortis: blood pooled low in the body darkens and purples the skin
-      base = mix(base, base * vec3(0.72, 0.6, 0.78), skinM * (1. - smoothstep(0.7, 1.3, vNqL.y)) * 0.35);
-      rough = mix(rough, 0.12, max(wound, bl * (1. - dry)));
-      float soak = clamp(wetK, 0., 1.);                                   // rain: skin takes a thin sheen, cloth goes dark and heavy
-      rough = mix(rough, rough * 0.72, soak * skinM);
-      rough = mix(rough, 0.16, soak * skinM * smoothstep(0.35, 0.9, N0.y));   // rain beads on the crown and shoulders
-      base *= 1. - 0.2 * soak * clm * (1. - armour);
-      bumpH = (mott - 0.5) * 0.004 * skinM - wound * 0.008 + vein * 0.003 + (vn(q.xy * 6.) - 0.5) * 0.0015 * clm;   // weave
-      // eyes (full-emissive verts on the head): milky, clouded, wet, with only a faint infected glint
-      float eye = step(0.97, vNqM.x) * step(4.5, vPart) * step(vPart, 5.5);
-      base = mix(base, vec3(0.3, 0.1, 0.07) * mix(1., vn(q.xy * 9.) * 0.4 + 0.7, 0.5), eye);   // bloodshot
-      rough = mix(rough, 0.08, eye); rimK = mix(rimK, 0.0, eye);
-      emis += iemit * eye * 3.2;                                              // burning pupils: readable at night from across the street
-      // teeth (tagged 0.9 in the sculpt, 0.27 after the vein softening): stained, cracked enamel, never glowing
-      float tooth = step(0.2, vNqM.x) * step(vNqM.x, 0.35) * step(4.5, vPart) * step(vPart, 6.5);
-      base = mix(base, vec3(0.3, 0.25, 0.15) * ao * (0.75 + 0.25 * vn(q.xy * 20.)), tooth); rough = mix(rough, 0.3, tooth); emis *= 1. - tooth;
-      // open wounds (carved craters/notches, authored in the blood mask) get the same treatment as the
-      // eyes: a faint infected glow so the carved geometry actually reads in this dark, backlit lighting
-      // instead of vanishing into the near-black silhouette. Concentrated on real wound centers (bl is
-      // already smoothstepped away from incidental blood specks), not a wash over every stain.
-      float woundGlow = bl * bl * (1. - tooth);
-      emis += vec3(0.5, 0.07, 0.045) * woundGlow * (0.55 + 0.25 * vn(q.xy * 5. + q.z));
-      rimK = mix(rimK, 1.35, bl);                                              // wet, torn edges catch rim light harder
-    }
-#endif
-  } else if (mat > 19.5 && mat < 20.5) {    // painted plaster: soft mottling, scuffed low down, faint roller texture
-    float n1 = vn(fcW * 1.3 + N0.xz * 3.), n2 = vn(fcW * 9.), n3 = vnf(vec2(fcW.x * 40., fcW.y * 2.));
-    base *= (0.9 + 0.14 * n1 - 0.05 * n2 - 0.03 * n3) * (1. - smoothstep(0.45, 0.0, vNqW.y) * 0.3 * (1. - step(0.5, abs(N0.y))));
-    rough = 0.85 - n2 * 0.08; rimK = 0.15; bumpH = n2 * 0.0006 + n3 * 0.0003;
-    nqTL = 6.; nqTS = 0.7;
-  } else if (mat > 20.5 && mat < 22.5) {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
-    vec2 q = vNqW.xz / (mat > 21.5 ? 0.33 : 0.6); vec2 gd = abs(fract(q) - 0.5); vec2 fw = max(fwidth(q), vec2(1e-4));
-    float grout = smoothstep(0.482 - fw.x * 1.2, 0.494, max(gd.x, gd.y));
-    float tv = 0.88 + 0.2 * h21(floor(q)), scuff = vn(vNqW.xz * 2.7) * vnf(vNqW.xz * 13.);
-    if (mat > 21.5) base = mix(base, vec3(0.025, 0.025, 0.03), mod(floor(q.x) + floor(q.y), 2.));
-    base = mix(base * tv * (1. - scuff * 0.25), vec3(0.06, 0.055, 0.05), grout * 0.8);
-    rough = mix(mix(0.18, 0.55, scuff), 0.95, grout); envK = uEnvK * 1.6; rimK = 0.1; bumpH = -grout * 0.002;
-  } else if (mat > 23.5 && mat < 24.5) {    // beacons and hazard lights: a short flash on each light's own beat
-    float ph = h21(floor(vNqW.xz * 0.5) + floor(vNqW.y * 0.25)), cyc = fract(uTime * (0.5 + 0.35 * ph) + ph);
-    emis *= 0.06 + 1.7 * smoothstep(0., 0.04, cyc) * (1. - smoothstep(0.16, 0.34, cyc)); rimK = 0.;
-  } else if (mat > 24.5 && mat < 25.5) {    // wreck paint (Meshy cars): years-old, faded on top, rusting at the arches and sills
-    float wear = vNqM.x; emis = iemit * dynK;   // nqm.x is the baked wear mask here, not a glow
-    float n1 = vn(vNqW.xz * 2.3 + vNqW.y * 1.7), n2 = vnf(fcW * 7.3 + N0.xz * 3.1);
-    float oxid = smoothstep(0.5, 0.95, N0.y) * (0.6 + 0.4 * n1);   // sun-baked hood and roof: a little paler and duller
-    base = mix(base, vec3(dot(base, vec3(0.333))) * 1.1 + 0.01, oxid * 0.3);
-    float rustM = wear * smoothstep(0.3, 0.75, n1 + (n2 - 0.5) * 0.3) * 0.8;   // soft rust only where the wear mask says (arches, sills)
-    base = mix(base, mix(vec3(0.15, 0.06, 0.025), vec3(0.3, 0.12, 0.04), n2), rustM);
-    float dirt = smoothstep(0.7, 0.1, vNqW.y) * (0.6 + 0.4 * n1);   // road grime: a smooth fade up from the sills, no blotches
-    base = mix(base, vec3(0.045, 0.04, 0.035), dirt * 0.5);
-    float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
-    base += scr * 0.05 * (1. - rustM);
-    rough = mix(mix(0.28, 0.55, oxid), 0.92, max(rustM, dirt * 0.8)) + streak * 0.05 * wetK;
-    metal = 0.22 * (1. - rustM); envK = uEnvK * mix(1.5, 0.25, max(rustM, dirt)); rimK = 0.9;
-    bumpH = -scr * 0.0008 + rustM * n2 * 0.003;
-  } else if (mat > 4.5 && mat < 5.5) {      // hologram
-    float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
-    emis += base*sl*1.6; base *= 0.0;
-  } else { rimK = 1.0; }
-  vec3 nqTexN = N0; float nqTexK = 0.;
-#if !defined(NQ_Z) && !defined(NQ_VM)
-  if (uTexOn > 0.5 && nqTL > -0.5 && nqTS > 0.01) {
-    int li = int(nqTL + 0.5); vec3 ta; vec2 tro; vec3 tn;
-    nqTri(nqTL, vNqW, N0, uTexS[li].x, ta, tro, tn);
-    vec3 det = pow(ta, vec3(2.2)) / max(uTexM[li].rgb, vec3(0.02));            // photo detail relative to the layer's average colour
-    base *= mix(vec3(1.), clamp(det, 0., 3.), nqTS);
-    base *= mix(1., tro.x, nqTS * 0.8);                                           // baked cavity occlusion
-    rough = clamp(mix(rough, rough * tro.y / max(uTexM[li].a, 0.05), nqTS * 0.7), 0.03, 1.);
-    nqTexN = tn; nqTexK = nqTS * uTexS[li].y;
-  }
-  // snow settles on anything facing the sky (not water, glass, holograms, or indoors), in drifts, thinner under cover
-  if (uSnowCov > 0.01 && !(mat > 17.5 && mat < 18.5) && !(mat > 22.5 && mat < 23.5) && !(mat > 9.5 && mat < 10.5) && !(mat > 4.5 && mat < 5.5)) {
-    float up = smoothstep(0.55, 0.9, N0.y);
-    float drift = smoothstep(0.25, 0.6, vn(vNqW.xz * 0.7) * 0.55 + vn(vNqW.xz * 3.1) * 0.2 + uSnowCov * 0.65);
-    float snowM = uSnowCov * up * clamp(nqOcc * 1.4 - 0.2, 0., 1.) * (1. - nqIn) * drift;
-    base = mix(base, vec3(0.56, 0.58, 0.64) * (0.92 + 0.08 * vnf(vNqW.xz * 9.)), snowM);
-    rough = mix(rough, 0.72, snowM); wetRefl *= 1. - snowM; emis *= 1. - snowM * 0.85; nqTexK *= 1. - snowM; bumpH *= 1. - snowM;
-  }
-#endif
-  diffuseColor.rgb = base * mix(1.0, nqOcc, 0.55);`)
-      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-  {   // derivative bump from the procedural height (view space)
-    vec3 sp = -vViewPosition, dpx = dFdx(sp), dpy = dFdy(sp);
-    float dhx = dFdx(bumpH), dhy = dFdy(bumpH);
-    vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx); float det = dot(dpx, r1);
-    if (abs(det) > 1e-9) normal = normalize(abs(det) * normal - sign(det) * (dhx * r1 + dhy * r2));
-  }
-  if (nqTexK > 0.) normal = normalize(normal + (viewMatrix * vec4(nqTexN - N0, 0.)).xyz * nqTexK);   // Ultra: photo-scanned surface normals`)
-      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = rough;')
-      .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n  metalnessFactor = metal;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-  { float rim = pow(1. - clamp(dot(normal, normalize(vViewPosition)), 0., 1.), 3.);
-#ifdef NQ_VM
-    rim *= 0.25;
-#endif
-    totalEmissiveRadiance = emis + (uRimCol*rim*0.35 + base*uRimCol*1.6*rim*0.6)*rimK;
-#ifdef NQ_Z
-    {   // readability: a soft fill from the camera side that fades with distance, and the city's neon edging the silhouette
-      float ndv = clamp(dot(normal, normalize(vViewPosition)), 0., 1.), zd = length(vNqW - cameraPosition);
-      totalEmissiveRadiance += base * uZFill * (0.3 + 0.7 * ndv) * (1. - smoothstep(8., 38., zd));
-      float rz = pow(1. - ndv, 2.6) * smoothstep(-0.2, 0.4, normal.y + 0.3);
-      totalEmissiveRadiance += mix(vec3(1.0, 0.31, 0.64), vec3(0.22, 0.88, 0.95), step(0., normal.x)) * rz * uZRim;
-    }
-#endif
-#ifndef NQ_VM
-    // planar reflection of the street (rendered mirrored by r3.js), rippled by the bumped normal
-    if (wetRefl > 0.0 && uReflOn > 0.5) {
-      vec2 suv = gl_FragCoord.xy / uRes; suv.y = 1. - suv.y;
-      vec3 wn = normalize((vec4(normal, 0.) * viewMatrix).xyz);
-      suv += wn.xz * vec2(0.007, -0.007);   // puddles stay sharp; only the ripples bend them
-      float fres = 0.04 + 0.96 * pow(1. - clamp(dot(normal, normalize(vViewPosition)), 0., 1.), 5.);
-      // wet asphalt stretches lights into vertical streaks: a few taps down the screen, tighter on standing water
-      float str = (1. - clamp(wetRefl, 0., 1.)) * 0.012 + 0.002; vec3 rc = texture2D(uRefl, suv).rgb * 0.34;
-      rc += texture2D(uRefl, suv + vec2(0., str)).rgb * 0.26 + texture2D(uRefl, suv + vec2(0., str * 2.2)).rgb * 0.22 + texture2D(uRefl, suv - vec2(0., str)).rgb * 0.18;
-      totalEmissiveRadiance += rc * wetRefl * mix(0.35, 1.1, fres);
-    }
-#endif
-  }`)
-      .replace('#include <lights_fragment_begin>', NQ_LIGHTS_FRAG || '#include <lights_fragment_begin>')
-      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n  iblIrradiance *= envK * 0.25 * nqOcc; radiance *= envK * mix(1.0, nqOcc, 0.6); irradiance *= nqOcc;')
-      .replace('#include <fog_fragment>', `
-  { float d = length(vNqW - cameraPosition);
-#ifdef NQ_FOGFAR
-    float fog = 1. - exp(-(d * uFogDen + max(d - uFogFar.x, 0.) * uFogFar.y));
-#else
-    float fog = 1. - exp(-d*uFogDen);
-#endif
-    fog *= mix(1.0, 0.55, clamp(vNqW.y/180., 0., 1.));
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, uFogCol, clamp(fog, 0., 1.));
-#if NUM_POINT_LIGHTS > 0 && !defined(NQ_VM)
-    // glowing air: light scattered by the rain haze between the eye and this surface, integrated
-    // analytically along the view ray for every nearby point light (so walls and bodies occlude it)
-    if (uAirK > 0.0001) {
-      vec3 P = -vViewPosition; float t = length(P); vec3 v = P / max(t, 1e-4); vec3 air = vec3(0.);
-      for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
-        if (pointLights[i].color != vec3(0.)) {   // unused pool slots and lights whose range misses the ray add exactly 0
-          vec3 Lp = pointLights[i].position; float b = dot(v, Lp); float h = sqrt(max(dot(Lp, Lp) - b * b, 0.) + 0.06);
-          float rng = pointLights[i].distance;
-          if (rng <= 0. || h < rng) {
-            float I = (atan((t - b) / h) - atan(-b / h)) / h;
-            float w = rng > 0. ? clamp(1. - h / rng, 0., 1.) : 1.;
-            air += pointLights[i].color * I * w * w;
-          }
-        }
-      }
-      gl_FragColor.rgb += air * uAirK;
-    }
-#endif
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(1.0,0.95,0.9)*1.5, flash); }`);
-  };
-  m.customProgramCacheKey = () => 'nq-' + kind;
-  return m;
-}
-const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMaterial('vm') };
 
 /* ---------------- Geometry builder ---------------- */
 /* ---------------- Geometry builder ---------------- */
@@ -1010,6 +451,653 @@ async function loadModels() {
     MODEL[name] = g;
   }
   return true;
+}
+
+/* ============================================================
+   NEON QUIVER — the WebGPU renderer's shaders, in TSL (roadmap Phase 2)
+   The same look as the GLSL in engine.js / r3.js, rebuilt as node materials: the shared surface material (windows,
+   puddles, surface detail, vertex-mask tinting for the infected and the gauntlets), the sky dome, light cones, and the
+   post chain (bloom, GTAO, colour grade) on a RenderPipeline. r3.js drives it (renderGPU); src/ builds it into
+   game-webgpu.js only.
+   ============================================================ */
+const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
+  positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
+  cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, modelWorldMatrix, cameraProjectionMatrix } = THREE.TSL;
+
+/* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry every frame ---- */
+const NQN = {};
+for (const [k, t] of Object.entries({ uTime: 'float', uFogCol: 'color', uFogDen: 'float', uNeon: 'float', uWin: 'float', uWinWarm: 'float', uGrid: 'float', uDyn: 'float',
+  uDynVM: 'float', uWet: 'float', uRimCol: 'color', uEnvK: 'float', uAirK: 'float', uZFill: 'float', uZRim: 'float', uWind: 'float', uReflOn: 'float', uRain: 'float',
+  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float', uFogFar: 'vec2' })) NQN[k] = reference('value', t, NQU[k]);
+NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4'); NQN.uTexS = uniformArray(NQU.uTexS.value, 'vec2');
+// textures: one node each, pointed at whatever NQU holds (gpuSyncTextures, every frame)
+const GPU_BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); GPU_BLACK.needsUpdate = true;
+const GPU_WHITE = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); GPU_WHITE.needsUpdate = true;
+const GPU_ARR = new THREE.DataArrayTexture(new Uint8Array(4 * 8).fill(128), 1, 1, 8); GPU_ARR.needsUpdate = true;
+const TEXN = { occ: texture(GPU_WHITE), indoor: texture(GPU_BLACK), refl: texture(GPU_BLACK), texA: texture(GPU_ARR), texN: texture(GPU_ARR), texR: texture(GPU_ARR) };
+function gpuSyncTextures() {
+  TEXN.occ.value = NQU.uOcc.value || GPU_WHITE; TEXN.indoor.value = NQU.uIndoor.value || GPU_BLACK;
+  TEXN.texA.value = NQU.uTexA.value || GPU_ARR; TEXN.texN.value = NQU.uTexN.value || GPU_ARR; TEXN.texR.value = NQU.uTexR.value || GPU_ARR;
+}
+// point lights for the glowing air (world position + range, colour x intensity): r3.js updateLights3 fills them
+const AIR_N = 16;   // = MAX_PL (r3.js)
+const AIR = { pos: Array.from({ length: AIR_N }, () => new THREE.Vector4()), col: Array.from({ length: AIR_N }, () => new THREE.Vector4()) };
+AIR.posN = uniformArray(AIR.pos, 'vec4'); AIR.colN = uniformArray(AIR.col, 'vec4');
+
+/* ---- noise (NOISE_GLSL): real WGSL functions, not inlined at each of the ~60 call sites ---- */
+const h21 = Fn(([q]) => { const p = fract(q.mul(vec2(123.34, 456.21))).toVar(); p.addAssign(dot(p, p.add(45.32))); return fract(p.x.mul(p.y)); })
+  .setLayout({ name: 'nqH21', type: 'float', inputs: [{ name: 'q', type: 'vec2' }] });
+const vn = Fn(([p]) => {
+  const i = floor(p).toVar(), f = fract(p).toVar(); f.assign(f.mul(f).mul(f.mul(-2).add(3)));
+  return mix(mix(h21(i), h21(i.add(vec2(1, 0))), f.x), mix(h21(i.add(vec2(0, 1))), h21(i.add(vec2(1, 1))), f.x), f.y);
+}).setLayout({ name: 'nqVN', type: 'float', inputs: [{ name: 'p', type: 'vec2' }] });
+const gmod = (x, y) => x.sub(floor(x.div(y)).mul(y));   // GLSL mod (WGSL % truncates toward zero)
+// rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
+const nqRipple = Fn(([p, t]) => {
+  const id = floor(p).toVar(), f = fract(p).sub(0.5).toVar(), h = float(0).toVar();
+  for (let k = 0; k < 2; k++) {
+    const o = vec2(h21(id.add(k * 7.1)), h21(id.add(13.7 + k))).sub(0.5);
+    const ph = fract(t.mul(h21(id.add(k * 2.3)).mul(0.4).add(0.8)).add(h21(id.mul(1.7).add(k * 3.3)))).toVar();
+    const d = length(f.sub(o.mul(0.5))), r = ph.mul(0.42);
+    h.addAssign(sin(d.sub(r).mul(70)).mul(smoothstep(0.07, 0, abs(d.sub(r)))).mul(ph.oneMinus()).mul(ph.oneMinus()));
+  }
+  return h;
+}).setLayout({ name: 'nqRipple', type: 'float', inputs: [{ name: 'p', type: 'vec2' }, { name: 't', type: 'float' }] });
+// bricks in facade space: colour variation + mortar mask
+const nqBrick = Fn(([fc]) => {
+  const b = fc.div(vec2(0.62, 0.24)).toVar(); b.x.addAssign(stepT(1, gmod(floor(b.y), float(2))).mul(0.5));
+  const f = fract(b), fw = max(fwidth(b), vec2(1e-3)).mul(1.5);
+  const m = smoothstep(0.06, fw.x.add(0.06), min(f.x, f.x.oneMinus())).mul(smoothstep(0.1, fw.y.add(0.1), min(f.y, f.y.oneMinus()))).oneMinus();
+  return vec2(h21(floor(b)), m);
+}).setLayout({ name: 'nqBrick', type: 'vec2', inputs: [{ name: 'fc', type: 'vec2' }] });
+// triplanar Ultra texture layer: colour (rgb) + AO/roughness, and a whiteout-blended world normal
+const nqTri = (L, W, N, sc) => {
+  const w = pow(abs(N), vec3(4)).toVar(); w.divAssign(w.x.add(w.y).add(w.z));
+  const ux = W.zy.mul(sc), uy = W.xz.mul(sc), uz = W.xy.mul(sc);
+  const a = vec3(0).toVar(), ro = vec2(0).toVar(), nx = vec3(0).toVar(), ny = vec3(0).toVar(), nz = vec3(0).toVar();
+  for (const [wk, u, n] of [[w.x, ux, nx], [w.y, uy, ny], [w.z, uz, nz]]) If(wk.greaterThan(0.02), () => {
+    a.addAssign(TEXN.texA.sample(u).depth(L).rgb.mul(wk)); ro.addAssign(TEXN.texR.sample(u).depth(L).rg.mul(wk)); n.assign(TEXN.texN.sample(u).depth(L).rgb.mul(2).sub(1));
+  });
+  a.divAssign(max(w.x.mul(stepT(0.02, w.x)).add(w.y.mul(stepT(0.02, w.y))).add(w.z.mul(stepT(0.02, w.z))), 1e-3));
+  nx.assign(vec3(nx.xy.add(N.zy), abs(nx.z).mul(N.x))); ny.assign(vec3(ny.xy.add(N.xz), abs(ny.z).mul(N.y))); nz.assign(vec3(nz.xy.add(N.xy), abs(nz.z).mul(N.z)));
+  return { a, ro, n: normalize(nx.zyx.mul(w.x).add(ny.xzy.mul(w.y)).add(nz.xyz.mul(w.z))) };
+};
+
+/* ---- one physically based material family for everything solid (engine.js nqMaterial, GLSL) ----
+   Values the surface code works out and the later stages need (bump height, emission, rim, wet mirror, sky
+   visibility...) travel as shader-wide properties. */
+const NQP = {
+  base: property('vec3', 'nqBase'), emis: property('vec3', 'nqEmis'), rough: property('float', 'nqRough'), metal: property('float', 'nqMetal'),
+  rimK: property('float', 'nqRimK'), envK: property('float', 'nqEnvK'), bump: property('float', 'nqBump'), wetRefl: property('float', 'nqWetRefl'),
+  occ: property('float', 'nqOcc'), texN: property('vec3', 'nqTexN'), texK: property('float', 'nqTexK'), flash: property('float', 'nqFlash'), N0: property('vec3', 'nqN0'),
+};
+class NQLighting extends THREE.PhysicalLightingModel {
+  indirect(builder) {   // the GLSL's lights_fragment_maps edit: sky visibility and envK scale the ambient and the env map
+    const c = builder.context;
+    c.iblIrradiance.mulAssign(NQP.envK.mul(0.25).mul(NQP.occ)); c.radiance.mulAssign(NQP.envK.mul(mix(1, NQP.occ, 0.6))); c.irradiance.mulAssign(NQP.occ);
+    super.indirect(builder);
+  }
+  // a pool slot that is off, or a lamp whose range ends short of this fragment, adds exactly 0: skip its BRDF (GLSL nqLightOn)
+  direct(data, builder) { If(dot(data.lightColor, vec3(1)).greaterThan(0), () => { super.direct(data, builder); }); }
+}
+// per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
+const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
+class NQMaterial extends THREE.MeshStandardNodeMaterial {
+  constructor(kind) {
+    super({ roughness: 0.7, metalness: 0 });
+    this.nqKind = kind; this.defines = {}; this.fog = false; this.lights = true;
+    this.roughnessNode = NQP.rough; this.metalnessNode = NQP.metal;
+    const zp = kind === 'zombie', inst = kind === 'inst' || kind === 'vm';
+    if (zp) this.positionNode = Fn(() => {   // a lost head, jaw or helmet: its triangles collapse to a point
+      const pi = int(attribute('part', 'float').add(0.5));
+      return select(zRef('uHide', 'float').element(pi).greaterThan(0.5), vec3(0), positionLocal);
+    })();
+    else if (!inst) this.positionNode = Fn(() => {   // foliage (and the blossom cards): a slow lean downwind plus a quick leaf flutter
+      const p = positionLocal.toVar(), nqm = attribute('nqm', 'vec2');
+      const on = this.defines.NQ_CARDS ? float(1) : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));
+      const t = NQN.uTime, hk = smoothstep(1.2, 4.5, p.y).mul(on);
+      const lean = NQN.uWind.mul(sin(t.mul(0.8).add(p.x.mul(0.11)).add(p.z.mul(0.09))).mul(0.45).add(0.55));
+      return p.add(vec3(lean.mul(0.16).mul(hk), 0, 0)).add(vec3(sin(t.mul(6.3).add(p.y.mul(4.1)).add(p.x.mul(2.7))), sin(t.mul(5.1).add(p.z.mul(3.3))).mul(0.5), cos(t.mul(5.7).add(p.x.mul(3.9))))
+        .mul(0.014).mul(NQN.uWind.add(0.35)).mul(hk));
+    })();
+    this.normalNode = Fn(() => {   // derivative bump from the procedural height (view space), then the Ultra photo normals
+      const n = materialNormal.toVar(), sp = positionView, dpx = dFdx(sp), dpy = dFdy(sp), dhx = dFdx(NQP.bump), dhy = dFdy(NQP.bump);
+      const r1 = cross(dpy, n), r2 = cross(n, dpx), det = dot(dpx, r1);
+      If(abs(det).greaterThan(1e-9), () => { n.assign(normalize(abs(det).mul(n).sub(sign(det).mul(dhx.mul(r1).add(dhy.mul(r2)))))); });
+      if (!zp && kind !== 'vm') If(NQP.texK.greaterThan(0), () => { n.assign(normalize(n.add(cameraViewMatrix.mul(vec4(NQP.texN.sub(NQP.N0), 0)).xyz.mul(NQP.texK)))); });
+      return n;
+    })();
+    this.emissiveNode = Fn(() => {
+      const N = normalView, ndv = clampT(dot(N, positionViewDirection), 0, 1);
+      const rim = pow(ndv.oneMinus(), 3).mul(kind === 'vm' ? 0.25 : 1);
+      const tot = NQP.emis.add(NQN.uRimCol.mul(rim).mul(0.35).add(NQP.base.mul(NQN.uRimCol).mul(1.6).mul(rim).mul(0.6)).mul(NQP.rimK)).toVar();
+      if (zp) {   // readability: a soft camera-side fill that fades with distance, and the city's neon edging the silhouette
+        const zd = length(positionWorld.sub(cameraPosition));
+        tot.addAssign(NQP.base.mul(NQN.uZFill).mul(ndv.mul(0.7).add(0.3)).mul(smoothstep(8, 38, zd).oneMinus()));
+        const rz = pow(ndv.oneMinus(), 2.6).mul(smoothstep(-0.2, 0.4, N.y.add(0.3)));
+        tot.addAssign(mix(vec3(1.0, 0.31, 0.64), vec3(0.22, 0.88, 0.95), stepT(0, N.x)).mul(rz).mul(NQN.uZRim));
+      }
+      if (kind !== 'vm') If(NQP.wetRefl.greaterThan(0).and(NQN.uReflOn.greaterThan(0.5)), () => {
+        // the street mirrored (r3.js renderReflection), rippled by the bumped normal; rows run top-down here, so v offsets flip
+        const wn = normalize(cameraWorldMatrix.mul(vec4(N, 0)).xyz);
+        const suv = vec2(screenUV.x, screenUV.y.oneMinus()).add(wn.xz.mul(vec2(0.007, 0.007))).toVar();
+        const fres = pow(ndv.oneMinus(), 5).mul(0.96).add(0.04);
+        const str = clampT(NQP.wetRefl, 0, 1).oneMinus().mul(0.012).add(0.002);   // wet asphalt stretches lights into streaks
+        const rc = TEXN.refl.sample(suv).rgb.mul(0.34).add(TEXN.refl.sample(suv.sub(vec2(0, str))).rgb.mul(0.26))
+          .add(TEXN.refl.sample(suv.sub(vec2(0, str.mul(2.2)))).rgb.mul(0.22)).add(TEXN.refl.sample(suv.add(vec2(0, str))).rgb.mul(0.18));
+        tot.addAssign(rc.mul(NQP.wetRefl).mul(mix(0.35, 1.1, fres)));
+      });
+      return tot;
+    })();
+  }
+  customProgramCacheKey() { const d = this.defines; return 'nqg-' + this.nqKind + (d.NQ_ZTEX ? '-tex' : '') + (d.NQ_CARDS ? '-cards' : '') + (d.NQ_MAPGLOW ? '-glow' + d.NQ_MAPGLOW : ''); }
+  setupLightingModel() { return new NQLighting(); }
+  setupDiffuseColor(builder) { nqSurface(this, builder); }
+  setupOutput(builder, out) { return super.setupOutput(builder, nqFog(this, out)); }
+}
+
+/* ---- the surface: material id -> albedo, roughness, metal, emission, bump (the GLSL color_fragment) ---- */
+function nqSurface(material, builder) {
+  const kind = material.nqKind, D = material.defines, zp = kind === 'zombie', vm = kind === 'vm', inst = kind === 'inst' || vm, city = !zp && !vm;
+  const geo = builder.geometry, ca = geo.getAttribute('color');
+  const col = ca ? (ca.itemSize === 4 ? attribute('color', 'vec4') : vec4(attribute('color', 'vec3'), 1)) : vec4(0, 0, 0, 1);
+  const W = positionWorld, N0 = NQP.N0, T = NQN.uTime;
+  N0.assign(normalWorldGeometry);
+  const tint = vec3(1).toVar(), skin = vec3(0.5).toVar(), iemit = vec3(0).toVar(), flash = NQP.flash; flash.assign(0);
+  const C = vec4(col.rgb, 1).toVar(), mat = float(0).toVar(), mx = float(0).toVar(); let part = float(0);
+  if (zp) {
+    part = attribute('part', 'float');
+    const pi = int(part.add(0.5));
+    C.assign(col); mx.assign(col.a); mat.assign(D.NQ_ZTEX ? 25 : 6);
+    tint.assign(zRef('uPT', 'vec3').element(pi)); skin.assign(zRef('uPS', 'vec3').element(pi)); iemit.assign(zRef('uPE', 'vec3').element(pi)); flash.assign(zRef('uFlash', 'float'));
+  } else {
+    const nqm = attribute('nqm', 'vec2'); mx.assign(nqm.x); mat.assign(nqm.y);
+    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });   // per-car paint only
+  }
+  if (inst) { const t = attribute('iTint', 'vec4'); tint.assign(t.rgb); flash.assign(t.a); iemit.assign(attribute('iEmit', 'vec3')); skin.assign(attribute('iSkin', 'vec3')); }
+  const dynK = vm ? NQN.uDynVM : NQN.uDyn;
+  const base = NQP.base; base.assign(C.rgb.mul(tint));
+  const hasMap = !!material.map, mapS = hasMap ? materialReference('map', 'texture') : null, nqTex = hasMap ? mapS.rgb : vec3(1);
+  if (hasMap) base.mulAssign(nqTex);
+  const emis = NQP.emis; emis.assign(base.mul(mx).mul(NQN.uNeon).add(iemit.mul(dynK)));
+  if (D.NQ_MAPGLOW) {   // the model's painted neon (saturated cyan/teal texels) lights up like the city's signs
+    const cy = smoothstep(0.06, 0.22, min(nqTex.g, nqTex.b).sub(nqTex.r)).mul(smoothstep(0.12, 0.35, max(nqTex.g, nqTex.b)));
+    emis.addAssign(nqTex.mul(cy).mul(+D.NQ_MAPGLOW).mul(NQN.uNeon));
+  }
+  const rough = NQP.rough, metal = NQP.metal, rimK = NQP.rimK, envK = NQP.envK, bumpH = NQP.bump, wetRefl = NQP.wetRefl, nqOcc = NQP.occ;
+  rough.assign(0.72); metal.assign(0); rimK.assign(0); envK.assign(NQN.uEnvK); bumpH.assign(0); wetRefl.assign(0); nqOcc.assign(1);
+  const nqTL = float(-1).toVar(), nqTS = float(0).toVar(), nqIn = float(0).toVar();
+  if (city) {   // baked occlusion: how much open sky this spot sees; inside a walk-in room it is dry and evenly lit
+    const B = NQN.uOccB;
+    If(B.z.greaterThan(0), () => {
+      const a = TEXN.occ.sample(W.xz.add(N0.xz.mul(0.4)).sub(B.xy).mul(B.zw)).r.toVar();
+      a.assign(mix(a, 1, smoothstep(0, 14, W.y).mul(a)));
+      nqOcc.assign(mix(a, 1, stepT(0.5, N0.y).mul(stepT(1.2, W.y))));
+      nqIn.assign(stepT(0.5, TEXN.indoor.sample(W.xz.add(N0.xz.mul(0.3)).sub(B.xy).mul(B.zw)).r).mul(stepT(W.y, 4.5)));
+      nqOcc.assign(mix(nqOcc, 0.82, nqIn));
+    });
+  }
+  const wetK = NQN.uWet.mul(nqIn.oneMinus()).toVar(), wet1 = clampT(wetK, 0, 1);
+  const fcW = select(abs(N0.x).greaterThan(0.5), vec2(W.z, W.y), vec2(W.x, W.y)).toVar();
+  const M = (a, b) => mat.greaterThan(a).and(mat.lessThan(b));
+  const streak = float(0).toVar();   // rain streaks down walls: only facades, corrugated, glass, car paint and cast concrete pay for them
+  If(M(0.5, 1.5).or(M(7.5, 11.5)).or(M(15.5, 16.5)), () => { streak.assign(vn(vec2(fcW.x.mul(3.1), fcW.y.mul(0.08).sub(T.mul(0.02)))).mul(vn(vec2(fcW.x.mul(11.7), fcW.y.mul(0.3)))).mul(nqIn.oneMinus())); });
+  const pud2 = (s, k, wide) => max(smoothstep(...wide, vn(W.xz.mul(s))), smoothstep(0.8, 0.5, nqOcc).mul(k));
+  If(M(0.5, 1.5).or(M(8.5, 9.5)), () => {   // facades with windows (concrete panels or brick)
+    If(abs(N0.y).lessThan(0.5), () => {
+      const fc = fcW, cell = fc.div(vec2(2.4, 3.3)), id = floor(cell).toVar(), f = fract(cell).toVar();
+      const win = stepT(0.16, f.x).mul(stepT(f.x, 0.84)).mul(stepT(0.22, f.y)).mul(stepT(f.y, 0.78)).toVar();
+      const bseed = h21(floor(W.xz.div(37)).add(N0.xz.mul(3.1))).toVar();
+      const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
+      const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
+      const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
+      const flick = stepT(0.997, h21(id.add(floor(T.mul(4)))));
+      const wc = select(seed.greaterThan(0.93), vec3(1.0, 0.25, 0.6), select(seed.greaterThan(0.84), vec3(0.25, 0.85, 1.0), vec3(1.0, 0.68, 0.38))).toVar();
+      wc.assign(mix(wc, vec3(1.0, 0.66, 0.36).mul(h21(id.add(3.7)).mul(0.6).add(0.7)), NQN.uWinWarm));
+      const tv = stepT(0.78, h21(id.add(8.8))).mul(floorLit.oneMinus());   // a TV still playing to an empty room
+      wc.assign(mix(wc, vec3(0.36, 0.6, 1.0).mul(vn(vec2(T.mul(4.7).add(seed.mul(40)), seed.mul(9))).mul(0.55).add(0.45)), tv));
+      wc.assign(mix(wc, vec3(0.8, 0.9, 1.0), floorLit));
+      // inside the glass: a room gradient, mullions, and some blinds half drawn
+      const mull = max(smoothstep(0, 0.012, abs(f.x.sub(0.5))).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(0.62))).oneMinus());
+      const blind = select(h21(id.add(5.3)).lessThan(0.35), stepT(0.5, fract(f.y.mul(18))).mul(stepT(h21(id.add(9.1)).mul(0.8).oneMinus(), f.y.oneMinus())), float(0));
+      const room = smoothstep(0.2, 0.8, f.y).mul(0.55).add(0.45).mul(h21(id.add(1.9)).mul(0.6).add(0.4)).toVar();
+      If(lit.mul(win).greaterThan(0.5), () => {   // interior mapping: trace the view ray into a box room behind the glass
+        const V = normalize(W.sub(cameraPosition));
+        const d = vec3(select(abs(N0.x).greaterThan(0.5), V.z, V.x), V.y, max(dot(V, N0).negate(), 0.05)).toVar();
+        const rs = vec2(2.4, 3.3), p = f.mul(rs), dep = h21(id.add(2.3)).mul(1.6).add(2.2);
+        const tx = select(d.x.greaterThan(0), rs.x.sub(p.x), p.x.negate()).div(select(abs(d.x).lessThan(1e-4), float(1e-4), d.x));
+        const ty = select(d.y.greaterThan(0), rs.y.sub(p.y), p.y.negate()).div(select(abs(d.y).lessThan(1e-4), float(1e-4), d.y));
+        const tz = dep.div(d.z), t = min(min(tx, ty), tz).toVar();
+        const hp = vec3(p, 0).add(d.mul(t)).toVar(), sh = float(0.42).toVar();   // side walls
+        If(t.equal(tz), () => {   // back wall with a piece of furniture or a figure in silhouette
+          const fx = hp.x.div(rs.x), ft = h21(id.add(4.4));
+          const furn = stepT(abs(fx.sub(0.3).sub(ft.mul(0.4))), ft.mul(0.15).add(0.12)).mul(stepT(hp.y, ft.mul(1.1).add(0.9)));
+          sh.assign(mix(0.62, 0.08, furn));
+        }).ElseIf(t.equal(ty), () => { sh.assign(select(d.y.greaterThan(0), float(1), vn(hp.xz.mul(3)).mul(0.3).add(0.7).mul(0.3))); });   // ceiling light / floor
+        sh.mulAssign(smoothstep(0, dep, dep.sub(hp.z.mul(0.6))).mul(0.45).add(0.55));   // falls off toward the back
+        room.assign(sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)));
+      });
+      const wk = win.mul(lit).mul(flick.oneMinus()).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
+      emis.addAssign(wk.mul(wc).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
+      const wall = vec3(0).toVar();
+      If(mat.greaterThan(8.5), () => {   // brick tenements
+        const br = select(NQN.uTexOn.greaterThan(0.5), vec2(0.5, 0), nqBrick(fc));
+        wall.assign(base.mul(br.x.mul(0.5).add(0.75)).mul(br.y.mul(-0.55).add(1))); bumpH.assign(br.y.mul(-0.012));
+      }).Else(() => {                     // concrete panels: seams every floor and bay, blotchy weathering
+        const seam = max(smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus(), smoothstep(0, 0.02, abs(f.x.sub(0.02))).oneMinus());
+        const panel = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.25).add(0.8).add(vn(fc.mul(4.3)).mul(0.1));
+        wall.assign(base.mul(panel).mul(seam.mul(-0.45).add(1))); bumpH.assign(seam.mul(-0.01));
+      });
+      // dirty water runs down from every sill; sheltered walls collect more soot
+      const sill = stepT(0.16, f.x).mul(stepT(f.x, 0.84)).mul(stepT(f.y, 0.22)).mul(smoothstep(0, 0.22, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
+      const grime = smoothstep(4, 0, fc.y).mul(0.35).add(streak.mul(0.5)).add(sill.mul(0.55)).add(nqOcc.oneMinus().mul(0.45));
+      wall.mulAssign(clampT(grime, 0, 1.4).mul(-0.5).add(1));
+      base.assign(mix(wall, vec3(0.015, 0.02, 0.04), win));
+      bumpH.subAssign(win.mul(0.03));
+      rough.assign(mix(mix(0.85, 0.45, streak.mul(wetK)), 0.08, win)); metal.assign(win.mul(0.2)); envK.assign(NQN.uEnvK.mul(mix(streak.add(0.6), 1.6, win)));
+      nqTL.assign(select(mat.greaterThan(8.5), float(2), float(1))); nqTS.assign(win.oneMinus().mul(0.9));
+    }).ElseIf(mat.greaterThan(8.5), () => { base.mulAssign(0.8); });
+  }).ElseIf(M(1.5, 2.5), () => {      // plaza tiles, wet
+    const q = W.xz.div(4), gd = abs(fract(q.sub(0.5)).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
+    const l2 = smoothstep(vec2(0.012), fw.mul(1.5).add(0.012), gd).oneMinus();
+    const line = max(l2.x, l2.y).mul(clampT(float(0.02).div(max(fw.x, fw.y)), 0, 1).mul(0.65).add(0.35));
+    const pud = pud2(0.18, 0.75, [0.52, 0.66]).toVar();   // water pools along wall bases
+    const tileV = h21(floor(q)).mul(0.2).add(0.9);
+    emis.addAssign(vec3(0.1, 0.55, 1.0).mul(line).mul(NQN.uGrid).mul(pud.mul(-0.6).add(1)));
+    const stain = vn(W.xz.mul(0.7)).mul(0.25).add(vn(W.xz.mul(3.7)).mul(0.12));
+    base.assign(mix(base.mul(tileV).mul(line.mul(-0.5).add(1)).mul(stain.oneMinus()), base.mul(0.35), pud));
+    bumpH.assign(line.mul(-0.01).add(pud.mul(nqRipple(W.xz.mul(2.2), T)).mul(0.002).mul(NQN.uRain)));
+    rough.assign(mix(0.62, mix(0.62, 0.04, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
+    wetRefl.assign(mix(0.22, 1.0, pud).mul(wet1));   // the whole wet surface mirrors a little, puddles fully
+    nqTL.assign(5); nqTS.assign(pud.mul(-0.7).add(1).mul(0.75));
+  }).ElseIf(M(2.5, 3.5), () => {      // asphalt
+    const pud = pud2(0.12, 0.8, [0.5, 0.7]).toVar();   // gutters stay wet
+    const lane = stepT(abs(W.x), 0.12).mul(stepT(0.5, fract(W.z.div(6)))).mul(stepT(abs(W.x), 6));
+    const lane2 = stepT(abs(W.z), 0.12).mul(stepT(0.5, fract(W.x.div(6)))).mul(stepT(abs(W.z), 6));
+    emis.addAssign(vec3(1.0, 0.75, 0.3).mul(lane.add(lane2)).mul(NQN.uGrid).mul(0.55).mul(stepT(40.5, max(abs(W.x), abs(W.z)))));
+    const grain = vn(W.xz.mul(3.1)), fine = vn(W.xz.mul(23));
+    const crack = smoothstep(0.02, 0, abs(vn(W.xz.mul(0.9)).sub(0.5))).mul(0.6);
+    base.mulAssign(pud.mul(-0.6).add(1).mul(grain.mul(0.3).add(0.78).add(fine.mul(0.1))).mul(crack.mul(-0.5).add(1)));
+    // south of the suburbs the road breaks up: cracked, then patched with gravel and dirt toward the gardens
+    const wild = smoothstep(128, 162, W.z).mul(stepT(abs(W.x), 40));
+    const grav = wild.mul(smoothstep(0.35, 0.6, vn(W.xz.mul(0.35)).mul(wild.mul(-0.4).add(1)).add(wild.mul(0.55))));
+    base.assign(mix(base.mul(crack.mul(wild).oneMinus()), vec3(0.12, 0.105, 0.085).mul(fine.mul(0.7).add(0.55)).mul(grain.mul(0.5).add(0.7)), grav));
+    pud.mulAssign(grav.mul(-0.7).add(1));
+    bumpH.assign(fine.mul(0.0025).sub(crack.mul(0.006)).add(pud.mul(nqRipple(W.xz.mul(2.2), T)).mul(0.002).mul(NQN.uRain)));
+    rough.assign(mix(0.85, mix(0.8, 0.05, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
+    wetRefl.assign(mix(0.2, 1.0, pud).mul(wet1));
+    nqTL.assign(0); nqTS.assign(pud.mul(-0.75).add(1).mul(0.9));
+  }).ElseIf(M(3.5, 4.5), () => {      // brushed metal
+    const br = vn(vec2(fcW.x.mul(60), fcW.y.mul(1.5)));
+    rough.assign(br.mul(0.15).add(0.3)); metal.assign(0.65); rimK.assign(1); bumpH.assign(br.mul(0.0015));
+    base.mulAssign(vn(W.xz.mul(2.1).add(W.y)).mul(0.2).add(0.9));
+  }).ElseIf(M(7.5, 8.5), () => {      // corrugated / painted steel: ribs, rust, scratches
+    const along = select(abs(N0.y).greaterThan(0.5), W.x, fcW.x), rib = sin(along.mul(25.1));
+    const rust = smoothstep(0.55, 0.8, vn(fcW.mul(1.3).add(N0.xz.mul(5))).add(streak.mul(0.4)));
+    base.assign(mix(base.mul(rib.mul(0.15).add(0.85)), vec3(0.16, 0.07, 0.03), rust.mul(0.7)).mul(smoothstep(1.5, 0, W.y).mul(-0.25).add(1)));
+    bumpH.assign(rib.mul(0.006)); rough.assign(mix(0.5, 0.85, rust)); metal.assign(rust.oneMinus().mul(0.45)); rimK.assign(1);
+    nqTL.assign(3); nqTS.assign(0.55);
+  }).ElseIf(M(9.5, 10.5), () => {     // glass: dark, glossy, streaked with rain
+    base.mulAssign(0.35); rough.assign(streak.mul(0.14).mul(wetK).add(0.04)); metal.assign(0); envK.assign(NQN.uEnvK.mul(2.4)); rimK.assign(0.6); bumpH.assign(streak.mul(0.0015));
+  }).ElseIf(M(10.5, 11.5), () => {    // car paint: clear coat, fine scratches, road grime low down
+    const scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x.mul(38), fcW.y.mul(2.5).add(N0.y.mul(7)))));
+    const dirt = smoothstep(0.95, 0.15, W.y).mul(vn(W.xz.mul(3).add(W.y.mul(2))).mul(0.55).add(0.45));
+    base.assign(mix(base, vec3(0.05, 0.045, 0.04), dirt.mul(0.65)).add(scr.mul(0.1)));
+    rough.assign(mix(0.24, 0.75, dirt).add(streak.mul(0.05).mul(wetK))); metal.assign(mix(0.3, 0.05, dirt)); envK.assign(NQN.uEnvK.mul(mix(1.8, 0.6, dirt))); rimK.assign(1); bumpH.assign(scr.mul(-0.0008));
+  }).ElseIf(M(11.5, 12.5), () => {    // bark: deep ridges, moss creeping up from the planter
+    const rid = abs(vn(W.xz.mul(11).add(W.y.mul(1.7))).sub(0.5)).mul(2);
+    const moss = smoothstep(1.6, 0.4, W.y).mul(vn(W.xz.mul(5).add(W.y.mul(4))));
+    base.assign(mix(base.mul(rid.mul(0.6).add(0.55)), vec3(0.05, 0.09, 0.03), moss.mul(0.7)));
+    bumpH.assign(rid.mul(0.012)); rough.assign(0.92); rimK.assign(0.4);
+  }).ElseIf(M(12.5, 13.5), () => {    // wood slats: grain, darker and slicker when wet
+    const gr = vn(vec2(W.x.add(W.z).mul(3.1), W.y.mul(40))).mul(0.5).add(vn(W.xz.mul(23)).mul(0.5));
+    const up = wetK.mul(stepT(0.5, N0.y));
+    base.mulAssign(gr.mul(0.45).add(0.7).mul(mix(1, 0.72, up)));
+    bumpH.assign(gr.mul(0.002)); rough.assign(mix(0.62, 0.35, up)); rimK.assign(0.5);
+  }).ElseIf(M(13.5, 14.5), () => {    // foliage: mottled leaves, light glowing through the canopy
+    const pinkF = base.r.greaterThan(base.g.mul(1.35)).toVar();
+    const an = abs(N0), lp = select(an.y.greaterThan(max(an.x, an.z)), W.xz, select(an.x.greaterThan(an.z), W.zy, W.xy)).toVar();
+    lp.assign(lp.mul(select(pinkF, float(13), float(9))).add(vec2(vn(W.xz.mul(2.1)), vn(W.zy.mul(2.3))).mul(1.5)));
+    const li = floor(lp).toVar(), lf = fract(lp).toVar(), F1 = float(9).toVar(), F2 = float(9).toVar(), cid = li.toVar();
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {   // individual leaves / petals: a cellular pattern
+      const o = vec2(i, j), lo = li.add(o), pc = o.add(vec2(h21(lo), h21(lo.add(7.1))).mul(0.85)).add(0.075), dd = length(pc.sub(lf)).toVar();
+      If(dd.lessThan(F1), () => { F2.assign(F1); F1.assign(dd); cid.assign(lo); }).ElseIf(dd.lessThan(F2), () => { F2.assign(dd); });
+    }
+    const edgeL = smoothstep(0, 0.14, F2.sub(F1)), hv = h21(cid.mul(1.31)), dome = clampT(F1.mul(1.6), 0, 1).oneMinus();
+    // ragged silhouette: leaves at grazing angles fall away between the gaps
+    const ndv = abs(dot(N0, normalize(cameraPosition.sub(W)))).toVar();
+    Discard(F2.sub(F1).lessThan(ndv.oneMinus().mul(0.25).add(0.1)).and(ndv.lessThan(0.45)).and(vn(W.xz.mul(3.3).add(W.y.mul(2.9))).greaterThan(0.3)));
+    const clump = vn(W.xz.mul(1.4).add(W.y.mul(1.7)));
+    If(pinkF, () => { base.assign(mix(base, mix(vec3(1, 0.78, 0.86), vec3(0.86, 0.36, 0.55), hv), 0.65).mul(clump.mul(0.45).add(0.62))); })   // white to deep pink petals
+      .Else(() => { base.mulAssign(mix(vec3(0.62, 0.72, 0.5), vec3(1.25, 1.12, 0.62), hv).mul(clump.mul(0.6).add(0.55))); });                   // dark to sunlit, yellowing leaves
+    base.mulAssign(mix(clump.mul(0.3).add(0.62), 1, edgeL).mul(dome.mul(0.3).add(0.8)));
+    If(pinkF, () => { base.mulAssign(vec3(1.12, 0.95, 1.02)); emis.addAssign(base.mul(dome.mul(0.16).add(0.1)).mul(clump.mul(0.4).add(0.6))); });   // petals glow softly, as if lit through
+    emis.addAssign(base.mul(NQN.uNeon).mul(0.3)); rough.assign(mix(0.7, 0.4, dome)); rimK.assign(1.4);
+    emis.addAssign(base.mul(ndv.oneMinus()).mul(ndv.oneMinus()).mul(NQN.uNeon.mul(0.6).add(0.25)).mul(select(pinkF, float(1.3), float(0.8))));   // thin leaves let the city light through at the edges
+    bumpH.assign(dome.mul(0.012).sub(edgeL.oneMinus().mul(0.006)));
+  }).ElseIf(M(14.5, 15.5), () => {    // moulded plastic / rubber
+    base.mulAssign(vn(W.xz.mul(4).add(W.y.mul(3))).mul(0.22).add(0.88)); rough.assign(0.55); metal.assign(0); rimK.assign(0.7);
+  }).ElseIf(M(15.5, 16.5), () => {    // cast concrete: aggregate, pits, wet tops
+    const ag = vn(W.xz.mul(1.7).add(W.y.mul(1.3))).mul(0.25).add(vn(W.xz.mul(9).add(W.y.mul(7))).mul(0.12));
+    const pit = smoothstep(0.78, 0.9, vn(W.xz.mul(31).add(W.y.mul(29)))), top = stepT(0.5, N0.y);
+    base.mulAssign(ag.add(0.78).mul(pit.mul(-0.35).add(1)).mul(streak.mul(0.2).mul(top.oneMinus()).oneMinus()).mul(mix(1, 0.7, wetK.mul(top))));
+    bumpH.assign(pit.mul(-0.004).add(ag.mul(0.004))); rough.assign(mix(0.92, 0.4, wetK.mul(top).mul(0.8))); rimK.assign(0.3);
+    nqTL.assign(7); nqTS.assign(0.85);
+  }).ElseIf(M(16.5, 17.5), () => {    // moss lawn strewn with fallen blossom
+    const n1 = vn(W.xz.mul(0.9)), n2 = vn(W.xz.mul(7.3)), n3 = vn(W.xz.mul(31));
+    base.mulAssign(n1.mul(0.5).add(0.6).add(n2.mul(0.25)).sub(n3.mul(0.15)));
+    const pet = smoothstep(0.8, 0.9, vn(W.xz.mul(5.1).add(3.7))).mul(smoothstep(0.3, 0.6, vn(W.xz.mul(0.4).add(9.1))));
+    base.assign(mix(base, vec3(0.75, 0.32, 0.45), pet.mul(0.85)));
+    emis.addAssign(vec3(0.6, 0.18, 0.3).mul(pet).mul(0.08).mul(NQN.uNeon));
+    bumpH.assign(n3.mul(0.004).add(n2.mul(0.006))); rough.assign(mix(0.9, 0.55, wet1.mul(0.6))); rimK.assign(0.2);
+  }).ElseIf(M(18.5, 19.5), () => {    // overgrown lawn: patchy weeds, bare mud, wet sheen
+    const n1 = vn(W.xz.mul(0.7)), n2 = vn(W.xz.mul(6.1)), n3 = vn(W.xz.mul(27));
+    base.mulAssign(n1.mul(0.6).add(0.5).add(n2.mul(0.3)).sub(n3.mul(0.15)));
+    base.assign(mix(base, vec3(0.05, 0.04, 0.03), smoothstep(0.55, 0.75, vn(W.xz.mul(0.35).add(4.2))).mul(0.8)));
+    bumpH.assign(n3.mul(0.005).add(n2.mul(0.006))); rough.assign(mix(0.92, 0.6, wet1.mul(0.5))); rimK.assign(0.2);
+  }).ElseIf(M(22.5, 23.5), () => {    // harbour: black oily water, long swell, rain rings, a rainbow fuel sheen
+    const sw = sin(W.x.mul(0.35).add(T.mul(0.7))).mul(0.5).add(sin(W.z.mul(0.23).sub(T.mul(0.5))).mul(0.5));
+    const oil = smoothstep(0.55, 0.8, vn(W.xz.mul(0.08).add(vec2(T.mul(0.01), 0))));
+    base.assign(vec3(0.008, 0.014, 0.016).add(cos(vec3(0, 0.33, 0.67).add(vn(W.xz.mul(0.4))).mul(6.2831)).mul(0.5).add(0.5).mul(0.03).mul(oil)));
+    bumpH.assign(nqRipple(W.xz.mul(1.6), T).mul(0.003).mul(max(NQN.uRain, 0.2)).add(sw.mul(0.03)).add(vn(W.xz.mul(0.9).add(T.mul(0.15))).sub(0.5).mul(0.02)));
+    rough.assign(0.05); metal.assign(0); envK.assign(NQN.uEnvK.mul(1.8)); rimK.assign(0); wetRefl.assign(0.9);
+  }).ElseIf(M(17.5, 18.5), () => {    // koi pond: black mirror water, rain rings, drifting petals, koi below
+    const pet = smoothstep(0.86, 0.93, vn(W.xz.mul(4.3).add(vec2(T.mul(0.05), 0))));
+    const kp = W.xz.mul(0.6).add(vec2(sin(T.mul(0.3)), cos(T.mul(0.23))).mul(1.5)), koi = smoothstep(0.9, 0.96, vn(kp.mul(1.7)));
+    base.assign(mix(vec3(0.01, 0.03, 0.035), vec3(0.8, 0.35, 0.5), pet));
+    emis.addAssign(vec3(1.0, 0.35, 0.08).mul(koi).mul(0.18).mul(pet.oneMinus()));
+    bumpH.assign(nqRipple(W.xz.mul(2.2), T).mul(0.003).mul(max(NQN.uRain, 0.25)).add(vn(W.xz.mul(1.3).add(T.mul(0.2))).sub(0.5).mul(0.004)));
+    rough.assign(mix(0.03, 0.6, pet)); metal.assign(0); envK.assign(NQN.uEnvK.mul(1.6)); rimK.assign(0); wetRefl.assign(mix(0.85, 0.08, pet));
+  }).ElseIf(M(24.5, 25.5), () => {
+    if (zp && D.NQ_ZTEX) {   // Meshy-scanned zombie: the texture carries skin, clothes and gore (uPT tone, uPS.x Cryo frost: rig.js)
+      const tx = nqTex, q = attribute('position', 'vec3').mul(7).add(zRef('uSeed', 'float')), L = attribute('position', 'vec3');
+      const lum = dot(tx, vec3(0.3, 0.55, 0.15));
+      const bl = smoothstep(0.05, 0.18, tx.r.sub(max(tx.g, tx.b).mul(1.35))).mul(smoothstep(0.12, 0.3, max(tx.g, tx.b)).oneMinus());   // open wounds, not brown stains
+      base.assign(tx.mul(tint).mul(vn(q.xy.mul(0.9).add(q.z.mul(0.4))).mul(0.28).add(0.86)));
+      const mud = smoothstep(0.05, 0.75, L.y).oneMinus().mul(vn(q.xz.mul(0.9).add(2.7)).mul(0.55).add(0.45));
+      base.assign(mix(base.mul(mud.mul(-0.3).add(1)), vec3(0.075, 0.06, 0.045), mud.mul(0.3)));   // street filth up the shins
+      base.assign(mix(base, lum.mul(1.5).add(0.06).mul(vec3(0.42, 0.62, 0.8)), skin.x));            // frost
+      rough.assign(mix(0.74, 0.18, bl)); metal.assign(0); rimK.assign(mix(0.6, 1.35, bl));
+      rough.assign(mix(rough, rough.mul(0.7), wet1)); base.mulAssign(wet1.mul(-0.15).add(1));
+      emis.assign(vec3(0.5, 0.07, 0.045).mul(bl).mul(bl).mul(vn(q.xy.mul(5).add(q.z)).mul(0.14).add(0.22)).mul(skin.x.oneMinus()));   // wounds glow faintly
+    } else {                  // wreck paint (Meshy cars): faded on top, rusting at the arches and sills (nqm.x is the baked wear mask)
+      const wear = mx; emis.assign(iemit.mul(dynK));
+      const n1 = vn(W.xz.mul(2.3).add(W.y.mul(1.7))), n2 = vn(fcW.mul(7.3).add(N0.xz.mul(3.1)));
+      const oxid = smoothstep(0.5, 0.95, N0.y).mul(n1.mul(0.4).add(0.6));
+      base.assign(mix(base, vec3(dot(base, vec3(0.333))).mul(1.1).add(0.01), oxid.mul(0.3)));
+      const rustM = wear.mul(smoothstep(0.3, 0.75, n1.add(n2.sub(0.5).mul(0.3)))).mul(0.8);
+      base.assign(mix(base, mix(vec3(0.15, 0.06, 0.025), vec3(0.3, 0.12, 0.04), n2), rustM));
+      const dirt = smoothstep(0.7, 0.1, W.y).mul(n1.mul(0.4).add(0.6));
+      base.assign(mix(base, vec3(0.045, 0.04, 0.035), dirt.mul(0.5)));
+      const scr = smoothstep(0.93, 1.0, vn(vec2(fcW.x.mul(38), fcW.y.mul(2.5).add(N0.y.mul(7)))));
+      base.addAssign(scr.mul(0.05).mul(rustM.oneMinus()));
+      rough.assign(mix(mix(0.28, 0.55, oxid), 0.92, max(rustM, dirt.mul(0.8))).add(streak.mul(0.05).mul(wetK)));
+      metal.assign(rustM.oneMinus().mul(0.22)); envK.assign(NQN.uEnvK.mul(mix(1.5, 0.25, max(rustM, dirt)))); rimK.assign(0.9);
+      bumpH.assign(scr.mul(-0.0008).add(rustM.mul(n2).mul(0.003)));
+    }
+  }).ElseIf(M(5.5, 7.5), () => {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
+    const ao = C.r, clm = C.g, bl = C.b.toVar();
+    base.assign(mix(skin, tint, clm));
+    if (zp) { bl.assign(smoothstep(0.3, 0.95, bl)); base.assign(mix(base, vec3(0.085, 0.01, 0.007), bl.mul(0.85))); }   // blood in stains and runs
+    else base.assign(mix(base, vec3(0.13, 0.008, 0.006), bl.mul(0.92)));
+    base.mulAssign(ao);
+    emis.assign(iemit.mul(mx).mul(dynK));
+    const armour = zp ? stepT(6.5, part).mul(stepT(part, 8.5)) : stepT(6.5, mat);
+    rough.assign(mix(mix(mix(0.62, 0.88, clm), 0.25, bl), 0.55, armour)); metal.assign(armour.mul(0.08)); rimK.assign(0.6);
+    if (zp) {   // decay: mottled skin, dark veins, wet wounds; grimy clothes torn open to the skin beneath
+      const L = attribute('position', 'vec3'), q = L.mul(7).add(zRef('uSeed', 'float')).toVar(), skinM = clm.oneMinus().mul(armour.oneMinus());
+      const mott = vn(q.xy.mul(1.3).add(q.z.mul(0.7)));
+      const vein = smoothstep(0.03, 0, abs(vn(q.xz.mul(2.1).add(q.y.mul(0.6))).sub(0.5))).mul(skinM).mul(smoothstep(0.4, 0.7, vn(q.xy.mul(0.7).add(3.3))));
+      const wound = smoothstep(0.68, 0.78, vn(q.yz.mul(0.8).add(7.3))).mul(armour.oneMinus());
+      const tear = smoothstep(0.8, 0.86, vn(q.xy.mul(1.6).add(3.1))).mul(clm).mul(armour.oneMinus());
+      const face = stepT(4.5, part).mul(stepT(part, 6.5));
+      base.mulAssign(mix(1, ao.mul(ao), face.mul(0.85)));                              // deep sockets, mouth and nostrils read as holes
+      const lum = dot(base, vec3(0.3, 0.55, 0.15)).toVar();
+      base.assign(mix(base, lum.mul(vec3(0.86, 0.97, 0.8)), skinM.mul(0.4)));         // grey-green pallor
+      base.assign(mix(base, base.mul(vec3(0.78, 0.72, 0.82)).mul(mott.mul(0.6).add(0.65)), skinM.mul(0.85)));
+      base.assign(mix(base, base.mul(vec3(0.38, 0.3, 0.45)), vein.mul(0.8)));
+      base.assign(mix(base, lum.mul(vec3(0.9, 1.0, 0.85)), clm.mul(0.26).mul(armour.oneMinus())));   // clothes: faded, filthy
+      base.assign(mix(base, mix(skin.mul(ao).mul(0.45), vec3(0.09, 0.012, 0.008).mul(ao), 0.35), tear));   // rips show dark, bloodied skin
+      base.mulAssign(clm.mul(tear.oneMinus()).mul(0.4).mul(vn(q.xz.mul(3).add(1.7))).oneMinus());
+      base.assign(mix(base, vec3(0.16, 0.015, 0.012).mul(ao), wound.mul(0.9)));
+      const dry = smoothstep(0.25, 0.6, vn(q.xy.mul(2.3).add(5.1)));                 // old blood dries brown-black; fresh stays wet and red
+      base.assign(mix(base, vec3(0.07, 0.025, 0.018).mul(ao), bl.mul(dry).mul(0.65)));
+      const mud = smoothstep(0.05, 0.8, L.y).oneMinus().mul(vn(q.xz.mul(0.9).add(2.7)).mul(0.55).add(0.45));   // street grime up the legs
+      base.assign(mix(base.mul(mud.mul(-0.35).add(1)), vec3(0.075, 0.06, 0.045).mul(ao), mud.mul(0.4).mul(clm.mul(0.6).add(0.4))));
+      base.assign(mix(base, base.mul(vec3(0.72, 0.6, 0.78)), skinM.mul(smoothstep(0.7, 1.3, L.y).oneMinus()).mul(0.35)));   // livor mortis
+      rough.assign(mix(rough, 0.12, max(wound, bl.mul(dry.oneMinus()))));
+      rough.assign(mix(rough, rough.mul(0.72), wet1.mul(skinM)));                      // rain: a thin sheen on skin, cloth dark and heavy
+      rough.assign(mix(rough, 0.16, wet1.mul(skinM).mul(smoothstep(0.35, 0.9, N0.y))));
+      base.mulAssign(wet1.mul(clm).mul(armour.oneMinus()).mul(-0.2).add(1));
+      bumpH.assign(mott.sub(0.5).mul(0.004).mul(skinM).sub(wound.mul(0.008)).add(vein.mul(0.003)).add(vn(q.xy.mul(6)).sub(0.5).mul(0.0015).mul(clm)));
+      const eye = stepT(0.97, mx).mul(stepT(4.5, part)).mul(stepT(part, 5.5));          // milky, bloodshot eyes with burning pupils
+      base.assign(mix(base, vec3(0.3, 0.1, 0.07).mul(mix(1, vn(q.xy.mul(9)).mul(0.4).add(0.7), 0.5)), eye));
+      rough.assign(mix(rough, 0.08, eye)); rimK.assign(mix(rimK, 0, eye));
+      emis.addAssign(iemit.mul(eye).mul(3.2));
+      const tooth = stepT(0.2, mx).mul(stepT(mx, 0.35)).mul(stepT(4.5, part)).mul(stepT(part, 6.5));   // stained, cracked enamel
+      base.assign(mix(base, vec3(0.3, 0.25, 0.15).mul(ao).mul(vn(q.xy.mul(20)).mul(0.25).add(0.75)), tooth)); rough.assign(mix(rough, 0.3, tooth)); emis.mulAssign(tooth.oneMinus());
+      emis.addAssign(vec3(0.5, 0.07, 0.045).mul(bl.mul(bl).mul(tooth.oneMinus())).mul(vn(q.xy.mul(5).add(q.z)).mul(0.25).add(0.55)));   // open wounds glow faintly
+      rimK.assign(mix(rimK, 1.35, bl));
+    }
+  }).ElseIf(M(19.5, 20.5), () => {    // painted plaster: soft mottling, scuffed low down, faint roller texture
+    const n1 = vn(fcW.mul(1.3).add(N0.xz.mul(3))), n2 = vn(fcW.mul(9)), n3 = vn(vec2(fcW.x.mul(40), fcW.y.mul(2)));
+    base.mulAssign(n1.mul(0.14).add(0.9).sub(n2.mul(0.05)).sub(n3.mul(0.03)).mul(smoothstep(0.45, 0, W.y).mul(0.3).mul(stepT(0.5, abs(N0.y)).oneMinus()).oneMinus()));
+    rough.assign(n2.mul(-0.08).add(0.85)); rimK.assign(0.15); bumpH.assign(n2.mul(0.0006).add(n3.mul(0.0003)));
+    nqTL.assign(6); nqTS.assign(0.7);
+  }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
+    const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
+    const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));
+    const tv = h21(floor(q)).mul(0.2).add(0.88), scuff = vn(W.xz.mul(2.7)).mul(vn(W.xz.mul(13)));
+    If(mat.greaterThan(21.5), () => { base.assign(mix(base, vec3(0.025, 0.025, 0.03), gmod(floor(q.x).add(floor(q.y)), float(2)))); });
+    base.assign(mix(base.mul(tv).mul(scuff.mul(-0.25).add(1)), vec3(0.06, 0.055, 0.05), grout.mul(0.8)));
+    rough.assign(mix(mix(0.18, 0.55, scuff), 0.95, grout)); envK.assign(NQN.uEnvK.mul(1.6)); rimK.assign(0.1); bumpH.assign(grout.mul(-0.002));
+  }).ElseIf(M(23.5, 24.5), () => {    // beacons and hazard lights: a short flash on each light's own beat
+    const ph = h21(floor(W.xz.mul(0.5)).add(floor(W.y.mul(0.25)))), cyc = fract(T.mul(ph.mul(0.35).add(0.5)).add(ph));
+    emis.mulAssign(smoothstep(0, 0.04, cyc).mul(smoothstep(0.16, 0.34, cyc).oneMinus()).mul(1.7).add(0.06)); rimK.assign(0);
+  }).ElseIf(M(4.5, 5.5), () => {      // hologram
+    const sl = sin(W.y.mul(60).add(T.mul(8))).mul(0.35).add(0.65);
+    emis.addAssign(base.mul(sl).mul(1.6)); base.assign(vec3(0));
+  }).Else(() => { rimK.assign(1); });
+  const texN = NQP.texN, texK = NQP.texK; texN.assign(N0); texK.assign(0);
+  if (city) {
+    If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {   // Ultra/Sharp/Balanced: CC0 photo detail, triplanar
+      const li = int(nqTL.add(0.5)), sc = NQN.uTexS.element(li), mean = NQN.uTexM.element(li);
+      const tr = nqTri(li, W, N0, sc.x);
+      const det = pow(tr.a, vec3(2.2)).div(max(mean.rgb, vec3(0.02)));          // photo detail relative to the layer's average colour
+      base.mulAssign(mix(vec3(1), clampT(det, 0, 3), nqTS));
+      base.mulAssign(mix(1, tr.ro.x, nqTS.mul(0.8)));                              // baked cavity occlusion
+      rough.assign(clampT(mix(rough, rough.mul(tr.ro.y).div(max(mean.a, 0.05)), nqTS.mul(0.7)), 0.03, 1));
+      texN.assign(tr.n); texK.assign(nqTS.mul(sc.y));
+    });
+    // snow settles on anything facing the sky (not water, glass, holograms, or indoors), in drifts, thinner under cover
+    If(NQN.uSnowCov.greaterThan(0.01).and(M(17.5, 18.5).not()).and(M(22.5, 23.5).not()).and(M(9.5, 10.5).not()).and(M(4.5, 5.5).not()), () => {
+      const up = smoothstep(0.55, 0.9, N0.y), sc = NQN.uSnowCov;
+      const drift = smoothstep(0.25, 0.6, vn(W.xz.mul(0.7)).mul(0.55).add(vn(W.xz.mul(3.1)).mul(0.2)).add(sc.mul(0.65)));
+      const snowM = sc.mul(up).mul(clampT(nqOcc.mul(1.4).sub(0.2), 0, 1)).mul(nqIn.oneMinus()).mul(drift).toVar();
+      base.assign(mix(base, vec3(0.56, 0.58, 0.64).mul(vn(W.xz.mul(9)).mul(0.08).add(0.92)), snowM));
+      rough.assign(mix(rough, 0.72, snowM)); wetRefl.mulAssign(snowM.oneMinus()); emis.mulAssign(snowM.mul(-0.85).add(1)); texK.mulAssign(snowM.oneMinus()); bumpH.mulAssign(snowM.oneMinus());
+    });
+  }
+  // alpha: the blossom cards cut their flowers out of the atlas (alpha test, or alpha-to-coverage under MSAA)
+  let a = hasMap ? mapS.a : float(1);
+  if (material.alphaTest > 0) {
+    if (material.alphaToCoverage) { a = smoothstep(material.alphaTest, fwidth(a).add(material.alphaTest), a).toVar(); Discard(a.lessThanEqual(0)); }
+    else Discard(a.lessThanEqual(material.alphaTest));
+  }
+  if (builder.isOpaque()) a = float(1);
+  diffuseColor.assign(vec4(base.mul(mix(1, nqOcc, 0.55)), a));
+}
+
+/* ---- after lighting: fog (thinner high up), the glowing air round nearby lights, the hit flash ---- */
+function nqFog(material, out) {
+  const W = positionWorld, d = length(W.sub(cameraPosition)), c = out.rgb.toVar();
+  const fog = exp(d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y)).negate()).oneMinus().mul(mix(1, 0.55, clampT(W.y.div(180), 0, 1)));
+  c.assign(mix(c, NQN.uFogCol, clampT(fog, 0, 1)));
+  if (material.nqKind !== 'vm') If(NQN.uAirK.greaterThan(0.0001), () => {
+    // light scattered by the rain haze between the eye and this surface, integrated along the view ray per point light
+    const P = W.sub(cameraPosition), t = length(P), v = P.div(max(t, 1e-4)), air = vec3(0).toVar();
+    Loop(AIR_N, ({ i }) => {
+      const lp = AIR.posN.element(i), lc = AIR.colN.element(i).rgb;
+      If(dot(lc, vec3(1)).greaterThan(0), () => {   // unused pool slots and lights whose range misses the ray add exactly 0
+        const Lp = lp.xyz.sub(cameraPosition), b = dot(v, Lp), h = sqrt(max(dot(Lp, Lp).sub(b.mul(b)), 0).add(0.06)).toVar(), rng = lp.w;
+        If(rng.lessThanEqual(0).or(h.lessThan(rng)), () => {
+          const I = atan(t.sub(b).div(h)).sub(atan(b.negate().div(h))).div(h);
+          const w = select(rng.greaterThan(0), clampT(h.div(rng).oneMinus(), 0, 1), float(1));
+          air.addAssign(lc.mul(I).mul(w).mul(w));
+        });
+      });
+    });
+    c.addAssign(air.mul(NQN.uAirK));
+  });
+  c.assign(mix(c, vec3(1.0, 0.95, 0.9).mul(1.5), NQP.flash));
+  return vec4(c, out.a);
+}
+function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
+  const m = new NQMaterial(kind); m.vertexColors = true;
+  m.userData.farOK = false;   // the distant-detail fade is a Classic budget: WebGPU always draws full detail
+  m.userData.u = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Array(ZPARTS).fill(0) }, uFlash: { value: 0 }, uSeed: { value: 0 } } : {};
+  return m;
+}
+const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMaterial('vm') };
+/* ---------------- sky dome (r3.js SKY_U drives it) ---------------- */
+function skyMaterialGPU(U) {
+  const R = (u, t) => reference('value', t, u);
+  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false }); m.fog = false;
+  m.fragmentNode = Fn(() => {
+    const d = normalize(positionWorld.sub(cameraPosition)).toVar(), h = d.y, T = NQN.uTime, glow = R(U.uGlow, 'color'), disc = R(U.uDiscCol, 'color');
+    const c = mix(NQN.uFogCol.mul(1.25), R(U.uMid, 'color'), smoothstep(0, 0.18, h)).toVar();
+    c.assign(mix(c, R(U.uZen, 'color'), smoothstep(0.15, 0.7, h)));
+    c.addAssign(glow.mul(exp(max(h, 0).mul(-14))).mul(0.5));
+    const q = d.xz.div(max(h.add(0.08), 0.02));
+    const cl = vn(q.mul(0.9).add(vec2(T.mul(0.01), 0))).mul(vn(q.mul(2.3).sub(vec2(T.mul(0.02), T.mul(0.01))))).toVar();
+    cl.assign(smoothstep(0.15, 0.6, cl).mul(smoothstep(0.02, 0.25, h)).mul(smoothstep(0.5, 0.9, h).oneMinus()));
+    // cloud undersides catch the city's glow: warmest low over the horizon, fading up into the dark
+    c.assign(mix(c, R(U.uCloud, 'color').add(glow.mul(smoothstep(0.03, 0.45, h).oneMinus().mul(0.95).add(0.25))), cl.mul(0.75)));
+    const sp = floor(vec2(atan(d.z, d.x).mul(180), h.mul(180)));
+    const st = stepT(0.9975, h21(sp)).mul(smoothstep(0.25, 0.6, h)).mul(cl.oneMinus());
+    c.addAssign(vec3(0.8, 0.85, 1).mul(st).mul(R(U.uStars, 'float')).mul(sin(T.mul(3).add(sp.x)).mul(0.5).add(0.5)));
+    const md = normalize(R(U.uDiscDir, 'vec3')), mm = dot(d, md);
+    c.addAssign(disc.mul(smoothstep(0.9993, 0.9996, mm)).mul(1.6));
+    c.addAssign(disc.mul(0.4).mul(pow(max(mm, 0), 220)).mul(0.8).add(disc.mul(0.08).mul(pow(max(mm, 0), 8))));
+    return vec4(c, 1);
+  })();
+  return m;
+}
+/* ---------------- light cones under the lamps (additive, order-free) ---------------- */
+function coneMaterialGPU(U) {
+  const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
+  m.fog = false;
+  m.fragmentNode = Fn(() => {
+    const W = positionWorld, Nn = normalWorldGeometry, d = length(W.sub(cameraPosition));
+    const facing = pow(abs(dot(Nn, normalize(cameraPosition.sub(W)))), 1.6);
+    const h = clampT(uv().y, 0, 1);   // MSAA samples can land just outside the triangle: pow() of a negative is NaN
+    const fall = pow(h, 1.8).mul(smoothstep(0, 0.25, h).mul(0.75).add(0.25));
+    const streaks = vn(vec2(atan(Nn.z, Nn.x.add(1e-5)).mul(9), W.y.mul(1.4).add(NQN.uTime.mul(9)))).mul(0.35).add(0.65);
+    const fogD = d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y));
+    const c = reference('value', 'color', U.uLamp).mul(facing).mul(fall).mul(streaks).mul(0.1).mul(reference('value', 'float', U.uVolK)).mul(smoothstep(0.5, 3, d)).mul(exp(fogD.mul(-0.5)));
+    return vec4(c, 0);
+  })();
+  return m;
+}
+
+/* ---------------- post: world (MSAA) -> GTAO (Ultra) -> bow -> bloom -> grade, one RenderPipeline ----------------
+   The bow is its own pass over a transparent clear; its alpha lays it over the world (the sky writes alpha 1 there). */
+const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
+  uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0) };
+const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null };
+const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
+function buildPostGPU(q, laptop) {
+  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); }
+  const samples = q >= 1 && !laptop ? 4 : 0;
+  const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
+  world.name = 'world'; vmP.name = 'bow';
+  vmP.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));   // transparent wherever the bow isn't, whoever triggers the pass
+  let col = world.getTextureNode('output').rgb;
+  let aoN = null, pre = null;
+  if (q >= 3) {   // Ultra: real-time GTAO for contact shadows at feet, corners, under cars and between bodies
+    // from its own depth + view-normal prepass of the opaque city, without MSAA (GTAO can't read a multisampled depth
+    // buffer), as Classic's GTAOPass does; glass, glows and cones are left out, so they cast no fake occlusion
+    pre = pass(scene, camera); pre.name = 'aoPrepass'; pre.transparent = false;
+    const nm = new THREE.NodeMaterial(); nm.fragmentNode = vec4(normalView, 1); nm.side = THREE.DoubleSide; pre.overrideMaterial = nm;
+    const pd = pre.getTextureNode('depth'), pn = pre.getTextureNode('output');
+    aoN = ao(pd, pn, camera);
+    aoN.radius.value = 1.1; aoN.distanceExponent.value = 1.4; aoN.thickness.value = 1.2; aoN.scale.value = 1.1; aoN.samples.value = 16; aoN.distanceFallOff.value = 1;
+    const aoT = denoise(aoN.getTextureNode(), pd, pn, camera);
+    aoT.lumaPhi.value = 10; aoT.depthPhi.value = 2; aoT.normalPhi.value = 3; aoT.radius.value = 6;
+    col = col.mul(mix(1, aoT.r, 0.85));
+  }
+  const vm = vmP.getTextureNode('output');
+  col = mix(col, vm.rgb, clampT(vm.a, 0, 1));
+  // drop any NaN / Inf pixel: bloom would smear a single one across the whole frame
+  const comb = convertToTexture(Fn(() => { const c = col.toVar(); return vec4(select(c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4)), c, vec3(0)), 1); })());
+  comb.name = 'composite';
+  const bl = bloom(comb, 0.6, 0.55, 1.0);
+  if (laptop) bl.setResolutionScale(0.25);   // Laptop keeps the glow at a quarter of the pixels, like Classic
+  const blT = bl.getTextureNode();
+  const S = (u) => comb.sample(u).rgb.add(blT.sample(u).rgb);
+  const U = GRADE_U;
+  const grade = Fn(() => {
+    const u = screenUV, cc = u.sub(0.5), r2 = dot(cc, cc);
+    const ab = U.uDmg.mul(0.006).add(0.0015).add(U.uAberr).mul(r2).mul(4);
+    const c = vec3(S(u.add(cc.mul(ab))).r, S(u).g, S(u.sub(cc.mul(ab))).b).toVar();
+    {   // contrast-adaptive sharpen: pulls back the softness of MSAA + upscaling, eased off on already-contrasty edges
+      const px = vec2(1).div(U.uRes), n = S(u.add(vec2(0, px.y))), s = S(u.sub(vec2(0, px.y))), e = S(u.add(vec2(px.x, 0))), w = S(u.sub(vec2(px.x, 0)));
+      const mn = min(min(min(n, s), min(e, w)), c), mxv = max(max(max(n, s), max(e, w)), c);
+      const amp = sqrt(clampT(min(mn, vec3(2).sub(mxv)).div(max(mxv, vec3(1e-4))), 0, 1)).mul(U.uSharp);
+      c.assign(max(c.add(n.add(s).add(e).add(w).mul(amp.negate()).mul(0.25)).div(vec3(1).sub(amp)), vec3(0)));
+    }
+    If(U.uFocus.greaterThan(0.001), () => {   // aiming: the edges of the frame soften, the target stays crisp
+      const k = U.uFocus.mul(smoothstep(0.02, 0.2, r2)), acc = c.toVar(), wsum = float(1).toVar();
+      for (let i = 1; i <= 6; i++) { const t = i / 6, o = cc.mul(t * 0.014).mul(k), w = 1 - t * 0.5; acc.addAssign(S(u.sub(o)).mul(w).add(S(u.add(o.mul(0.5))).mul(w * 0.5))); wsum.addAssign(w * 1.5); }
+      c.assign(mix(c, acc.div(wsum), clampT(k.mul(2), 0, 0.85)));
+    });
+    c.mulAssign(U.uExpo);
+    const lum = dot(c, vec3(0.3, 0.59, 0.11));
+    c.assign(mix(c, vec3(lum).mul(vec3(1.1, 0.9, 0.9)), U.uLow.mul(0.55)));
+    c.assign(aces(c));
+    c.mulAssign(U.uGrade); const lm = dot(c, vec3(0.3, 0.59, 0.11)); c.assign(mix(vec3(lm), c, U.uSat)); c.addAssign(U.uLift.mul(c.oneMinus()));
+    c.assign(pow(clampT(c, 0, 1), vec3(1 / 2.2)));
+    c.assign(mix(c, c.mul(c).mul(c.mul(-2).add(3)), 0.42));   // S-curve: deeper blacks, punchier neon
+    const l2 = dot(c, vec3(0.3, 0.59, 0.11)).toVar(); c.assign(max(mix(vec3(l2), c, 1.18), vec3(0))); c.mulAssign(smoothstep(0.12, 0, l2).mul(-0.35).add(1));   // richer colour, crushed shadows
+    const vig = smoothstep(0.85, 0.2, sqrt(r2).mul(1.25)); c.mulAssign(mix(0.72, 1, vig));
+    const edge = smoothstep(0.25, 0.75, sqrt(r2).mul(1.4));
+    c.assign(mix(c, vec3(0.75, 0.02, 0.08), edge.mul(clampT(U.uDmg, 0, 1)).mul(0.75)));
+    c.assign(mix(c, vec3(0.5, 0, 0.05), edge.mul(U.uLow).mul(sin(U.uTime.mul(6)).mul(0.2).add(0.25))));
+    c.addAssign(h21(u.mul(U.uRes).add(fract(U.uTime).mul(100))).sub(0.5).mul(0.014));
+    return vec4(c, 1);
+  });
+  const pipe = new THREE.RenderPipeline(renderer, grade());
+  pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma, as in Classic
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, key: q + ':' + (laptop ? 1 : 0) });
+}
+
+/* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------
+   A custom inspector names each render by what it draws; after the queries resolve, their times are summed by name. */
+const GPU_PROF = { names: new Map(), acc: {}, shadowCams: new Set(), busy: false, ok: false, tag: null };   // tag: r3.js names whole jobs (env capture, mirror)
+class GPUProfInspector extends THREE.InspectorBase {
+  beginRender(uid, scn, cam, rt) {
+    let n;
+    if (GPU_PROF.tag) n = GPU_PROF.tag; else if (cam === camera) n = GPOST.pre && rt === GPOST.pre.renderTarget ? 'ao prepass' : 'world'; else if (cam === vmCamera) n = 'bow'; else if (GPU_PROF.shadowCams.has(cam)) n = 'shadows';
+    else { const s = (scn && scn.name) || ''; n = /Bloom/.test(s) ? 'bloom' : /AO|Denoise/.test(s) ? 'gtao' : /Render Pipeline/.test(s) ? 'grade' : 'post'; }
+    GPU_PROF.names.set(uid, n);
+  }
+}
+function gpuProfPoll() {
+  if (!renderer.backend.trackTimestamp || GPU_PROF.busy) return;
+  GPU_PROF.busy = true;
+  renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then(() => {
+    const pool = renderer.backend.timestampQueryPool.render; if (!pool) return;
+    const frames = {};   // per-frame sums by pass name, then averaged over the frames resolved
+    for (const [uid, ms] of pool.timestamps) {
+      const n = GPU_PROF.names.get(uid) || 'post', f = uid.slice(uid.lastIndexOf(':f') + 2);
+      const fr = frames[f] || (frames[f] = {}); fr[n] = (fr[n] || 0) + ms; GPU_PROF.names.delete(uid);
+    }
+    for (const fr of Object.values(frames)) for (const n in fr) { const a = GPU_PROF.acc[n] || (GPU_PROF.acc[n] = { s: 0, n: 0 }); a.s += fr[n]; a.n++; }
+    if (GPU_PROF.names.size > 4096) GPU_PROF.names.clear();
+    GPU_PROF.ok = true;
+  }).catch(() => { }).finally(() => { GPU_PROF.busy = false; });
 }
 
 /* ============================================================
@@ -5893,6 +5981,7 @@ function makeRig(z) {
     const mesh = new THREE.SkinnedMesh(mz ? mz.geo : zGeometry(key), mat);
     mesh.name = 'zmesh'; mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 2.2); mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.customDepthMaterial = zDepthMat(mat.userData.u);
+    mesh.userData.u = mat.userData.u;   // gpu.js reads each body's tints, flash and hidden parts off the mesh (shadow pass included)
     const T = mz || ZRIG;
     const root = T.rootTemplate.clone(true);
     const byName = {}; root.traverse(o => { if (o.isBone) byName[o.name] = o; });
@@ -6228,29 +6317,9 @@ function flushList(list, vm) {
 
 /* ---------------- sky dome ---------------- */
 const SKY_U = { uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uGlow: { value: new THREE.Color() }, uCloud: { value: new THREE.Color() }, uDiscCol: { value: new THREE.Color() }, uDiscDir: { value: new THREE.Vector3() }, uStars: { value: 1 } };
-const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), new THREE.ShaderMaterial({
-  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol }, SKY_U), side: THREE.BackSide, depthWrite: false, depthTest: false,
-  vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW; uniform float uTime; uniform vec3 uFogCol, uZen, uMid, uGlow, uCloud, uDiscCol, uDiscDir; uniform float uStars;
-${NOISE_GLSL}
-void main(){
-  vec3 d = normalize(vW - cameraPosition); float h = d.y;
-  vec3 hor = uFogCol*1.25;
-  vec3 c = mix(hor, uMid, smoothstep(0.0,0.18,h)); c = mix(c, uZen, smoothstep(0.15,0.7,h));
-  c += uGlow*exp(-max(h,0.)*14.)*0.5;
-  vec2 uv = d.xz/max(h+0.08,0.02);
-  float cl = vn(uv*0.9+vec2(uTime*0.01,0.)) * vn(uv*2.3-vec2(uTime*0.02,uTime*0.01));
-  cl = smoothstep(0.15,0.6,cl)*smoothstep(0.02,0.25,h)*(1.-smoothstep(0.5,0.9,h));
-  // cloud undersides catch the city's glow: warmest low over the horizon, fading up into the dark
-  c = mix(c, uCloud + uGlow * (0.25 + 0.95 * (1. - smoothstep(0.03, 0.45, h))), cl*0.75);
-  vec2 sp = floor(vec2(atan(d.z,d.x)*180., h*180.));
-  float st = step(0.9975, h21(sp)) * smoothstep(0.25,0.6,h) * (1.-cl);
-  c += vec3(0.8,0.85,1.)*st*uStars*(0.5+0.5*sin(uTime*3.+sp.x));
-  vec3 md = normalize(uDiscDir); float m = dot(d, md);
-  c += uDiscCol*smoothstep(0.9993,0.9996,m)*1.6;
-  c += uDiscCol*0.4*pow(max(m,0.),220.)*0.8 + uDiscCol*0.08*pow(max(m,0.),8.);
-  gl_FragColor = vec4(c,1.);
-}` }));
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24),
+  skyMaterialGPU(SKY_U)
+);
 skyMesh.frustumCulled = false; skyMesh.renderOrder = -1000; skyMesh.matrixAutoUpdate = true;
 scene.add(skyMesh);
 
@@ -6451,7 +6520,9 @@ function buildLights() {
     s.shadow.mapSize.set(1024, 1024); s.shadow.camera.near = 0.5; s.shadow.camera.far = 30; s.shadow.bias = -0.0008; s.shadow.normalBias = 0.03; s.shadow.radius = 3;
     s.shadow.autoUpdate = false;   // refreshed by updateLights3: half of them per frame, or at once when moved
     scene.add(s); scene.add(s.target); SPOTS.push({ s, shadow: i < N_SHADOW_SPOTS, lamp: null });
+    GPU_PROF.shadowCams.add(s.shadow.camera);
   }
+  GPU_PROF.shadowCams.add(sun.shadow.camera);
 }
 const _dyn = [], _stat = [], _lampsNear = [];
 // dynamic light candidates come from a reused pool (no per-frame objects); p is either the source's own
@@ -6548,6 +6619,7 @@ function updateLights3(cam) {
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
   for (let i = nStat; i < _stat.length && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
+  for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
 }
 
 /* ---------------- world meshes ---------------- */
@@ -7028,29 +7100,66 @@ function buildOcclusion() {
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
-function updateEnv() { }   // preview: no district cube captures yet (hemisphere light only)
+let pmrem = null;
+const ENV = { cache: {}, cur: null, job: null, old: null, vis: true, refl: 0 };
+const cubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
+const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
+// Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
+function envHide(on) {
+  if (on) { ENV.vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false; ENV.refl = NQU.uReflOn.value; NQU.uReflOn.value = 0; }
+  else { partPoints.visible = ENV.vis; rainLines.visible = true; snowPts.visible = true; NQU.uReflOn.value = ENV.refl; }
+  for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = !on;
+  for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
+}
+function envFace(face) {   // one cube face, exactly as CubeCamera.update renders it
+  const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
+  if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
+  cubeCam.updateMatrixWorld(true);
+  envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
+  const gm = cubeRT.texture.generateMipmaps; if (face < 5) cubeRT.texture.generateMipmaps = false;   // mips build on the last face
+  renderer.setRenderTarget(cubeRT, face); farSuspend(); renderer.render(scene, cubeCam.children[face]); farResume();
+  envHide(false); cubeRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+}
+function envFinish(d) {
+  if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
+  ENV.cache[d.id] = pmrem.fromCubemap(cubeRT.texture);
+  return ENV.cache[d.id];
+}
+function captureEnv(d) {   // all six faces in one frame: only when nothing else can be shown yet
+  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+  ENV.job = null; cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
+  for (let f = 0; f < 6; f++) envFace(f);
+  return envFinish(d);
+}
+// Crossing into a district not captured yet (Fast / Balanced / Laptop): keep showing the old map, render one face
+// per frame, then the PMREM on the seventh frame, so a district boundary never pays for 6 scene renders + a
+// convolution at once. Faces after the first see the shadow maps of later frames, so a nearby zombie's shadow can
+// fade into the ambient light a little; Sharp and Ultra keep the one-frame capture untouched.
+function updateEnv(cam) {
+  if (ENV_DIRTY) {   // new Look: every capture is stale. Keep the one on screen alive until its replacement is ready.
+    for (const k in ENV.cache) if (ENV.cache[k].texture !== scene.environment) ENV.cache[k].dispose(); else ENV.old = ENV.cache[k];
+    ENV.cache = {}; ENV.job = null; ENV_DIRTY = false;
+  }
+  const d = districtAt(cam[0], cam[2]);
+  let rt = ENV.cache[d.id];
+  if (!rt) {
+    if (!scene.environment || !FAR.on) rt = captureEnv(d);   // first frame, or Sharp / Ultra: one frame, exactly as before
+    else {
+      if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+      if (!ENV.job || ENV.job.d !== d) { ENV.job = { d, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
+      if (ENV.job.face < 6) envFace(ENV.job.face++);
+      else { ENV.job = null; rt = envFinish(d); }
+    }
+  }
+  if (rt && scene.environment !== rt.texture) {
+    scene.environment = rt.texture;
+    if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
+  }
+}
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
-const coneMat = new THREE.ShaderMaterial({
-  uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
-  transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `varying vec3 vW, vN; varying float vH; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vH = uv.y; gl_Position = projectionMatrix*viewMatrix*w; }`,
-  fragmentShader: `precision highp float; varying vec3 vW, vN; varying float vH; uniform vec3 uLamp; uniform float uVolK, uTime, uFogDen; uniform vec3 uFogCol;
-${FOG_GLSL}
-
-${NOISE_GLSL}
-void main(){
-  vec3 V = normalize(cameraPosition - vW);
-  float facing = pow(abs(dot(normalize(vN), V)), 1.6);
-  float h = clamp(vH, 0., 1.);   // MSAA samples can land just outside the triangle: pow() of a negative is NaN on D3D
-  float fall = pow(h, 1.8) * (0.25 + 0.75 * smoothstep(0.0, 0.25, h));
-  float streaks = 0.65 + 0.35 * vn(vec2(atan(vN.z, vN.x + 1e-5) * 9., vW.y * 1.4 + uTime * 9.));
-  float d = length(vW - cameraPosition);
-  float near = smoothstep(0.5, 3.0, d);
-  vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-NQ_FOGD(d) * 0.5);
-  gl_FragColor = vec4(c, 0.);
-}` });
+const coneMat = coneMaterialGPU(VOL_U);
 const CONES = [];
 const HALOS = [];
 function buildVolumes() {
@@ -7091,8 +7200,9 @@ void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. 
 }
 
 /* ---------------- wet-street reflections: the scene mirrored in y, at half resolution ---------------- */
-const reflRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
+const reflRT = new THREE.RenderTarget(4, 4, { type: THREE.HalfFloatType });
 const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
+reflCam.coordinateSystem = renderer.coordinateSystem;   // the projection is copied from the main camera: never rebuilt from reflCam's own fov
 const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
@@ -7109,10 +7219,13 @@ function renderReflection(r) {
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
   const mode = SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0);
   const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
-  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H); return; }
+  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+    TEXN.refl.value = reflRT.texture;
+    return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
   NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
+  TEXN.refl.value = BLACK_TEX;   // a pass can't sample the target it draws into
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
   const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
   partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
@@ -7123,6 +7236,7 @@ function renderReflection(r) {
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  TEXN.refl.value = reflRT.texture;
   REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
   REFL_CACHE.quality = mode; REFL_CACHE.w = W; REFL_CACHE.h = H;
 }
@@ -7132,6 +7246,7 @@ function renderReflection(r) {
 const PROF = { on: false, ext: null, gl: null, pending: [], free: [], acc: {}, cpu: 0, n: 0, el: null, t: 0 };
 try { PROF.on = new URLSearchParams(location.search).has('prof'); } catch (e) { }
 if (PROF.on) {
+  renderer.inspector = new GPUProfInspector();   // gpu.js: names each render call so the timestamp queries add up per pass
   renderer.info.autoReset = false;
   PROF.el = document.createElement('pre');
   Object.assign(PROF.el.style, { position: 'fixed', left: '8px', bottom: '8px', zIndex: 99, margin: 0, padding: '6px 9px', font: '11px/1.35 monospace', color: '#bff6ff', background: 'rgba(0,0,0,0.72)', pointerEvents: 'none', whiteSpace: 'pre' });
@@ -7151,18 +7266,20 @@ function profInstrument() {
 }
 function profFrame(cpuMs) {
   if (!PROF.on) return; profPoll(); PROF.cpu += cpuMs; PROF.n++;
-  const inf = renderer.info.render; PROF.calls = inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
+  const inf = renderer.info.render; PROF.calls = NQ_GPU === 'webgpu' ? inf.drawCalls : inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
   if (performance.now() - PROF.t < 500) return; PROF.t = performance.now();
   let gpu = 0, lines = [];
-  for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
+  const acc = NQ_GPU === 'webgpu' ? GPU_PROF.acc : PROF.acc;
+  for (const [k, a] of Object.entries(acc)) { if (!a.n) continue; const m = a.s / a.n; gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
   const qname = SETTINGS.laptop ? 'Laptop' : ['Fast', 'Balanced', 'Sharp', 'Ultra'][SETTINGS.quality];
-  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU preview  ' : ''}GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : NQ_GPU === 'webgpu' ? 'timing not wired yet' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  const gpuT = NQ_GPU === 'webgpu' ? (!renderer.backend.trackTimestamp ? 'timestamp-query unavailable' : GPU_PROF.ok ? gpu.toFixed(2) + ' ms' : 'waiting for timestamps') : PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable';
+  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU' : 'WebGL2'}  GPU ${gpuT}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 /* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
 const ULTRA = { state: 'none', res: null };
-const wantTexRes = (q) => NQ_GPU !== 'webgl' || SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;   // sampled by the GLSL uber-shader only
+const wantTexRes = (q) => SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;
 function loadUltraTextures(res) {
   if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
   const sfx = res === 'half' ? '_half' : '';
@@ -7175,7 +7292,7 @@ function loadUltraTextures(res) {
       for (let L = 0; L < TEX_LAYERS.length; L++) for (let y = 0; y < h; y++) d.set(src.subarray((L * h + y) * row, (L * h + y + 1) * row), (L * h + (h - 1 - y)) * row);   // GL rows run bottom-up
       const t = new THREE.DataArrayTexture(d, w, h, TEX_LAYERS.length);
       t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, NQ_GPU === 'webgpu' ? renderer.getMaxAnisotropy() : renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
       return { t, d, w, h };
     });
     const [A, N, O] = arr;
@@ -7264,8 +7381,11 @@ function render3(time, W, H, fov, cam) {
   partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
+  gpuUnported();   // before the env capture renders the scene too
+  GPU_PROF.tag = 'env map';
   updateEnv(cam);
-  renderPreview(T); return;
+  GPU_PROF.tag = null;
+  renderGPU(T, W, H, time); return;
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
@@ -7281,22 +7401,32 @@ function render3(time, W, H, fov, cam) {
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
-/* ---- WebGPU preview (roadmap Phase 1): the scene through three's node materials, straight to the canvas ----
-   Not ported yet, so skipped here: every GLSL ShaderMaterial (sky, signs, decals, particles, rain, snow, light cones,
-   halos, glass), the uber-shader's surface detail / windows / puddles (onBeforeCompile), wet-street reflections,
-   district env maps, bloom, GTAO and the grade pass. Phase 2 replaces this with TSL ports. */
-const _bg = new THREE.Color(), _fog = new THREE.FogExp2(0x000000, 0.01);
-function renderPreview(T) {
-  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.visible = false; });
-  NQU.uReflOn.value = 0;
-  _bg.setRGB(T.fog[0], T.fog[1], T.fog[2]); scene.background = _bg;
-  _fog.color.copy(_bg); _fog.density = NQU.uFogDen.value; scene.fog = _fog;
-  const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
+/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ----
+   Not ported yet (Phase 3) and kept off this renderer: the GLSL signs, decals, particles, rain, snow, halos and
+   shopfront glass. They sit on a layer no camera draws. */
+const _clr = new THREE.Color(); let _unportedN = -1;
+function gpuUnported() {
+  if (scene.children.length === _unportedN) return; _unportedN = scene.children.length;
+  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.layers.set(31); });
+}
+function renderGPU(T, W, H, time) {
+  if (!GPOST.pipe || GPOST.key !== SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0)) buildPostGPU(SETTINGS.quality, !!SETTINGS.laptop);
+  gpuSyncTextures();
+  const nf = renderer._nodes.nodeFrame; nf.update(); renderer.info.frame = nf.frameId;   // one node frame per game frame: every pass redraws
+  const U = GRADE_U;
+  U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
+  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
+  vmCamera.layers.set(VM_ITEMS.n > 0 && !DBG.noVM ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
-    renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene, camera);
-    if (vmOn) { scene.background = null; renderer.clearDepth(); renderer.render(scene, vmCamera); }   // the background would paint over the world
-  } finally { scene.matrixWorldAutoUpdate = true; scene.background = _bg; }
+    GPU_PROF.tag = 'reflection';
+    if (SETTINGS.quality >= 1 && THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; TEXN.refl.value = BLACK_TEX; }
+    GPU_PROF.tag = null; renderer.setRenderTarget(null);
+    const f = T.fog; renderer.setClearColor(_clr.setRGB(f[0], f[1], f[2]), 0);   // alpha 0: the bow pass lays over the world by its alpha
+    GPOST.pipe.render();
+  } finally { scene.matrixWorldAutoUpdate = true; }
+  if (PROF.on) gpuProfPoll();
 }
 
 /* ============================================================
@@ -8564,6 +8694,7 @@ window.NQ = {
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
+  GPOST, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

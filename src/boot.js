@@ -6,8 +6,8 @@
    ============================================================ */
 (function () {
   var BUNDLES = /*__BUNDLES__*/{};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
-  // The WebGPU build is an early port (Phase 1 of the roadmap): it is offered, but Classic stays the preselected
-  // choice until the port is complete. Flip this when it is, and rename the storage key so everyone is asked again.
+  // The WebGPU build is a partial port (roadmap Phase 2: the shared material, sky, cones, mirror and post chain): it
+  // is offered, but Classic stays the preselected choice until the port is complete. Flip this when it is, and rename the storage key so everyone is asked again.
   var WEBGPU_PREVIEW = true, KEY = 'nq_renderer';
   var MAPS = {
     webgl: { 'three': './vendor/three.module.js', 'three/addons/': './vendor/addons/' },
@@ -89,7 +89,7 @@
     go.addEventListener('click', launch);
     probe().then(function (r) {
       opts.webgpu.disabled = !r.ok;
-      $('bootGPUs').textContent = !r.ok ? r.why : r.soft ? 'Works here, but on a software adapter: expect it to be slow.' : WEBGPU_PREVIEW ? 'Ready. Early preview: most effects aren’t ported yet.' : 'Ready on this GPU.';
+      $('bootGPUs').textContent = !r.ok ? r.why : r.soft ? 'Works here, but on a software adapter: expect it to be slow.' : WEBGPU_PREVIEW ? 'Ready. Preview: the city’s look is ported, signs, rain and particles aren’t yet.' : 'Ready on this GPU.';
       $('bootGPU').classList.toggle('na', !r.ok || !!r.soft);
       pick(best(r));
     });

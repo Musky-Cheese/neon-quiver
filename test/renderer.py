@@ -19,7 +19,7 @@ def page(b, init=None):
 def ready(pg, t=240000): pg.wait_for_function('window.NQ_READY === true', timeout=t, polling=500); pg.evaluate('NQ.noLoop(true)')
 def shot(pg, n):
     if pg.evaluate('!!window.NQ_READY'): pg.evaluate('NQ.renderOnce()')
-    pg.screenshot(path=os.path.join(OUT, n + '.png'))
+    pg.screenshot(path=os.path.join(OUT, n + '.png'), timeout=600000)   # a full WebGPU frame on SwiftShader takes a minute or more
 FAST = 'localStorage.getItem("nq_settings") || localStorage.setItem("nq_settings", JSON.stringify({ quality: 0, auto: false }))'   # Fast tier: quicker software frames
 def ls(pg, k): return pg.evaluate(f'localStorage.getItem("{k}")')
 def errs(E): return [e for e in E if 'favicon' not in e]
@@ -56,6 +56,9 @@ with sync_playwright() as p:
     pg.evaluate('NQ.run(30)'); shot(pg, '3-title-webgpu')
     check(pg.evaluate('document.getElementById("renderer").value') == 'webgpu', 'Settings shows WebGPU')
     pg.evaluate('NQ.play(); NQ.run(120)'); shot(pg, '3-play-webgpu')
+    check(pg.evaluate('!!(NQ.GPOST.pipe && NQ.GPOST.world && NQ.GPOST.bloom)'), 'TSL post pipeline built (world, bow, bloom, grade)')
+    check(pg.evaluate('NQ.scene.children.filter(o => o.isMesh && o.material && o.material.isShaderMaterial && o.layers.mask & 1).length') == 0, 'no GLSL material left where a camera draws')
+    check(pg.evaluate('NQ.scene.children.some(o => o.isMesh && o.geometry.parameters && o.geometry.parameters.radius === 1000 && o.material.isNodeMaterial)'), 'sky dome is a node material')
     real = [e for e in errs(E)]
     check(not real, 'no console errors on WebGPU ' + str(real[:4]))
     print('4. Settings → Renderer on the pause screen asks first, then reloads into Classic')
@@ -91,6 +94,21 @@ with sync_playwright() as p:
     shot(pg, '7-device-lost')
     pg.click('#sysErrBtn2'); ready(pg)
     check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and json.loads(ls(pg, 'nq_renderer')) == 'webgl', 'Reload in Classic: switched')
+    b.close()
+
+    print('8. WebGPU on Ultra in the rain: MSAA, wet-street mirror, GTAO, Ultra textures, per-pass GPU timing (?prof=1)')
+    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b, 'localStorage.setItem("nq_settings", JSON.stringify({ quality: 3, auto: false }))')
+    pg.goto(URL + '?gpu=webgpu&nowarn&prof=1'); ready(pg, 600000)
+    pg.evaluate('''() => { const N = NQ; N.play(); N.clear(); N.GAME.toSpawn = 0; N.GAME.intermission = true; N.GAME.interT = 1e9;
+      Object.assign(N.WX, { state: 'rain', forced: 'rain', precip: 0.6, snow: 0, wet: 1, cover: 0, flash: 0 });
+      const P = { x: -14, z: -12, y: 0, yaw: -0.9, pitch: 0.05, roll: 0 }; for (let i = 0; i < 8; i++) { N.pose(P); N.step(1 / 60); } N.pose(P); N.renderOnce(); N.renderOnce(); }''')
+    check(pg.evaluate('NQ.NQU.uReflOn.value') == 1 and pg.evaluate('NQ.TEXN.refl.value.isRenderTargetTexture === true'), 'wet-street mirror on')
+    check(pg.evaluate('!!(NQ.GPOST.ao && NQ.GPOST.pre)') and pg.evaluate('NQ.GPOST.world.options.samples') == 4, 'GTAO prepass + 4x MSAA on Ultra')
+    pg.wait_for_function('NQ.GPU_PROF.ok', timeout=600000, polling=2000)
+    acc = pg.evaluate('Object.keys(NQ.GPU_PROF.acc)')
+    check('world' in acc and 'bloom' in acc and 'gtao' in acc, 'GPU timestamps per pass: ' + ', '.join(acc))
+    shot(pg, '8-ultra-webgpu')
+    check(not errs(E), 'no console errors on WebGPU Ultra ' + str(errs(E)[:4]))
     b.close()
 
 print('FAILED: %d' % len(FAILS) if FAILS else 'ALL OK'); sys.exit(1 if FAILS else 0)

@@ -79,7 +79,9 @@ function flushList(list, vm) {
 
 /* ---------------- sky dome ---------------- */
 const SKY_U = { uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uGlow: { value: new THREE.Color() }, uCloud: { value: new THREE.Color() }, uDiscCol: { value: new THREE.Color() }, uDiscDir: { value: new THREE.Vector3() }, uStars: { value: 1 } };
-const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), new THREE.ShaderMaterial({
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24),
+//#if webgl
+new THREE.ShaderMaterial({
   uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol }, SKY_U), side: THREE.BackSide, depthWrite: false, depthTest: false,
   vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
   fragmentShader: `precision highp float; varying vec3 vW; uniform float uTime; uniform vec3 uFogCol, uZen, uMid, uGlow, uCloud, uDiscCol, uDiscDir; uniform float uStars;
@@ -101,7 +103,11 @@ void main(){
   c += uDiscCol*smoothstep(0.9993,0.9996,m)*1.6;
   c += uDiscCol*0.4*pow(max(m,0.),220.)*0.8 + uDiscCol*0.08*pow(max(m,0.),8.);
   gl_FragColor = vec4(c,1.);
-}` }));
+}` })
+//#else
+  skyMaterialGPU(SKY_U)
+//#endif
+);
 skyMesh.frustumCulled = false; skyMesh.renderOrder = -1000; skyMesh.matrixAutoUpdate = true;
 scene.add(skyMesh);
 
@@ -304,7 +310,13 @@ function buildLights() {
     s.shadow.mapSize.set(1024, 1024); s.shadow.camera.near = 0.5; s.shadow.camera.far = 30; s.shadow.bias = -0.0008; s.shadow.normalBias = 0.03; s.shadow.radius = 3;
     s.shadow.autoUpdate = false;   // refreshed by updateLights3: half of them per frame, or at once when moved
     scene.add(s); scene.add(s.target); SPOTS.push({ s, shadow: i < N_SHADOW_SPOTS, lamp: null });
+//#if webgpu
+    GPU_PROF.shadowCams.add(s.shadow.camera);
+//#endif
   }
+//#if webgpu
+  GPU_PROF.shadowCams.add(sun.shadow.camera);
+//#endif
 }
 const _dyn = [], _stat = [], _lampsNear = [];
 // dynamic light candidates come from a reused pool (no per-frame objects); p is either the source's own
@@ -401,6 +413,9 @@ function updateLights3(cam) {
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
   for (let i = nStat; i < _stat.length && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
+//#if webgpu
+  for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
+//#endif
 }
 
 /* ---------------- world meshes ---------------- */
@@ -881,10 +896,13 @@ function buildOcclusion() {
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
-//#if webgl
 let pmrem = null;
 const ENV = { cache: {}, cur: null, job: null, old: null, vis: true, refl: 0 };
+//#if webgl
 const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
+//#else
+const cubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
+//#endif
 const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
 // Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
 function envHide(on) {
@@ -938,12 +956,10 @@ function updateEnv(cam) {
     if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
   }
 }
-//#else
-function updateEnv() { }   // preview: no district cube captures yet (hemisphere light only)
-//#endif
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
+//#if webgl
 const coneMat = new THREE.ShaderMaterial({
   uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U),
   transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
@@ -963,6 +979,9 @@ void main(){
   vec3 c = uLamp * facing * fall * streaks * 0.1 * uVolK * near * exp(-NQ_FOGD(d) * 0.5);
   gl_FragColor = vec4(c, 0.);
 }` });
+//#else
+const coneMat = coneMaterialGPU(VOL_U);
+//#endif
 const CONES = [];
 const HALOS = [];
 function buildVolumes() {
@@ -1003,8 +1022,15 @@ void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. 
 }
 
 /* ---------------- wet-street reflections: the scene mirrored in y, at half resolution ---------------- */
+//#if webgl
 const reflRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType });
+//#else
+const reflRT = new THREE.RenderTarget(4, 4, { type: THREE.HalfFloatType });
+//#endif
 const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
+//#if webgpu
+reflCam.coordinateSystem = renderer.coordinateSystem;   // the projection is copied from the main camera: never rebuilt from reflCam's own fov
+//#endif
 const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
@@ -1021,10 +1047,17 @@ function renderReflection(r) {
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
   const mode = SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0);
   const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
-  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H); return; }
+  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+//#if webgpu
+    TEXN.refl.value = reflRT.texture;
+//#endif
+    return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
   NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
+//#if webgpu
+  TEXN.refl.value = BLACK_TEX;   // a pass can't sample the target it draws into
+//#endif
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
   const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
   partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
@@ -1035,6 +1068,9 @@ function renderReflection(r) {
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+//#if webgpu
+  TEXN.refl.value = reflRT.texture;
+//#endif
   REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
   REFL_CACHE.quality = mode; REFL_CACHE.w = W; REFL_CACHE.h = H;
 }
@@ -1115,6 +1151,8 @@ try { PROF.on = new URLSearchParams(location.search).has('prof'); } catch (e) { 
 if (PROF.on) {
 //#if webgl
   PROF.gl = renderer.getContext(); PROF.ext = PROF.gl.getExtension('EXT_disjoint_timer_query_webgl2');
+//#else
+  renderer.inspector = new GPUProfInspector();   // gpu.js: names each render call so the timestamp queries add up per pass
 //#endif
   renderer.info.autoReset = false;
   PROF.el = document.createElement('pre');
@@ -1135,13 +1173,15 @@ function profInstrument() {
 }
 function profFrame(cpuMs) {
   if (!PROF.on) return; profPoll(); PROF.cpu += cpuMs; PROF.n++;
-  const inf = renderer.info.render; PROF.calls = inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
+  const inf = renderer.info.render; PROF.calls = NQ_GPU === 'webgpu' ? inf.drawCalls : inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
   if (performance.now() - PROF.t < 500) return; PROF.t = performance.now();
   let gpu = 0, lines = [];
-  for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
+  const acc = NQ_GPU === 'webgpu' ? GPU_PROF.acc : PROF.acc;
+  for (const [k, a] of Object.entries(acc)) { if (!a.n) continue; const m = a.s / a.n; gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
   const qname = SETTINGS.laptop ? 'Laptop' : ['Fast', 'Balanced', 'Sharp', 'Ultra'][SETTINGS.quality];
-  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU preview  ' : ''}GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : NQ_GPU === 'webgpu' ? 'timing not wired yet' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  const gpuT = NQ_GPU === 'webgpu' ? (!renderer.backend.trackTimestamp ? 'timestamp-query unavailable' : GPU_PROF.ok ? gpu.toFixed(2) + ' ms' : 'waiting for timestamps') : PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable';
+  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU' : 'WebGL2'}  GPU ${gpuT}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 //#if webgl
@@ -1176,7 +1216,7 @@ function buildComposer(W, H, q) {
 //#endif
 /* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
 const ULTRA = { state: 'none', res: null };
-const wantTexRes = (q) => NQ_GPU !== 'webgl' || SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;   // sampled by the GLSL uber-shader only
+const wantTexRes = (q) => SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;
 function loadUltraTextures(res) {
   if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
   const sfx = res === 'half' ? '_half' : '';
@@ -1189,7 +1229,7 @@ function loadUltraTextures(res) {
       for (let L = 0; L < TEX_LAYERS.length; L++) for (let y = 0; y < h; y++) d.set(src.subarray((L * h + y) * row, (L * h + y + 1) * row), (L * h + (h - 1 - y)) * row);   // GL rows run bottom-up
       const t = new THREE.DataArrayTexture(d, w, h, TEX_LAYERS.length);
       t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, NQ_GPU === 'webgpu' ? renderer.getMaxAnisotropy() : renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
       return { t, d, w, h };
     });
     const [A, N, O] = arr;
@@ -1285,9 +1325,16 @@ function render3(time, W, H, fov, cam) {
   partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
+//#if webgpu
+  gpuUnported();   // before the env capture renders the scene too
+  GPU_PROF.tag = 'env map';
+//#endif
   updateEnv(cam);
 //#if webgpu
-  renderPreview(T); return;
+  GPU_PROF.tag = null;
+//#endif
+//#if webgpu
+  renderGPU(T, W, H, time); return;
 //#endif
   // post
   const U = gradePass.uniforms;
@@ -1305,21 +1352,31 @@ function render3(time, W, H, fov, cam) {
   try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
 //#if webgpu
-/* ---- WebGPU preview (roadmap Phase 1): the scene through three's node materials, straight to the canvas ----
-   Not ported yet, so skipped here: every GLSL ShaderMaterial (sky, signs, decals, particles, rain, snow, light cones,
-   halos, glass), the uber-shader's surface detail / windows / puddles (onBeforeCompile), wet-street reflections,
-   district env maps, bloom, GTAO and the grade pass. Phase 2 replaces this with TSL ports. */
-const _bg = new THREE.Color(), _fog = new THREE.FogExp2(0x000000, 0.01);
-function renderPreview(T) {
-  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.visible = false; });
-  NQU.uReflOn.value = 0;
-  _bg.setRGB(T.fog[0], T.fog[1], T.fog[2]); scene.background = _bg;
-  _fog.color.copy(_bg); _fog.density = NQU.uFogDen.value; scene.fog = _fog;
-  const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
+/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ----
+   Not ported yet (Phase 3) and kept off this renderer: the GLSL signs, decals, particles, rain, snow, halos and
+   shopfront glass. They sit on a layer no camera draws. */
+const _clr = new THREE.Color(); let _unportedN = -1;
+function gpuUnported() {
+  if (scene.children.length === _unportedN) return; _unportedN = scene.children.length;
+  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.layers.set(31); });
+}
+function renderGPU(T, W, H, time) {
+  if (!GPOST.pipe || GPOST.key !== SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0)) buildPostGPU(SETTINGS.quality, !!SETTINGS.laptop);
+  gpuSyncTextures();
+  const nf = renderer._nodes.nodeFrame; nf.update(); renderer.info.frame = nf.frameId;   // one node frame per game frame: every pass redraws
+  const U = GRADE_U;
+  U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
+  U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
+  const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
+  vmCamera.layers.set(VM_ITEMS.n > 0 && !DBG.noVM ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
-    renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene, camera);
-    if (vmOn) { scene.background = null; renderer.clearDepth(); renderer.render(scene, vmCamera); }   // the background would paint over the world
-  } finally { scene.matrixWorldAutoUpdate = true; scene.background = _bg; }
+    GPU_PROF.tag = 'reflection';
+    if (SETTINGS.quality >= 1 && THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; TEXN.refl.value = BLACK_TEX; }
+    GPU_PROF.tag = null; renderer.setRenderTarget(null);
+    const f = T.fog; renderer.setClearColor(_clr.setRGB(f[0], f[1], f[2]), 0);   // alpha 0: the bow pass lays over the world by its alpha
+    GPOST.pipe.render();
+  } finally { scene.matrixWorldAutoUpdate = true; }
+  if (PROF.on) gpuProfPoll();
 }
 //#endif

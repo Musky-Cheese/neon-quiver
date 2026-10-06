@@ -1018,6 +1018,7 @@ async function loadModels() {
   return true;
 }
 
+
 /* ============================================================
    Street props, modelled in code with the Geo kit (rounded boxes, lathes, tubes, blobs).
    Every builder keeps the collision footprint it replaced, so navigation is unchanged.
@@ -6234,7 +6235,8 @@ function flushList(list, vm) {
 
 /* ---------------- sky dome ---------------- */
 const SKY_U = { uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Color() }, uGlow: { value: new THREE.Color() }, uCloud: { value: new THREE.Color() }, uDiscCol: { value: new THREE.Color() }, uDiscDir: { value: new THREE.Vector3() }, uStars: { value: 1 } };
-const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), new THREE.ShaderMaterial({
+const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24),
+new THREE.ShaderMaterial({
   uniforms: Object.assign({ uTime: NQU.uTime, uFogCol: NQU.uFogCol }, SKY_U), side: THREE.BackSide, depthWrite: false, depthTest: false,
   vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; gl_Position = projectionMatrix*viewMatrix*w; }`,
   fragmentShader: `precision highp float; varying vec3 vW; uniform float uTime; uniform vec3 uFogCol, uZen, uMid, uGlow, uCloud, uDiscCol, uDiscDir; uniform float uStars;
@@ -6256,7 +6258,8 @@ void main(){
   c += uDiscCol*smoothstep(0.9993,0.9996,m)*1.6;
   c += uDiscCol*0.4*pow(max(m,0.),220.)*0.8 + uDiscCol*0.08*pow(max(m,0.),8.);
   gl_FragColor = vec4(c,1.);
-}` }));
+}` })
+);
 skyMesh.frustumCulled = false; skyMesh.renderOrder = -1000; skyMesh.matrixAutoUpdate = true;
 scene.add(skyMesh);
 
@@ -7169,7 +7172,8 @@ function renderReflection(r) {
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
   const mode = SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0);
   const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
-  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H); return; }
+  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+    return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
   NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
@@ -7279,13 +7283,15 @@ function profInstrument() {
 }
 function profFrame(cpuMs) {
   if (!PROF.on) return; profPoll(); PROF.cpu += cpuMs; PROF.n++;
-  const inf = renderer.info.render; PROF.calls = inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
+  const inf = renderer.info.render; PROF.calls = NQ_GPU === 'webgpu' ? inf.drawCalls : inf.calls; PROF.tris = inf.triangles; renderer.info.reset();   // per-frame totals across every pass
   if (performance.now() - PROF.t < 500) return; PROF.t = performance.now();
   let gpu = 0, lines = [];
-  for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
+  const acc = NQ_GPU === 'webgpu' ? GPU_PROF.acc : PROF.acc;
+  for (const [k, a] of Object.entries(acc)) { if (!a.n) continue; const m = a.s / a.n; gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
   const qname = SETTINGS.laptop ? 'Laptop' : ['Fast', 'Balanced', 'Sharp', 'Ultra'][SETTINGS.quality];
-  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU preview  ' : ''}GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : NQ_GPU === 'webgpu' ? 'timing not wired yet' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  const gpuT = NQ_GPU === 'webgpu' ? (!renderer.backend.trackTimestamp ? 'timestamp-query unavailable' : GPU_PROF.ok ? gpu.toFixed(2) + ' ms' : 'waiting for timestamps') : PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable';
+  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU' : 'WebGL2'}  GPU ${gpuT}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
 function buildComposer(W, H, q) {
@@ -7318,7 +7324,7 @@ function buildComposer(W, H, q) {
 }
 /* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
 const ULTRA = { state: 'none', res: null };
-const wantTexRes = (q) => NQ_GPU !== 'webgl' || SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;   // sampled by the GLSL uber-shader only
+const wantTexRes = (q) => SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;
 function loadUltraTextures(res) {
   if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
   const sfx = res === 'half' ? '_half' : '';
@@ -7331,7 +7337,7 @@ function loadUltraTextures(res) {
       for (let L = 0; L < TEX_LAYERS.length; L++) for (let y = 0; y < h; y++) d.set(src.subarray((L * h + y) * row, (L * h + y + 1) * row), (L * h + (h - 1 - y)) * row);   // GL rows run bottom-up
       const t = new THREE.DataArrayTexture(d, w, h, TEX_LAYERS.length);
       t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
-      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = Math.min(8, NQ_GPU === 'webgpu' ? renderer.getMaxAnisotropy() : renderer.capabilities.getMaxAnisotropy()); t.needsUpdate = true;
       return { t, d, w, h };
     });
     const [A, N, O] = arr;

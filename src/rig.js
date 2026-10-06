@@ -140,6 +140,9 @@ function makeRig(z) {
     const mesh = new THREE.SkinnedMesh(mz ? mz.geo : zGeometry(key), mat);
     mesh.name = 'zmesh'; mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 2.2); mesh.castShadow = true; mesh.receiveShadow = true;
     mesh.customDepthMaterial = zDepthMat(mat.userData.u);
+//#if webgpu
+    mesh.userData.u = mat.userData.u;   // gpu.js reads each body's tints, flash and hidden parts off the mesh (shadow pass included)
+//#endif
     const T = mz || ZRIG;
     const root = T.rootTemplate.clone(true);
     const byName = {}; root.traverse(o => { if (o.isBone) byName[o.name] = o; });
