@@ -7010,11 +7010,15 @@ function buildOcclusion() {
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ----------------
    scene.environment is set once and never swapped: WebGPURenderer rebuilds every object's render state, in every pass,
-   when the scene's environment texture changes (well over a second on a fast desktop). Each district keeps its own
-   cube capture; crossing into it re-convolves that cube into the one PMREM target the scene points at. */
+   when the scene's environment texture changes (well over a second on a fast desktop). Each district's capture is
+   convolved once into its own PMREM target and copied into the one the scene points at when you walk in.
+   Captures always draw through the same camera into the same cube target, so the renderer reuses its per-object
+   state, and a new district renders one face per frame (PMREM on the seventh) while the old map stays up. */
 let pmrem = null;
-const ENV = { cubes: {}, done: {}, live: null, cur: null, vis: true, refl: 0 };   // done: districts whose cube shows the current Look
-const cubeCam = new THREE.CubeCamera(0.5, 1200, new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType })); scene.add(cubeCam);
+const ENV = { pm: {}, live: null, cur: null, want: null, job: null, vis: true, refl: 0 };   // pm: district id -> PMREM target of the current Look
+const capRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
+const cubeCam = new THREE.CubeCamera(0.5, 1200, capRT); scene.add(cubeCam);
+const faceCam = new THREE.PerspectiveCamera(90, 1, 0.5, 1200); faceCam.matrixAutoUpdate = false; faceCam.matrixWorldAutoUpdate = false;
 // Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
 function envHide(on) {
   if (on) { ENV.vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false; ENV.refl = NQU.uReflOn.value; NQU.uReflOn.value = 0; }
@@ -7022,30 +7026,31 @@ function envHide(on) {
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = !on;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
 }
-function envFace(rt, face) {   // one cube face, exactly as CubeCamera.update renders it
+function envFace(face) {   // one cube face, as CubeCamera.update renders it, through the shared face camera
   const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
   if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
   cubeCam.updateMatrixWorld(true);
+  const c = cubeCam.children[face]; faceCam.coordinateSystem = c.coordinateSystem;
+  faceCam.matrixWorld.copy(c.matrixWorld); faceCam.matrixWorldInverse.copy(c.matrixWorldInverse); faceCam.projectionMatrix.copy(c.projectionMatrix); faceCam.projectionMatrixInverse.copy(c.projectionMatrixInverse);
   envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
-  const gm = rt.texture.generateMipmaps; if (face < 5) rt.texture.generateMipmaps = false;   // mips build on the last face
-  renderer.setRenderTarget(rt, face); renderer.render(scene, cubeCam.children[face]);
-  envHide(false); rt.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+  const gm = capRT.texture.generateMipmaps; if (face < 5) capRT.texture.generateMipmaps = false;   // mips build on the last face
+  renderer.setRenderTarget(capRT, face); renderer.render(scene, faceCam);
+  envHide(false); capRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
 }
-function captureEnv(d) {   // all six faces of this district's cube, in one frame
-  const rt = ENV.cubes[d.id] || (ENV.cubes[d.id] = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType }));
-  cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
-  for (let f = 0; f < 6; f++) envFace(rt, f);
-  return rt;
+function envFinish(id) {   // the captured cube -> this district's PMREM (and, the first time, the scene's)
+  ENV.pm[id] = pmrem.fromCubemap(capRT.texture, ENV.pm[id] || null);
+  if (!ENV.live) { ENV.live = pmrem.fromCubemap(capRT.texture); scene.environment = ENV.live.texture; }
 }
+function envShow(id) { if (ENV.cur === id) return; renderer.copyTextureToTexture(ENV.pm[id].texture, ENV.live.texture); ENV.cur = id; }
 function updateEnv(cam) {
-  if (ENV_DIRTY) { ENV.done = {}; ENV.cur = null; ENV_DIRTY = false; }   // new Look: every capture is stale (the cubes are kept and redrawn)
-  const d = districtAt(cam[0], cam[2]);
-  if (ENV.cur === d.id) return;
   if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
-  if (!ENV.done[d.id]) { captureEnv(d); ENV.done[d.id] = true; }
-  ENV.live = pmrem.fromCubemap(ENV.cubes[d.id].texture, ENV.live);   // into the same target every time
-  if (scene.environment !== ENV.live.texture) scene.environment = ENV.live.texture;
-  ENV.cur = d.id;
+  if (ENV_DIRTY) { for (const k in ENV.pm) ENV.pm[k].dispose(); ENV.pm = {}; ENV.cur = null; ENV.job = null; ENV_DIRTY = false; }   // new Look: every capture is stale
+  const d = districtAt(cam[0], cam[2]);
+  if (ENV.pm[d.id]) { ENV.job = null; envShow(d.id); return; }
+  if (!ENV.job || ENV.job.id !== d.id) { ENV.job = { id: d.id, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
+  if (!ENV.live || !scene.environment) { for (let f = 0; f < 6; f++) envFace(f); ENV.job.face = 6; }   // first frame: nothing to show yet
+  if (ENV.job.face < 6) { envFace(ENV.job.face++); return; }
+  envFinish(d.id); ENV.job = null; ENV.cur = null; envShow(d.id);
 }
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
@@ -7214,7 +7219,24 @@ function warmShaders() {
     R3.warming = true; render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
   finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  warmMeshyZombies();   // every breed and outfit that has landed so far
   R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
+}
+
+// The breeds that stream in after boot (and the walker outfits): draw one of each once, out of sight, as soon as they
+// land, so the first wave that brings one doesn't upload its model and textures and build its render state mid-fight.
+function warmMeshyZombies() {
+  if (typeof MZ === 'undefined') return;
+  const zs = [];
+  for (const [b, l] of Object.entries(MZ_BY)) l.forEach((t, k) => {
+    if (MZ[t].warmed) return; MZ[t].warmed = true;
+    let seed = 0.5; for (let i = 0; i < 400; i++) { const s = (i + 0.5) / 400; if (Math.floor(((s * 9.173) % 1 + 1) % 1 * l.length) % l.length === k) { seed = s; break; } }   // a seed that picks this outfit (rig.js mzFor)
+    const z = { type: b, seed, warm: true }; makeRig(z);
+    if (z.rig) { z.rig.mesh.position.set(0, -60, 0); z.rig.mesh.frustumCulled = false; z.rig.mesh.updateMatrixWorld(true); zs.push(z); }
+  });
+  if (!zs.length) return;
+  try { R3.warming = true; render(GAME.time); } catch (e) { console.warn('zombie warm-up', e); }
+  finally { R3.warming = false; for (const z of zs) { z.rig.mesh.frustumCulled = true; releaseRig(z); } }
 }
 
 /* ---------------- per-frame sync + render ---------------- */
@@ -8458,7 +8480,7 @@ async function boot() {
     loadMeshyCars(),
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
-  loadMeshyZombies().then(() => { window.NQ_MZ_READY = true; });   // the other breeds stream in behind; until theirs lands a body uses the sculpt
+  loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
   gpuCheck();
   wireUI();
   // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font

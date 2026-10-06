@@ -958,7 +958,7 @@ async function boot() {
     loadMeshyCars(),
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
-  loadMeshyZombies().then(() => { window.NQ_MZ_READY = true; });   // the other breeds stream in behind; until theirs lands a body uses the sculpt
+  loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
   gpuCheck();
   wireUI();
   // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
