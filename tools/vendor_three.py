@@ -15,3 +15,5 @@ def go(rel):
         else: print('??',m)
 for f in ['postprocessing/EffectComposer.js','postprocessing/Pass.js','postprocessing/ShaderPass.js','postprocessing/UnrealBloomPass.js','postprocessing/GTAOPass.js','loaders/GLTFLoader.js','utils/BufferGeometryUtils.js']: go(f)
 print(sorted(seen))
+# the WebGPU build (game-webgpu.js): three.webgpu.js shares three.core.js with three.module.js; three.tsl.js is the TSL entry point
+for f in ['three.module.js', 'three.core.js', 'three.webgpu.js', 'three.tsl.js']: shutil.copy(J + '../../build/' + f, 'vendor/' + f)
