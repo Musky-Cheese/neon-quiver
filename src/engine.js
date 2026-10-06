@@ -614,13 +614,12 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 24.5 && mat < 25.5) {    // wreck paint (Meshy cars): years-old, faded on top, rusting at the arches and sills
     float wear = vNqM.x; emis = iemit * dynK;   // nqm.x is the baked wear mask here, not a glow
     float n1 = vn(vNqW.xz * 2.3 + vNqW.y * 1.7), n2 = vnf(fcW * 7.3 + N0.xz * 3.1);
-    float oxid = smoothstep(0.35, 0.95, N0.y) * (0.5 + 0.5 * n1);   // sun-baked hood and roof: chalky, paler, duller
-    base = mix(base, vec3(dot(base, vec3(0.333))) * 1.2 + 0.025, oxid * 0.5);
-    float rustM = smoothstep(0.62, 0.9, wear * 0.7 + n1 * 0.45 + n2 * 0.3) + smoothstep(0.86, 0.95, n2) * 0.6;
-    rustM = clamp(rustM, 0., 1.);
+    float oxid = smoothstep(0.5, 0.95, N0.y) * (0.6 + 0.4 * n1);   // sun-baked hood and roof: a little paler and duller
+    base = mix(base, vec3(dot(base, vec3(0.333))) * 1.1 + 0.01, oxid * 0.3);
+    float rustM = wear * smoothstep(0.3, 0.75, n1 + (n2 - 0.5) * 0.3) * 0.8;   // soft rust only where the wear mask says (arches, sills)
     base = mix(base, mix(vec3(0.15, 0.06, 0.025), vec3(0.3, 0.12, 0.04), n2), rustM);
-    float dirt = smoothstep(0.85, 0.12, vNqW.y) * (0.5 + 0.5 * n1);
-    base = mix(base, vec3(0.045, 0.04, 0.035), dirt * 0.6);
+    float dirt = smoothstep(0.7, 0.1, vNqW.y) * (0.6 + 0.4 * n1);   // road grime: a smooth fade up from the sills, no blotches
+    base = mix(base, vec3(0.045, 0.04, 0.035), dirt * 0.5);
     float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
     base += scr * 0.05 * (1. - rustM);
     rough = mix(mix(0.28, 0.55, oxid), 0.92, max(rustM, dirt * 0.8)) + streak * 0.05 * wetK;

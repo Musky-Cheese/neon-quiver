@@ -1,6 +1,7 @@
 """Turn a Meshy model packed in the browser (vertex-clustered, uint16-quantized, gzip, base64) into a game GLB.
 
 usage: python tools/meshy_unpack.py packed.txt out.glb length_m [--orient]
+       python tools/meshy_unpack.py simplified.bin out.glb length_m      (output of tools/qem.cpp; the preferred route)
   packed.txt: the browser tool's saved result (JSON [{text}] wrapping 'NQB64:<base64>:END'), or the bare base64
   length_m:   real length of the longest axis in metres (the model is rescaled to it, base at y=0, centred on x/z)
   --orient:   for boxy hulls that came out of clustering with folded double shells (Meshy vans): face every
@@ -10,13 +11,18 @@ import sys, json, re, gzip, base64, struct
 import numpy as np
 
 src, out, L = sys.argv[1], sys.argv[2], float(sys.argv[3])
-t = open(src).read()
-try: t = ''.join(x.get('text', '') for x in json.loads(t))
-except Exception: pass
-m = re.search(r'NQB64:([A-Za-z0-9+/=]+):END', t); b = gzip.decompress(base64.b64decode(m.group(1) if m else t.strip().strip('"')))
-head = np.frombuffer(b[:32], np.float32); nv, ni, ext, isz = int(head[0]), int(head[1]), float(head[5]), int(head[6])
-q = np.frombuffer(b[32:32 + nv * 6], np.uint16).reshape(-1, 3).astype(np.float32) / 65535 * ext
-idx = np.array(np.frombuffer(b[32 + nv * 6:32 + nv * 6 + ni * isz], np.uint16 if isz == 2 else np.uint32).astype(np.uint32).reshape(-1, 3))
+if src.endswith('.bin'):   # tools/qem output: uint32 nv, nt, float32 pos, uint32 idx
+    b = open(src, 'rb').read(); nv, nt = struct.unpack('<II', b[:8])
+    q = np.frombuffer(b, np.float32, nv * 3, 8).reshape(-1, 3).copy(); idx = np.frombuffer(b, np.uint32, nt * 3, 8 + nv * 12).reshape(-1, 3).copy()
+    q -= q.min(0)
+else:
+    t = open(src).read()
+    try: t = ''.join(x.get('text', '') for x in json.loads(t))
+    except Exception: pass
+    m = re.search(r'NQB64:([A-Za-z0-9+/=]+):END', t); b = gzip.decompress(base64.b64decode(m.group(1) if m else t.strip().strip('"')))
+    head = np.frombuffer(b[:32], np.float32); nv, ni, ext, isz = int(head[0]), int(head[1]), float(head[5]), int(head[6])
+    q = np.frombuffer(b[32:32 + nv * 6], np.uint16).reshape(-1, 3).astype(np.float32) / 65535 * ext
+    idx = np.array(np.frombuffer(b[32 + nv * 6:32 + nv * 6 + ni * isz], np.uint16 if isz == 2 else np.uint32).astype(np.uint32).reshape(-1, 3))
 p = q * (L / (q.max(0) - q.min(0)).max())
 p[:, 0] -= (p[:, 0].max() + p[:, 0].min()) / 2; p[:, 2] -= (p[:, 2].max() + p[:, 2].min()) / 2; p[:, 1] -= p[:, 1].min()
 if '--orient' in sys.argv:

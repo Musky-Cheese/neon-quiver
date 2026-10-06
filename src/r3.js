@@ -651,8 +651,8 @@ function buildBlossoms() {
 /* ---------------- Meshy wrecked cars ----------------
    Two downloaded models (sedan, van), geometry only, one instanced draw each, split into parts by carParts(). Every
    car gets its own paint colour through instanceColor (paint only); glass, tyres, chrome and lamps keep their own. */
-/* Meshy cars arrive as one grey shell. carParts() smooths the clustering lumps out of it (Taubin smoothing of the
-   positions, then of the normals) and splits it per triangle into parts by where they sit on the car: tyres, hubs,
+/* Meshy cars arrive as one grey shell (simplified offline by tools/qem.cpp, which keeps panels flat). carParts() gives it
+   crease-aware normals and splits it per triangle into parts by where they sit on the car: tyres, hubs,
    glass, bumpers, lamps, dark trim and paint. Every triangle gets its own vertices so material ids never blend across
    an edge (blended ids were the jagged bright seam along the sills). Paint is material 25, the aged-wreck paint; its
    nqm.x carries a baked wear mask (wheel arches, sills) that the shader turns into rust. Units: metres, model frame. */
@@ -665,24 +665,28 @@ const CAR_LAYOUT = {
     head: [-2.38, 0.74, 1.05, 0.45], tail: [2.55, 0.65, 1.5, 0.82] },
 };
 function carParts(src, kind) {
-  const L = CAR_LAYOUT[kind], idx = src.index.array, P = Float32Array.from(src.attributes.position.array), nv = P.length / 3, nt = idx.length / 3;
-  // vertex neighbours (CSR) from the triangle edges
+  const L = CAR_LAYOUT[kind], idx = src.index.array, P = src.attributes.position.array, nv = P.length / 3, nt = idx.length / 3;
+  // per-vertex face lists (CSR), then crease-aware normals below: a corner averages only the faces around its vertex
+  // that bend less than ~38 degrees from its own face, so panels shade smooth and their edges stay crisp
   const deg = new Uint32Array(nv + 1);
-  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { deg[idx[t * 3 + k] + 1] += 2; }
+  for (let t = 0; t < nt * 3; t++) deg[idx[t] + 1]++;
   for (let i = 0; i < nv; i++) deg[i + 1] += deg[i];
-  const nb = new Uint32Array(deg[nv]), fill = deg.slice(0, nv);
-  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) { const a = idx[t * 3 + k], b = idx[t * 3 + (k + 1) % 3], c = idx[t * 3 + (k + 2) % 3]; nb[fill[a]++] = b; nb[fill[a]++] = c; }
-  const relax = (A, f) => { const o = new Float32Array(A.length);
-    for (let i = 0; i < nv; i++) { let x = 0, y = 0, z = 0; const n = deg[i + 1] - deg[i]; if (!n) { o.set(A.subarray(i * 3, i * 3 + 3), i * 3); continue; }
-      for (let j = deg[i]; j < deg[i + 1]; j++) { const v = nb[j] * 3; x += A[v]; y += A[v + 1]; z += A[v + 2]; }
-      o[i * 3] = A[i * 3] + f * (x / n - A[i * 3]); o[i * 3 + 1] = A[i * 3 + 1] + f * (y / n - A[i * 3 + 1]); o[i * 3 + 2] = A[i * 3 + 2] + f * (z / n - A[i * 3 + 2]); }
-    A.set(o); };
-  const ground = new Uint8Array(nv); for (let i = 0; i < nv; i++) ground[i] = P[i * 3 + 1] < 0.02;
-  for (let it = 0; it < 4; it++) { relax(P, 0.5); relax(P, -0.53); }   // Taubin: removes the lumps without shrinking the body
-  for (let i = 0; i < nv; i++) if (ground[i]) P[i * 3 + 1] = Math.min(P[i * 3 + 1], 0.005);
-  const g0 = new THREE.BufferGeometry(); g0.setAttribute('position', new THREE.BufferAttribute(P, 3)); g0.setIndex(new THREE.BufferAttribute(idx, 1)); g0.computeVertexNormals();
-  const Nn = g0.attributes.normal.array; for (let it = 0; it < 3; it++) relax(Nn, 0.6);
-  for (let i = 0; i < nv; i++) { const l = Math.hypot(Nn[i * 3], Nn[i * 3 + 1], Nn[i * 3 + 2]) || 1; Nn[i * 3] /= l; Nn[i * 3 + 1] /= l; Nn[i * 3 + 2] /= l; }
+  const vfl = new Uint32Array(nt * 3), fill = deg.slice(0, nv);
+  for (let t = 0; t < nt; t++) for (let k = 0; k < 3; k++) vfl[fill[idx[t * 3 + k]]++] = t;
+  const FN = new Float32Array(nt * 3);   // area-weighted face normals
+  for (let t = 0; t < nt; t++) {
+    const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3;
+    const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+    FN[t * 3] = uy * vz - uz * vy; FN[t * 3 + 1] = uz * vx - ux * vz; FN[t * 3 + 2] = ux * vy - uy * vx;
+  }
+  const CREASE = Math.cos(38 * Math.PI / 180);
+  const cornerN = (t, v, out) => {
+    const fl = Math.hypot(FN[t * 3], FN[t * 3 + 1], FN[t * 3 + 2]) || 1, fx = FN[t * 3] / fl, fy = FN[t * 3 + 1] / fl, fz = FN[t * 3 + 2] / fl;
+    let x = 0, y = 0, z = 0;
+    for (let j = deg[v]; j < deg[v + 1]; j++) { const u = vfl[j] * 3, l = Math.hypot(FN[u], FN[u + 1], FN[u + 2]) || 1;
+      if ((FN[u] * fx + FN[u + 1] * fy + FN[u + 2] * fz) / l >= CREASE) { x += FN[u]; y += FN[u + 1]; z += FN[u + 2]; } }
+    const l = Math.hypot(x, y, z) || 1; out[0] = x / l; out[1] = y / l; out[2] = z / l;
+  };
   let hw = 0; for (let i = 0; i < nv; i++) hw = Math.max(hw, Math.abs(P[i * 3 + 2]));
   const wheelD = (x, y) => Math.min(Math.hypot(x - L.wx[0], y - L.wy), Math.hypot(x - L.wx[1], y - L.wy));
   // part table: [r, g, b, material id]
@@ -697,10 +701,10 @@ function carParts(src, kind) {
     const T = L.tail; if (cx > T[0] && cy > T[1] && cy < T[2] && az > T[3] && fx > 0.3) return TAIL;
     const bF = L.bumpF, bR = L.bumpR;
     if ((cx < bF[0] && cy > bF[1] && cy < bF[2]) || (cx > bR[0] && cy > bR[1] && cy < bR[2])) return L.chrome ? CHROME : TRIM;
-    if (cy < 0.3 || fy < -0.6) return TRIM;   // rockers, undertray, anything facing the road
+    if (cy < 0.3 || (fy < -0.6 && cy < 0.9)) return TRIM;   // rockers and the undertray facing the road
     return PAINT;
   };
-  const n3 = nt * 3, oP = new Float32Array(n3 * 3), oN = new Float32Array(n3 * 3), oC = new Float32Array(n3 * 3), oQ = new Float32Array(n3 * 2);
+  const cn = [0, 0, 0], n3 = nt * 3, oP = new Float32Array(n3 * 3), oN = new Float32Array(n3 * 3), oC = new Float32Array(n3 * 3), oQ = new Float32Array(n3 * 2);
   for (let t = 0; t < nt; t++) {
     const a = idx[t * 3] * 3, b = idx[t * 3 + 1] * 3, c = idx[t * 3 + 2] * 3;
     const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
@@ -708,7 +712,7 @@ function carParts(src, kind) {
     const q = part((P[a] + P[b] + P[c]) / 3, (P[a + 1] + P[b + 1] + P[c + 1]) / 3, (P[a + 2] + P[b + 2] + P[c + 2]) / 3, fx, fy, fz);
     for (let k = 0; k < 3; k++) {
       const v = idx[t * 3 + k] * 3, o = t * 3 + k;
-      oP[o * 3] = P[v]; oP[o * 3 + 1] = P[v + 1]; oP[o * 3 + 2] = P[v + 2]; oN[o * 3] = Nn[v]; oN[o * 3 + 1] = Nn[v + 1]; oN[o * 3 + 2] = Nn[v + 2];
+      oP[o * 3] = P[v]; oP[o * 3 + 1] = P[v + 1]; oP[o * 3 + 2] = P[v + 2]; cornerN(t, idx[t * 3 + k], cn); oN[o * 3] = cn[0]; oN[o * 3 + 1] = cn[1]; oN[o * 3 + 2] = cn[2];
       oC[o * 3] = q[0]; oC[o * 3 + 1] = q[1]; oC[o * 3 + 2] = q[2]; oQ[o * 2 + 1] = q[3];
       if (q === PAINT) {   // wear: rust gathers around the wheel arches and along the sills
         const arch = Math.max(0, Math.min(1, (L.wr + 0.32 - wheelD(P[v], P[v + 1])) / 0.28)), sill = Math.max(0, Math.min(1, (0.62 - P[v + 1]) / 0.3));

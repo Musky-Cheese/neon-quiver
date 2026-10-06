@@ -13,10 +13,14 @@ with sync_playwright() as p:
     pg.goto(f'http://localhost:{port}/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=180000, polling=500)
     pg.evaluate("() => { const N = window.NQ; N.SETTINGS.quality = 1; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; }")
     if poses == []:   # no poses given: close-ups of the first sedan and van near the plaza
-        cs = pg.evaluate("() => window.NQ.WORLD.carSpots.filter(s => Math.abs(s.x) < 70 && Math.abs(s.z) < 70).map(s => [s.x, s.z, s.ry, s.kind])")
+        cs = pg.evaluate("""() => { const W = window.NQ.WORLD, L = W.lights || [];
+          const lit = s => Math.min(1e9, ...L.map(l => Math.hypot(l.p[0] - s.x, l.p[2] - s.z)));   // LIT=1: the cars nearest a lamp
+          let c = W.carSpots.filter(s => Math.abs(s.x) < 70 && Math.abs(s.z) < 70);
+          if (""" + ('true' if os.environ.get('LIT') else 'false') + """) c = W.carSpots.slice().sort((a, b) => lit(a) - lit(b));
+          return c.map(s => [s.x, s.z, s.ry, s.kind]); }""")
         for k in ('sedan', 'van'):
             x, z, ry, _ = next(c for c in cs if c[3] == k)
-            for a, d in (((0.9, 5.5), (2.4, 6.5), (-0.5, 5.0)) if not os.environ.get('BIG') else ((1.1, 4.2),)):
+            for a, d in (((0.9, 5.5), (2.4, 6.5), (-0.5, 5.0)) if not os.environ.get('BIG') else ((1.1, 4.2), (2.5, 4.6))):
                 poses.append([x + math.sin(ry + a) * d, z + math.cos(ry + a) * d, x, 0.9, z])
     tiles = []
     for cx, cz, tx, ty, tz in poses:
