@@ -114,7 +114,8 @@ if (typeof GPUTexture !== 'undefined') {
 // WebGPU build: a real adapter + device, or back to Classic (src/boot.js reloads into game-webgl.js and says why).
 // three's WebGPURenderer quietly drops to its own WebGL2 backend when WebGPU is missing: that counts as a failure here.
 try {
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance' });
+  const trackTimestamp = new URLSearchParams(location.search).has('prof');   // ?prof=1: per-pass GPU timing (r3.js profiler)
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp });
   renderer.onDeviceLost = (info) => gpuDeviceLost(info);   // game.js: before the game is up this falls back, after it pauses and explains
   await renderer.init();
   if (!renderer.backend.isWebGPUBackend) throw new Error('WebGPU unavailable: the browser only offered WebGL2');
@@ -122,14 +123,8 @@ try {
 //#endif
 renderer.setPixelRatio(1);
 renderer.autoClear = false;
-//#if webgl
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma
 renderer.toneMapping = THREE.NoToneMapping;
-//#endif
-//#if webgpu
-renderer.outputColorSpace = THREE.SRGBColorSpace;   // preview: no grade pass yet, so three's own tone curve + sRGB out
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-//#endif
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
@@ -208,6 +203,7 @@ function farDefines(m) {   // NQ_FAR: Fast / Balanced / Laptop, NQ_FOGFAR: Lapto
   if (fog) d.NQ_FOGFAR = 1; else delete d.NQ_FOGFAR;
   m.needsUpdate = true; return true;
 }
+//#if webgl
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 });
   m.defines = {};
@@ -771,6 +767,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   return m;
 }
 const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMaterial('vm') };
+//#endif
 
 /* ---------------- Geometry builder ---------------- */
 /* ---------------- Geometry builder ---------------- */

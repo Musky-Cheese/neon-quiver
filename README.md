@@ -3,10 +3,10 @@
 A first-person archery survival game that runs in the browser. Sector 7 is under quarantine: a rain-soaked cyberpunk city at night, with the plaza at its heart and districts all around it. Hold the bow, draw, release, and survive endless zombie waves that find you wherever you go.
 
 - **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the street lamps, mirror-accurate reflections in the puddles with rain ripples, light cones in the rain, procedural brick, concrete, steel and asphalt detail, bloom, and ambient occlusion on the High setting.
-- **Small download:** about 1 MB on a first visit (the page, three.js and the zombie model). The WebGPU renderer fetches three's larger WebGPU build instead, about 0.3 MB more compressed.
+- **Small download:** about 1 MB on a first visit (the page, three.js and the zombie model). The WebGPU renderer fetches three's larger WebGPU build instead (plus its node post-processing for bloom and ambient occlusion), about 0.33 MB more compressed.
 - **Rigged zombies:** one skinned mesh per infected, rigged and animated in Blender (`models/zombie.glb`, built by `tools/make_rig.py`). Walk, run, heavy, crawl, attack, slam and roar clips blend into hit reactions and physics-driven deaths.
 - **Desktop only:** keyboard and mouse, in any current Chrome, Edge, Firefox or Safari with WebGL2.
-- **Two renderers:** the first time you open the game it asks how to draw the city: **WebGPU** or **WebGL2 (Classic)**. It checks for a working WebGPU adapter and greys that option out (with the reason) when the browser can't run it. Your choice is remembered, and **Settings → Renderer** (title or pause screen) switches it with a reload. If WebGPU fails to start, or the GPU drops out while it loads, the game falls back to Classic by itself and tells you why. WebGPU is an early preview for now: it runs the full game, but the shaders and effects (sky, signs, rain, wet-street reflections, bloom and the rest) haven't been ported yet, so Classic stays the preselected choice until they have.
+- **Two renderers:** the first time you open the game it asks how to draw the city: **WebGPU** or **WebGL2 (Classic)**. It checks for a working WebGPU adapter and greys that option out (with the reason) when the browser can't run it. Your choice is remembered, and **Settings → Renderer** (title or pause screen) switches it with a reload. If WebGPU fails to start, or the GPU drops out while it loads, the game falls back to Classic by itself and tells you why. WebGPU is still a preview, so Classic stays the preselected choice: the city's shared surface material (lit windows with rooms behind them, wet tiles and asphalt with puddles and rain rings, brick, steel, foliage, the infected's skin and wounds), lighting and shadows, the wet-street mirror, the glowing air round the lights, light cones under the lamps, district reflections, the sky, bloom, ambient occlusion on Ultra and the colour grade are ported. Neon signs, holo billboards, rain, snow, particles, blood decals, light halos and shopfront glass aren't yet.
 
 ## Play locally
 
@@ -62,7 +62,7 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 - **Auto quality (the default for new players):** the first few seconds on the title screen are timed and the game settles on the best tier that holds about 40 fps (Fast, Laptop, Balanced, or Sharp on a strong desktop GPU; Ultra is only ever picked by hand). If a fight still drags once resolution scaling has bottomed out, it drops one more tier and says so. The quality menu shows what Auto picked; choosing a tier by hand turns Auto off.
 - **Built to keep running:** if the browser resets the graphics card (after sleep, or a busy GPU) the game pauses, says so, and carries on when the GPU is back. If something breaks, an error screen explains it and offers a reload instead of a frozen picture.
 - **Look pass:** the infected get a soft camera-side fill and a two-tone neon rim so they read against the city, wet sheen on heads and shoulders in the rain, and brighter eyes. Towers have more life in their windows (office floors left on, blue TV rooms), mast beacons and car hazards blink on their own beat, clouds glow from the city below, working hover-car pods light the street, canopies sway with the weather and let light through their edges, and blossom petals ride the gusts. Laptop mode keeps bloom at a quarter of the resolution. Art direction sheets for all of it live on the design canvas.
-- Add `?prof=1` to the URL for a performance overlay: GPU time per render pass, CPU frame time, draw calls and triangles (per-pass GPU time is Classic only for now).
+- Add `?prof=1` to the URL for a performance overlay: GPU time per render pass, CPU frame time, draw calls and triangles. Classic times its passes with `EXT_disjoint_timer_query_webgl2`, WebGPU with timestamp queries (shadows, wet-street mirror, env map, world, bow, AO prepass, GTAO, bloom, grade); either needs a browser that exposes them.
 
 ## Ad and marketing assets (`ads/`)
 
@@ -98,6 +98,7 @@ The readable source is in `src/`:
 - `boot.js`: the renderer choice screen, run before any game code: probes WebGPU, remembers the pick, loads `game-webgl.js` or `game-webgpu.js` and falls back to Classic when WebGPU fails
 
 - `engine.js`: math, geometry and the shared material (surface detail, windows, puddles, reflections)
+- `gpu.js`: the WebGPU build's shaders in TSL (three's node shading language): the same shared material, sky and light cones, the post chain (bloom, GTAO, grade) and the per-pass GPU timer
 - `r3.js`: the three.js scene, lights, reflections, light cones, post-processing
 - `city.js`: plaza, buildings, signs and traffic
 - `districts.js`: the Rail Yard, Night Market, Docks, Freight Line, Warrens, Suburbs, Sakura Gardens, Flooded Metro and Refinery
@@ -111,7 +112,7 @@ The readable source is in `src/`:
 - `audio.js`: synthesized sound effects, ambience and music, with reverb, 3D (HRTF) positioning and per-bus volume
 - `seg.js`: the 16-segment neon lettering
 
-After editing, run `python3 build.py`. It rebuilds `index.html`, `game-webgl.js`, `game-webgpu.js` and `build/artifact.html` (a single-file Classic build). Both bundles come from the same `src/` files: lines between `//#if webgl` (or `//#if webgpu`) and `//#endif` go into that bundle only, and `NQ_GPU` says at runtime which one is running. The WebGPU bundle imports `three/webgpu` (`vendor/three.webgpu.js`, same three.js release).
+After editing, run `python3 build.py`. It rebuilds `index.html`, `game-webgl.js`, `game-webgpu.js` and `build/artifact.html` (a single-file Classic build). Both bundles come from the same `src/` files: lines between `//#if webgl` (or `//#if webgpu`) and `//#endif` go into that bundle only, and `NQ_GPU` says at runtime which one is running. The WebGPU bundle imports `three/webgpu` (`vendor/three.webgpu.js`, same three.js release) and three's TSL bloom, GTAO and denoise nodes (`vendor/addons/tsl/display/`).
 
 Balance numbers you will probably want to tune live near the top of their files: `ZTYPES` in `zombies.js` (health, speed and damage per enemy), `ARMORY` / `UPG` / `ALLOT` in `armory.js` (prices, upgrade effects, special arrows per wave), and `GAME.startWave` / `GAME.spawnOne` in `game.js` (wave sizes and the enemy mix).
 
