@@ -380,19 +380,45 @@ function propPath(g, R, pts, w, y = 0.018) {
 function inPond(x, z) { return waterAt(x, z) > 0; }   // any water you wade through (see hazards.js)
 function inKoiPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
 // background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
+// a spray of flower cards over an ellipsoid canopy shell (r3.js buildBlossoms draws them), facing outward
+function blossomShell(R, cx, cy, cz, rx, ry, rz, n, size, c, glow) {
+  for (let k = 0; k < n; k++) {
+    const u = R() * 2 - 1, a = R() * TAU, w = Math.sqrt(1 - u * u), sh = 0.86 + R() * 0.28;   // up = paler, as before
+    let nx = w * Math.cos(a), ny = u * 0.8 + 0.25, nz = w * Math.sin(a); const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl; nz /= nl;
+    const d = 0.82 + R() * 0.24, t = R();
+    const col = t < 0.12 ? [1.0, 0.82, 0.9] : t > 0.9 ? [0.84, 0.34, 0.5] : c;
+    WORLD.blossoms.push(cx + w * Math.cos(a) * rx * d, cy + u * ry * d, cz + w * Math.sin(a) * rz * d, nx, ny, nz,
+      size * (0.8 + R() * 0.5), col[0] * sh * (0.85 + 0.15 * (u + 1)), col[1] * sh, col[2] * sh, glow, (R() * 4) | 0);
+  }
+}
 function propSakuraFar(g, R, x, z, s = 1, detail = 1, leaf = null) {   // leaf: plain foliage colour (non-blossom trees)
   const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
   const blossom = leaf ? [leaf[0] * (0.8 + R() * 0.4), leaf[1] * (0.8 + R() * 0.4), leaf[2]] : [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)], glow = leaf ? 0 : 1.6;
+  // blossom trees: the blobs become small dark cores and the visible canopy is flower cards over their surface
+  const core = leaf ? blossom : [blossom[0] * 0.2, blossom[1] * 0.14, blossom[2] * 0.17], cg = leaf ? 0 : 0.08, ck = leaf ? 1 : 0.86;
+  const nCards = detail >= 2 ? 26 : detail === 1 ? 18 : 12, cs = detail >= 2 ? 0.55 : detail === 1 ? 0.7 : 0.85;
+  // the cards roll their own dice (seeded from the spot) so the city's shared random sequence is untouched
+  let seed = ((Math.floor(x * 131.7) * 73856093) ^ (Math.floor(z * 97.3) * 19349663)) >>> 0 || 1;
+  const CR = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const canopy = (cx, cy, cz, rx, ry, rz, frac) => { if (!leaf) blossomShell(CR, cx, cy, cz, rx, ry, rz, Math.round(nCards * frac), cs * s, blossom, 1.1); };
   const h = r(1.4, 1.9) * s, sides = detail >= 2 ? 6 : 4;
   g.tube([[x, 0, z], [x + r(-0.2, 0.2), h * 0.6, z + r(-0.2, 0.2)], [x + r(-0.3, 0.3), h, z + r(-0.3, 0.3)]], [0.24 * s, 0.2 * s, 0.16 * s], bark, 0, 12, sides, false);
   const n = detail >= 2 ? 5 : detail === 1 ? 3 : 2, a0 = r(0, TAU), seg = detail >= 2 ? 10 : detail === 1 ? 7 : 6, rings = detail >= 2 ? 7 : detail === 1 ? 5 : 4;
   for (let i = 0; i < n; i++) {
     const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
     g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
-    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, r(0, TAU)), r(1.1, 1.5) * s, r(0.75, 1.0) * s, r(1.1, 1.5) * s, 0.35, r(0, 99), blossom, glow, 14, seg, rings, 1);
-    if (detail >= 1) for (let k = 0; k < 2; k++) { const b = r(0, TAU), e = r(0.9, 1.4) * s; g.blob(pT(PM.a, tx + Math.cos(b) * e, ty + r(-0.2, 0.5) * s, tz + Math.sin(b) * e, r(0, TAU)), r(0.45, 0.7) * s, r(0.35, 0.55) * s, r(0.45, 0.7) * s, 0.45, r(0, 99), blossom, glow, 14, 7, 5, 1); }
+    const rot = r(0, TAU), bx = r(1.1, 1.5) * s, by = r(0.75, 1.0) * s, bz = r(1.1, 1.5) * s;   // same dice order as before
+    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, rot), bx * ck, by * ck, bz * ck, 0.35, r(0, 99), core, cg, 14, seg, rings, 1);
+    canopy(tx, ty + 0.3 * s, tz, bx, by, bz, 1);
+    if (detail >= 1) for (let k = 0; k < 2; k++) {
+      const b = r(0, TAU), e = r(0.9, 1.4) * s, ex = tx + Math.cos(b) * e, ey = ty + r(-0.2, 0.5) * s, ez = tz + Math.sin(b) * e;
+      const rot2 = r(0, TAU), sx = r(0.45, 0.7) * s, sy = r(0.35, 0.55) * s, sz = r(0.45, 0.7) * s;
+      g.blob(pT(PM.a, ex, ey, ez, rot2), sx * ck, sy * ck, sz * ck, 0.45, r(0, 99), core, cg, 14, 7, 5, 1);
+      canopy(ex, ey, ez, sx, sy, sz, 0.35);
+    }
   }
-  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s, 0.9 * s, 1.5 * s, 0.3, r(0, 99), blossom, glow, 14, seg, rings, 1);
+  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s * ck, 0.9 * s * ck, 1.5 * s * ck, 0.3, r(0, 99), core, cg, 14, seg, rings, 1);
+  canopy(x, h + 1.4 * s, z, 1.5 * s, 0.9 * s, 1.5 * s, 1.2);
   if (detail >= 2 && !leaf && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
 }
 
