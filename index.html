@@ -7808,12 +7808,15 @@ function warmShaders() {
   const stand = [new THREE.Mesh(g, MAT.static), new THREE.InstancedMesh(g, MAT.inst, 1), new THREE.InstancedMesh(g, MAT.vm, 1)];
   stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
+  // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
+  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5 } : null;
+  if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {
     renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
     renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); }
+  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
   R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
 }
 
