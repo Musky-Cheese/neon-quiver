@@ -7027,7 +7027,8 @@ function envHide(on) {
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
 }
 function envFace(face) {   // one cube face, as CubeCamera.update renders it, through the shared face camera
-  const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
+  // no env map in its own capture: envK 0 drops the env term exactly as a null scene.environment would, without the rebuild
+  const prevT = renderer.getRenderTarget(), ek = NQU.uEnvK.value; NQU.uEnvK.value = 0;
   if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
   cubeCam.updateMatrixWorld(true);
   const c = cubeCam.children[face]; faceCam.coordinateSystem = c.coordinateSystem;
@@ -7035,11 +7036,11 @@ function envFace(face) {   // one cube face, as CubeCamera.update renders it, th
   envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
   const gm = capRT.texture.generateMipmaps; if (face < 5) capRT.texture.generateMipmaps = false;   // mips build on the last face
   renderer.setRenderTarget(capRT, face); renderer.render(scene, faceCam);
-  envHide(false); capRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+  envHide(false); capRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); NQU.uEnvK.value = ek;
 }
 function envFinish(id) {   // the captured cube -> this district's PMREM (and, the first time, the scene's)
   ENV.pm[id] = pmrem.fromCubemap(capRT.texture, ENV.pm[id] || null);
-  if (!ENV.live) { ENV.live = pmrem.fromCubemap(capRT.texture); scene.environment = ENV.live.texture; }
+  if (!ENV.live) { ENV.live = pmrem.fromCubemap(capRT.texture); scene.environment = ENV.live.texture; }   // once, at boot
 }
 function envShow(id) { if (ENV.cur === id) return; renderer.copyTextureToTexture(ENV.pm[id].texture, ENV.live.texture); ENV.cur = id; }
 function updateEnv(cam) {
@@ -7048,7 +7049,7 @@ function updateEnv(cam) {
   const d = districtAt(cam[0], cam[2]);
   if (ENV.pm[d.id]) { ENV.job = null; envShow(d.id); return; }
   if (!ENV.job || ENV.job.id !== d.id) { ENV.job = { id: d.id, face: 0 }; cubeCam.position.set(d.env[0], d.env[1], d.env[2]); }
-  if (!ENV.live || !scene.environment) { for (let f = 0; f < 6; f++) envFace(f); ENV.job.face = 6; }   // first frame: nothing to show yet
+  if (!ENV.live) { for (let f = 0; f < 6; f++) envFace(f); ENV.job.face = 6; }   // first frame: nothing to show yet
   if (ENV.job.face < 6) { envFace(ENV.job.face++); return; }
   envFinish(d.id); ENV.job = null; ENV.cur = null; envShow(d.id);
 }
@@ -7197,6 +7198,8 @@ function applyQuality3(q) {
 }
 
 /* ---------------- shader warm-up: compile every program at load, not on first use in play ---------------- */
+// every shadow map redraws in the warm-up frame, so the shadow-pass pipelines of the stand-ins are built too
+function warmShadows() { sun.shadow.needsUpdate = true; for (const { s } of SPOTS) s.shadow.needsUpdate = true; renderer.shadowMap.needsUpdate = true; }
 // Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
 // Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
 function warmShaders() {
@@ -7216,7 +7219,7 @@ function warmShaders() {
     // the renderer builds a pipeline per pass (mirror, world, bow, shadows, AO prepass) the first time it draws a material:
     // draw one frame now with every stand-in in it, plus a spark and a smoke puff for the particle pipeline
     emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
-    R3.warming = true; render(GAME.time);
+    R3.warming = true; warmShadows(); render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
   finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
   warmMeshyZombies();   // every breed and outfit that has landed so far
@@ -7235,7 +7238,7 @@ function warmMeshyZombies() {
     if (z.rig) { z.rig.mesh.position.set(0, -60, 0); z.rig.mesh.frustumCulled = false; z.rig.mesh.updateMatrixWorld(true); zs.push(z); }
   });
   if (!zs.length) return;
-  try { R3.warming = true; render(GAME.time); } catch (e) { console.warn('zombie warm-up', e); }
+  try { R3.warming = true; warmShadows(); render(GAME.time); } catch (e) { console.warn('zombie warm-up', e); }
   finally { R3.warming = false; for (const z of zs) { z.rig.mesh.frustumCulled = true; releaseRig(z); } }
 }
 
