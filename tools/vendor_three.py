@@ -1,5 +1,6 @@
-import re,os,shutil
-J='/home/claude/three/package/examples/jsm/'
+import re,os,shutil,sys
+# usage: python3 tools/vendor_three.py [extracted three package dir]
+J=os.path.join(sys.argv[1] if len(sys.argv)>1 else '/home/claude/three/package','examples','jsm','')
 OUT='vendor/addons/'
 seen=set()
 def go(rel):
