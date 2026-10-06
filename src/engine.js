@@ -98,14 +98,38 @@ const _t4a = M4.create(), _t4b = M4.create(), _t4c = M4.create();
 /* ---------------- renderer ---------------- */
 const canvas = document.getElementById('gl');
 let renderer;
+//#if webgl
 try {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!window.__NQ_CAPTURE });
   if (!renderer.capabilities.isWebGL2) throw new Error('WebGL2 unavailable');
 } catch (e) { document.getElementById('nogl').hidden = false; throw e; }
+//#endif
+//#if webgpu
+// three r186 passes the identity texture-view swizzle as the newer string form ('rgba'); browsers from before that
+// spec change (Chromium 141 and older) reject the string. Identity is the default, so leaving it out changes nothing.
+if (typeof GPUTexture !== 'undefined') {
+  const cv = GPUTexture.prototype.createView;
+  GPUTexture.prototype.createView = function (d) { if (d && d.swizzle === 'rgba') { const { swizzle, ...rest } = d; return cv.call(this, rest); } return cv.call(this, d); };
+}
+// WebGPU build: a real adapter + device, or back to Classic (src/boot.js reloads into game-webgl.js and says why).
+// three's WebGPURenderer quietly drops to its own WebGL2 backend when WebGPU is missing: that counts as a failure here.
+try {
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance' });
+  renderer.onDeviceLost = (info) => gpuDeviceLost(info);   // game.js: before the game is up this falls back, after it pauses and explains
+  await renderer.init();
+  if (!renderer.backend.isWebGPUBackend) throw new Error('WebGPU unavailable: the browser only offered WebGL2');
+} catch (e) { if (window.NQ_BOOT && window.NQ_BOOT.fallback(e)) await new Promise(() => { }); throw e; }   // reloading: stop here quietly
+//#endif
 renderer.setPixelRatio(1);
 renderer.autoClear = false;
+//#if webgl
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma
 renderer.toneMapping = THREE.NoToneMapping;
+//#endif
+//#if webgpu
+renderer.outputColorSpace = THREE.SRGBColorSpace;   // preview: no grade pass yet, so three's own tone curve + sRGB out
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+//#endif
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.shadowMap.autoUpdate = false;
@@ -150,6 +174,9 @@ const ZPARTS = 10;
 /* three's direct-light loops, with lossless early-outs: a point/spot light whose colour is zero, or whose range
    cutoff this fragment is beyond, contributes exactly 0 (getDistanceAttenuation), so skip its info, shadow and BRDF.
    (Unrolled loops: no `continue`, so the body is wrapped in an `if`.) Falls back to the stock chunk if three changes. */
+//#if webgpu
+const NQ_LIGHTS_FRAG = null;   // GLSL chunk surgery: the WebGL build only
+//#else
 const NQ_LIGHTS_FRAG = (() => {
   const src = THREE.ShaderChunk.lights_fragment_begin;
   const RE = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
@@ -162,6 +189,7 @@ const NQ_LIGHTS_FRAG = (() => {
   spot = spot.replace(SP, 'if ( nqLightOn( spotLight.position, spotLight.color, spotLight.distance, geometryPosition ) ) {\n\t\t' + SP + '\n\t\tif ( directLight.visible ) {').replace(RE, RE + ' } }');
   return pre + spot + src.slice(iE);
 })();
+//#endif
 /* Distant-detail budget for Fast, Balanced and Laptop (never Sharp or Ultra). Nothing nearer than NEAR changes on
    any setting; past it, detail fades out over FADE metres so there is no visible line. Laptop also thickens the
    fog past lap.fogStart and draws small props, glass and signs less far. Tune here. */

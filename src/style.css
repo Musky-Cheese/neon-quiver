@@ -215,6 +215,11 @@ button, select, input { font-family: var(--f); }
 
 #swWarn { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--amber); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
 #swWarn b { color: var(--amber); }
+#gpuNote { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--cyan); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
+#gpuNote b { color: var(--cyan); }
+#gpuNote code { display: block; margin-top: 4px; font-size: 12px; color: var(--dim); word-break: break-word; }
+#gpuNote .btn { padding: 8px 16px; font-size: 13px; flex: none; }
+#gpuNote:not([hidden]) ~ #swWarn { top: 128px; }
 #swWarn code { font-size: 13px; color: var(--cyan); }
 #swWarn .btn { padding: 8px 16px; font-size: 13px; flex: none; }
 #sysErr { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(7, 8, 15, 0.92); font-family: "Chakra Petch", var(--f); color: #EEF1F8; }
@@ -224,6 +229,9 @@ button, select, input { font-family: var(--f); }
 .sys-panel p { margin: 0; font-size: 17px; line-height: 1.45; color: #C3C8D8; }
 .sys-panel code { display: block; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; line-height: 1.4; color: #A3AAC2; padding: 10px 12px; background: #07080F; border: 1px solid rgba(255, 255, 255, 0.12); white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow: auto; user-select: text; }
 .sys-btn { justify-self: start; height: 52px; padding: 0 28px; border: 0; background: #38E1F2; color: #05060C; font: 700 18px "Chakra Petch", var(--f); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.sys-btns { display: flex; flex-wrap: wrap; gap: 12px; }
+.sys-btn.ghost { background: transparent; color: #EEF1F8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+.sys-btn.ghost:hover { background: rgba(56, 225, 242, 0.12); }
 .sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
 #loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
 #nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
@@ -236,3 +244,24 @@ button, select, input { font-family: var(--f); }
   .stats { grid-template-columns: repeat(2, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------------- boot: renderer choice (src/boot.js) ---------------- */
+#scr-boot { z-index: 40; background: radial-gradient(ellipse at 30% 20%, rgba(255, 46, 136, 0.12), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(41, 231, 255, 0.1), transparent 50%), var(--bg); padding: clamp(16px, 5vh, 56px) 16px; }
+.boot-panel { place-self: center; width: min(760px, 100%); display: grid; gap: 18px; }
+.boot-title { margin: 0; font-size: clamp(44px, 8vw, 84px); line-height: 0.95; font-weight: 700; font-style: italic; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 28px rgba(255, 46, 136, 0.35); }
+.boot-title span { color: var(--mag); text-shadow: 0 0 22px rgba(255, 46, 136, 0.7); }
+.boot-lead { margin: 0; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.4; color: var(--ink); max-width: 62ch; }
+.boot-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.boot-opt { --c: var(--cyan); appearance: none; text-align: left; font: inherit; color: var(--ink); cursor: pointer; display: grid; grid-template-columns: 1fr auto; align-content: start; gap: 6px 12px; padding: 18px 20px 16px; background: var(--panel); border: 1px solid var(--line); position: relative; clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
+#bootGPU { --c: var(--mag); }
+.boot-opt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); box-shadow: 0 0 10px var(--c); opacity: 0.35; transition: opacity 0.15s; }
+.boot-opt:hover:not(:disabled), .boot-opt:focus-visible { border-color: color-mix(in srgb, var(--c) 55%, transparent); outline: none; }
+.boot-opt[aria-checked=true] { border-color: var(--c); background: color-mix(in srgb, var(--c) 9%, rgba(11, 8, 22, 0.9)); box-shadow: inset 0 0 28px -12px var(--c); }
+.boot-opt[aria-checked=true]::before { opacity: 1; }
+.boot-opt:disabled { cursor: not-allowed; opacity: 0.55; }
+.boot-name { font-size: 26px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
+.boot-tag { align-self: center; font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--c); }
+.boot-desc { grid-column: 1 / -1; font-size: 14px; line-height: 1.4; color: var(--dim); }
+.boot-stat { grid-column: 1 / -1; font-size: 12px; letter-spacing: 0.08em; color: var(--lime); min-height: 1.4em; }
+.boot-opt.na .boot-stat { color: var(--amber); }
+#bootGo { justify-self: start; }

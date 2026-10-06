@@ -942,7 +942,27 @@ function wireUI() {
     saveLS('nq_settings', SETTINGS); syncQualityUI(); }); }
   syncQualityUI();
   syncMusicBtn();
+  wireRendererUI();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
+}
+/* Settings → Renderer: boot.js chose this bundle before the module loaded; switching saves the choice and reloads
+   into the other one (asking first if a run would be lost). Hidden in the single-file artifact, which has no boot.js. */
+function wireRendererUI() {
+  const B = window.NQ_BOOT, sel = ['renderer', 'renderer2'].map($).filter(Boolean);
+  for (const s of sel) {
+    if (!B) { s.closest('label').hidden = true; continue; }
+    for (const o of s.options) o.textContent = B.names[o.value] + (o.value === 'webgpu' && B.preview ? ' (preview)' : '');
+    s.value = NQ_GPU;
+    s.addEventListener('change', () => {
+      const v = s.value; for (const t of sel) t.value = NQ_GPU;   // stays on the current one until the reload
+      if (v === NQ_GPU) return;
+      if (GAME.state === 'title') { B.choose(v); return; }
+      window.NQ_SYS.show('RENDERER', 'Switch to ' + B.names[v] + '?', 'The game reloads to change renderer, so this run ends here. Your best score is saved.', '', { btn: 'Switch and reload', act: () => B.choose(v), btn2: 'Keep playing', act2: () => window.NQ_SYS.hide() });
+    });
+  }
+  if (B && NQ_GPU !== 'webgpu') B.probe().then((r) => {   // grey WebGPU out where it can't run, with the reason on hover
+    for (const s of sel) { const o = s.querySelector('option[value="webgpu"]'); if (!r.ok) { o.disabled = true; o.textContent = B.names.webgpu + ' (unavailable)'; s.title = r.why; } }
+  });
 }
 function toTitle() {
   GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true; hazReset();
@@ -953,7 +973,11 @@ function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best
 
 /* ---------------- GPU check: software-rendering warning, first-run quality pick ---------------- */
 function gpuName() {
+//#if webgpu
+  try { const i = renderer.backend.device.adapterInfo || {}; return [i.vendor, i.architecture, i.description].filter(Boolean).join(' '); } catch (e) { return ''; }
+//#else
   try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || ''); } catch (e) { return ''; }
+//#endif
 }
 function gpuCheck() {
   const g = gpuName(), q = new URLSearchParams(location.search);
@@ -970,6 +994,14 @@ function gpuCheck() {
     if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. Waiting for it to come back. If the picture doesn\'t return in a few seconds, reload: your best score is saved.');
   });
   canvas.addEventListener('webglcontextrestored', () => { GPU.lost = false; R3.quality = -1; if (window.NQ_SYS) window.NQ_SYS.hide(); });
+}
+// WebGPU (renderer.onDeviceLost, engine.js): lost while starting up → Classic (src/boot.js); lost mid-game → pause and
+// explain. A lost device doesn't come back the way a WebGL context does, so the way on is a reload.
+function gpuDeviceLost(info) {
+  const why = 'Device lost' + (info && info.message ? ': ' + info.message : '') + (info && info.reason ? ' (' + info.reason + ')' : '');
+  if (!window.NQ_READY) { if (window.NQ_BOOT && window.NQ_BOOT.fallback(new Error(why))) return; if (window.NQ_FATAL) window.NQ_FATAL(new Error(why)); return; }
+  GPU.lost = true; if (GAME.state === 'playing') GAME.pause();
+  if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. WebGPU needs a reload to pick up again: your best score is saved.', why);
 }
 const GPU = { name: '', soft: false, integrated: false, lost: false };
 

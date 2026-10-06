@@ -149,6 +149,9 @@ function signArray(texs) {
   return arr;
 }
 function buildSigns() {
+//#if webgpu
+  return;   // preview: GL texture-array upload + GLSL sign shader, not ported yet
+//#endif
   const groups = new Map();
   for (const s of WORLD.signs) {
     const k = s.tex.image.width + 'x' + s.tex.image.height + (s.add ? '+' : '');
@@ -878,6 +881,7 @@ function buildOcclusion() {
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
+//#if webgl
 let pmrem = null;
 const ENV = { cache: {}, cur: null, job: null, old: null, vis: true, refl: 0 };
 const cubeRT = new THREE.WebGLCubeRenderTarget(128, { type: THREE.HalfFloatType });
@@ -934,6 +938,9 @@ function updateEnv(cam) {
     if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
   }
 }
+//#else
+function updateEnv() { }   // preview: no district cube captures yet (hemisphere light only)
+//#endif
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
@@ -1033,6 +1040,7 @@ function renderReflection(r) {
 }
 
 /* ---------------- post: passes ---------------- */
+//#if webgl
 // Anti-aliasing lives in its own multisampled target that is copied into the (plain) composer buffer:
 // some GPUs (ANGLE / D3D) output pure black when the bloom pass writes back into a multisampled buffer.
 let msRT = null;
@@ -1100,11 +1108,15 @@ void main(){
 }`,
 };
 let composer = null, worldPass, gtaoPass, vmPass, bloomPass, gradePass;
+//#endif
 /* ---- GPU profiler (?prof=1): per-pass GPU time via EXT_disjoint_timer_query_webgl2, plus draw calls / triangles ---- */
 const PROF = { on: false, ext: null, gl: null, pending: [], free: [], acc: {}, cpu: 0, n: 0, el: null, t: 0 };
 try { PROF.on = new URLSearchParams(location.search).has('prof'); } catch (e) { }
 if (PROF.on) {
-  PROF.gl = renderer.getContext(); PROF.ext = PROF.gl.getExtension('EXT_disjoint_timer_query_webgl2'); renderer.info.autoReset = false;
+//#if webgl
+  PROF.gl = renderer.getContext(); PROF.ext = PROF.gl.getExtension('EXT_disjoint_timer_query_webgl2');
+//#endif
+  renderer.info.autoReset = false;
   PROF.el = document.createElement('pre');
   Object.assign(PROF.el.style, { position: 'fixed', left: '8px', bottom: '8px', zIndex: 99, margin: 0, padding: '6px 9px', font: '11px/1.35 monospace', color: '#bff6ff', background: 'rgba(0,0,0,0.72)', pointerEvents: 'none', whiteSpace: 'pre' });
   document.body.appendChild(PROF.el);
@@ -1117,7 +1129,7 @@ function profPoll() {
     const ms = gl.getQueryParameter(p.q, gl.QUERY_RESULT) / 1e6; PROF.free.push(p.q); if (dis) continue; const a = PROF.acc[p.name] || (PROF.acc[p.name] = { s: 0, n: 0 }); a.s += ms; a.n++; }
 }
 function profInstrument() {
-  if (!PROF.on) return;
+  if (!PROF.on || NQ_GPU !== 'webgl') return;
   const names = new Map([[worldPass, 'world+shadows'], [gtaoPass, 'gtao'], [vmPass, 'bow'], [bloomPass, 'bloom'], [gradePass, 'grade']]);
   for (const p of composer.passes) { if (p._prof) continue; const orig = p.render.bind(p), nm = names.get(p) || p.constructor.name; p.render = (...a) => { profBegin(nm); orig(...a); profEnd(); }; p._prof = true; }
 }
@@ -1129,9 +1141,10 @@ function profFrame(cpuMs) {
   for (const [k, a] of Object.entries(PROF.acc)) { const m = a.s / Math.max(1, a.n); gpu += m; lines.push(`  ${k.padEnd(14)} ${m.toFixed(2)} ms`); a.s = 0; a.n = 0; }
   const alive = ZOMBIES.filter(z => !z.dead).length;
   const qname = SETTINGS.laptop ? 'Laptop' : ['Fast', 'Balanced', 'Sharp', 'Ultra'][SETTINGS.quality];
-  PROF.el.textContent = `GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
+  PROF.el.textContent = `${NQ_GPU === 'webgpu' ? 'WebGPU preview  ' : ''}GPU ${PROF.ext ? gpu.toFixed(2) + ' ms' : NQ_GPU === 'webgpu' ? 'timing not wired yet' : 'timer ext unavailable'}\n${lines.join('\n')}\nCPU frame ${(PROF.cpu / PROF.n).toFixed(2)} ms\ncalls ${PROF.calls}  tris ${(PROF.tris / 1e6).toFixed(2)}M\nzombies ${alive}  chunks ${WORLD_STREAM.active}/${WORLD_MESHES.length}  quality ${qname}${SETTINGS.laptop ? '  textures off' : SETTINGS.quality >= 1 ? '  textures ' + ULTRA.state + ' ' + (ULTRA.res || '') : ''}`;
   PROF.cpu = 0; PROF.n = 0;
 }
+//#if webgl
 function buildComposer(W, H, q) {
   if (composer) { composer.renderTarget1.dispose(); composer.renderTarget2.dispose(); if (gtaoPass) gtaoPass.dispose(); bloomPass.dispose(); }
   if (msRT) { msRT.dispose(); msRT = null; }
@@ -1160,9 +1173,10 @@ function buildComposer(W, H, q) {
   composer.setSize(W, H); profInstrument();
   R3.quality = q; R3.laptop = !!SETTINGS.laptop; R3.W = W; R3.H = H;
 }
+//#endif
 /* ---- surface textures: CC0 texture arrays, loaded on demand. Balanced gets the half-res set, High and Ultra the full one; Fast none ---- */
 const ULTRA = { state: 'none', res: null };
-const wantTexRes = (q) => SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;
+const wantTexRes = (q) => NQ_GPU !== 'webgl' || SETTINGS.laptop ? null : q >= 2 ? 'full' : q >= 1 ? 'half' : null;   // sampled by the GLSL uber-shader only
 function loadUltraTextures(res) {
   if (ULTRA.state === 'loading' || ULTRA.res === res) return; ULTRA.state = 'loading';
   const sfx = res === 'half' ? '_half' : '';
@@ -1208,6 +1222,9 @@ function applyQuality3(q) {
 // Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
 // Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
 function warmShaders() {
+//#if webgpu
+  R3.warm = { programs: 0, ms: 0 }; return;   // preview: pipelines build on first use
+//#endif
   const t0 = performance.now(), before = renderer.info.programs.length;
   const g = new THREE.BufferGeometry(), n = 3;
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
@@ -1230,8 +1247,13 @@ function warmShaders() {
 
 /* ---------------- per-frame sync + render ---------------- */
 function render3(time, W, H, fov, cam) {
+//#if webgl
   if (!composer || R3.quality !== SETTINGS.quality || R3.laptop !== !!SETTINGS.laptop) { buildComposer(W, H, SETTINGS.quality); applyQuality3(SETTINGS.quality); }
   if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); composer.setSize(W, H); if (msRT) msRT.setSize(W, H); R3.W = W; R3.H = H; }
+//#else
+  if (R3.quality !== SETTINGS.quality || R3.laptop !== !!SETTINGS.laptop) { applyQuality3(SETTINGS.quality); R3.quality = SETTINGS.quality; R3.laptop = !!SETTINGS.laptop; }
+  if (R3.W !== W || R3.H !== H) { renderer.setSize(W, H, false); R3.W = W; R3.H = H; }
+//#endif
   if (canvas.width !== W || canvas.height !== H) renderer.setSize(W, H, false);
   syncFar();
   // cameras
@@ -1264,6 +1286,9 @@ function render3(time, W, H, fov, cam) {
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
   updateEnv(cam);
+//#if webgpu
+  renderPreview(T); return;
+//#endif
   // post
   const U = gradePass.uniforms;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
@@ -1279,3 +1304,22 @@ function render3(time, W, H, fov, cam) {
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
+//#if webgpu
+/* ---- WebGPU preview (roadmap Phase 1): the scene through three's node materials, straight to the canvas ----
+   Not ported yet, so skipped here: every GLSL ShaderMaterial (sky, signs, decals, particles, rain, snow, light cones,
+   halos, glass), the uber-shader's surface detail / windows / puddles (onBeforeCompile), wet-street reflections,
+   district env maps, bloom, GTAO and the grade pass. Phase 2 replaces this with TSL ports. */
+const _bg = new THREE.Color(), _fog = new THREE.FogExp2(0x000000, 0.01);
+function renderPreview(T) {
+  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.visible = false; });
+  NQU.uReflOn.value = 0;
+  _bg.setRGB(T.fog[0], T.fog[1], T.fog[2]); scene.background = _bg;
+  _fog.color.copy(_bg); _fog.density = NQU.uFogDen.value; scene.fog = _fog;
+  const vmOn = VM_ITEMS.n > 0 && !DBG.noVM;
+  scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
+  try {
+    renderer.setRenderTarget(null); renderer.clear(); renderer.render(scene, camera);
+    if (vmOn) { scene.background = null; renderer.clearDepth(); renderer.render(scene, vmCamera); }   // the background would paint over the world
+  } finally { scene.matrixWorldAutoUpdate = true; scene.background = _bg; }
+}
+//#endif
