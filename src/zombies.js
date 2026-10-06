@@ -210,15 +210,16 @@ function updateDying(z, dt) {
   if (z.crawl) { z.pitch = 0; if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.5; return; }
   // translate with the hit's momentum, slide to a stop on the ground
   z.x += z.dv[0] * dt; z.z += z.dv[2] * dt; z.y += z.dv[1] * dt;
-  if (z.y > 0.001) z.dv[1] -= 12 * dt; else { z.y = Math.max(z.y, z.dieT > 3.4 ? z.y : 0); z.dv[1] = Math.max(0, z.dv[1]); const f = Math.max(0, 1 - 5 * dt); z.dv[0] *= f; z.dv[2] *= f; }
+  const fl = z.floor || 0;
+  if (z.y > fl + 0.001) z.dv[1] -= 12 * dt; else { z.y = Math.max(z.y, z.dieT > 3.4 ? z.y : fl); z.dv[1] = Math.max(0, z.dv[1]); const f = Math.max(0, 1 - 5 * dt); z.dv[0] *= f; z.dv[2] *= f; }
   pushOutCircle(z, 0.28 * z.scale);
   // crumple: knees give first, then the body tips over
   if (z.crumpleMode && z.crumple < 1) { z.crumple = Math.min(1, z.crumple + dt * 2.6); if (z.crumple > 0.7 && z.pitchV === 0) z.pitchV = z.pitchSign * 0.6; }
   const lim = 1.5;
-  if (Math.abs(z.pitch) < lim || z.y > 0.05) {
+  if (Math.abs(z.pitch) < lim || z.y > fl + 0.05) {
     z.pitchV += z.pitchSign * (4 + 9 * Math.abs(Math.sin(z.pitch))) * dt * (z.crumpleMode && z.crumple < 0.7 ? 0 : 1);
     z.pitch += z.pitchV * dt;
-    if (Math.abs(z.pitch) >= lim && z.y <= 0.05) { z.pitch = lim * Math.sign(z.pitch); z.pitchV = -z.pitchV * 0.18; if (Math.abs(z.pitchV) > 0.8) { shakeNear(z, 0.08); bloodBurst(z.x, 0.1, z.z, null, 6, 0.6); } else z.pitchV = 0; }
+    if (Math.abs(z.pitch) >= lim && z.y <= fl + 0.05) { z.pitch = lim * Math.sign(z.pitch); z.pitchV = -z.pitchV * 0.18; if (Math.abs(z.pitchV) > 0.8) { shakeNear(z, 0.08); bloodBurst(z.x, fl + 0.1, z.z, null, 6, 0.6); } else z.pitchV = 0; }
   }
   z.roll = clamp(z.roll + z.rollV * dt, -0.6, 0.6); z.rollV *= Math.max(0, 1 - 3 * dt);
   if (z.dieT > CORPSE_SETTLE) z.y -= dt * 0.55;
@@ -243,6 +244,9 @@ function updateZombies(dt, time) {
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
     z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    // stand on low things they walk over (the Metro's island platform, steps, kerbs) instead of wading through them
+    if (z.state !== 'drop' && z.climbState === 'ground') { const fy = z.floor = groundAt(z.x, z.z, (z.dead ? z.floor || 0 : z.y) + 0.15, 0.2 * z.scale);
+      if (!z.dead) z.y = fy > z.y ? Math.min(fy, z.y + dt * 3) : Math.max(fy, z.y - dt * 5); }
     { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
       z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }
     if (z.chill > 0 && !z.dead && Math.random() < dt * 14) emit(z.x + rand(-0.3, 0.3) * z.scale, z.y + rand(0.2, 1.7) * z.scale, z.z + rand(-0.3, 0.3) * z.scale, rand(-0.2, 0.2), rand(-0.4, 0.1), rand(-0.2, 0.2), rand(0.4, 0.8), [0.8, 1.6, 2.4], rand(0.04, 0.09), 0.3, 1, 0.2);
