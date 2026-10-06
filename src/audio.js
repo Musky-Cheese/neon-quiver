@@ -145,6 +145,8 @@ const AUD = {
     if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);
     this.burst('lowpass', 2400, 90, 0.8, 1.2, 0.9 * v); this.tone('sine', 110, 28, 0.9, 0.9 * v); this.burst('highpass', 4000, 2000, 0.5, 0.2, 0.2 * v);
   },
+  // a Volatile body bursting: a wet crack and a low thump
+  pop(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 1400, 300, 1.2, 0.25, 0.35, o); this.tone('sine', 140, 45, 0.22, 0.4, o); this.burst('lowpass', 700, 120, 0.8, 0.4, 0.25, o); },
   fireIgnite() { if (!this.ctx) return; this.burst('bandpass', 600, 2400, 0.7, 0.4, 0.25); },
   groan(pan, vol = 0.12, low = 1) {
     if (!this.ctx) return; const c = this.ctx, t = this.now(), d = rand(0.6, 1.3);

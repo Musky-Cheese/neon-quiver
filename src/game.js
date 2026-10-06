@@ -457,10 +457,10 @@ const GAME = {
     this.intermission = false; this.clearedShown = false; this.armoryT = 0;
     this.wave++;
     refillForWave();
-    const boss = this.wave % 5 === 0;
-    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1));
+    const boss = this.wave % 5 === 0, M = mutRoll(this.wave);   // a sector alert bends this wave (objectives.js)
+    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
-    this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : '#ff2e88');
+    this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : M ? `SECTOR ALERT · ${M.name} · ${M.sub}` : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : M ? M.col : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
     if (boss) this.bossPending = 4;
     objWaveStart(this.wave);
@@ -473,7 +473,7 @@ const GAME = {
     const pRun = w >= 2 ? Math.min(0.45, 0.1 + (w - 2) * 0.045) : 0, pBrute = w >= 3 ? Math.min(0.3, 0.06 + (w - 3) * 0.022) : 0;
     // spitters and screamers start from wave 4, climbers from wave 5 — all stay a rare mix-in
     const pSpit = w >= 4 ? Math.min(0.14, (w - 4) * 0.012) : 0, pScream = w >= 5 ? Math.min(0.1, (w - 5) * 0.01) : 0, pClimb = w >= 5 ? Math.min(0.14, (w - 5) * 0.013) : 0;
-    const pElite = w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0;
+    const pElite = mutElite(w >= 8 ? Math.min(0.35, (w - 7) * 0.03) : 0);
     let type;
     if (r < pBrute) type = 'brute';
     else if (r < pBrute + pSpit) type = 'spitter';
@@ -481,14 +481,16 @@ const GAME = {
     else if (r < pBrute + pSpit + pScream + pClimb) type = 'climber';
     else if (r < pBrute + pSpit + pScream + pClimb + pRun) type = 'runner';
     else type = 'walker';
+    type = mutType(type);
     // pick a spawn not right next to the player
     const s = navSpawnPoint();
     const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
     if (Math.random() < pElite) makeElite(z);
+    mutSpawned(z);
     // from wave 6, runners sometimes come as a pack from the same spot
     if (type === 'runner' && w >= 6 && this.toSpawn > 2 && Math.random() < Math.min(0.35, 0.1 + (w - 6) * 0.03)) {
       const extra = Math.min(this.toSpawn - 1, w >= 14 ? 3 : 2);
-      for (let k = 0; k < extra; k++) { spawnZombie('runner', s[0] + rand(-1.2, 1.2), s[1] + rand(-1.2, 1.2), w); this.toSpawn--; }
+      for (let k = 0; k < extra; k++) { mutSpawned(spawnZombie('runner', s[0] + rand(-1.2, 1.2), s[1] + rand(-1.2, 1.2), w)); this.toSpawn--; }
     }
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
@@ -496,14 +498,14 @@ const GAME = {
   update(dt) {
     if (this.state === 'playing') {
       const maxAlive = Math.min(36, 9 + this.wave * 2);
-      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3); } }
+      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
         this.clearT += dt;
         if (this.clearT > 0.4 && !this.clearedShown) {
-          this.clearedShown = true; const bonus = 20 + this.wave * 6; this.scrap += bonus; this.score += bonus * 12;
-          this.showBanner('WAVE CLEARED', `+${bonus} SCRAP · ARMORY OPENING`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
+          const M = mutDef(); this.clearedShown = true; const bonus = Math.round((20 + this.wave * 6) * (M ? M.bonus : 1)); this.scrap += bonus; this.score += bonus * 12;
+          this.showBanner('WAVE CLEARED', M ? `+${bonus} SCRAP · ${M.name} BONUS · ARMORY OPENING` : `+${bonus} SCRAP · ARMORY OPENING`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
           this.intermission = true; this.interT = INTERMISSION; this.armoryT = 1.8;   // a beat to see the banner, then the Armory opens
         }
       }
@@ -532,7 +534,7 @@ const GAME = {
     const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
     const scrap = z.T.scrap * (z.elite ? 2 : 1) + (head ? 2 : 0);   // scrap per kill: see ZTYPES in zombies.js
     this.score += pts; this.scrap += scrap; this.kills++; if (head) this.headshots++;
-    AUD.kill();
+    AUD.kill(); objOnKill(z); mutOnKill(z);
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
     if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
     // drops
@@ -693,10 +695,12 @@ function drawMarks(W, H) {
   for (const z of ZOMBIES) {
     if (z.dead || z.markT <= 0) continue;
     const p = toScreen(z.x, z.y + 1.25 * z.scale * (z.crawl ? 0.35 : 1), z.z, W, H); if (!p) continue;
-    const r = clamp(220 / p[2], 7, 22), a = Math.min(1, z.markT / 0.6);
+    const r = clamp(220 / p[2], 7, 22) * (z.alpha ? 1.3 : 1), a = Math.min(1, z.markT / 0.6);
+    const c = z.alpha ? OBJ_COL.bounty : col; hx.strokeStyle = c; hx.fillStyle = c;   // the bounty's Alpha wears gold
     hx.globalAlpha = a * (0.65 + 0.35 * Math.sin(GAME.time * 8 + z.seed));
     hx.beginPath(); hx.moveTo(p[0], p[1] - r); hx.lineTo(p[0] + r * 0.7, p[1]); hx.lineTo(p[0], p[1] + r); hx.lineTo(p[0] - r * 0.7, p[1]); hx.closePath(); hx.stroke();
-    if (p[2] > 14) { hx.globalAlpha = a * 0.8; hx.fillText(Math.round(p[2]) + ' m', p[0], p[1] - r - 6); }
+    if (z.alpha) { hx.globalAlpha = a * 0.95; hx.fillText(`${z.alpha} · ${Math.round(p[2])} m`, p[0], p[1] - r - 6); }
+    else if (p[2] > 14) { hx.globalAlpha = a * 0.8; hx.fillText(Math.round(p[2]) + ' m', p[0], p[1] - r - 6); }
   }
   hx.globalAlpha = 1;
 }
@@ -975,7 +979,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, warmShaders, nqMaterial, backend: () => NQ_BACKEND, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
+  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

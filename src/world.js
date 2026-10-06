@@ -267,6 +267,7 @@ function drawMinimap(hx, W, H, time) {
   }
   for (const p of PICKUPS) { const [x, y] = map(p.x, p.z); hx.fillStyle = p.kind === 'health' ? '#6dff9a' : '#ffd23a'; hx.fillRect(x - 1.5, y - 1.5, 3, 3); }
   for (const z of ZOMBIES) { if (z.dead) continue; const [x, y] = map(z.x, z.z); hx.fillStyle = z.type === 'boss' ? '#ff3df0' : z.type === 'brute' ? '#ff6b3d' : '#ff3040'; const r = z.type === 'boss' ? 4.5 : z.type === 'brute' ? 3 : 2.2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fill(); }
+  drawObjectiveMinimap(hx, map, cx, cy, R, time);
   hx.restore();
   // player + ring
   hx.fillStyle = '#ffffff'; hx.beginPath(); hx.moveTo(cx, cy - 6); hx.lineTo(cx + 4.5, cy + 5); hx.lineTo(cx, cy + 2.5); hx.lineTo(cx - 4.5, cy + 5); hx.fill();

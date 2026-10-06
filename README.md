@@ -33,7 +33,7 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 | Right click | Let the string down without firing |
 | W A S D | Move · Shift sprint (limited by stamina) · Space jump · hold C to crouch |
 | 1 – 3 | The special arrows in your quiver's three slots; press the same key again (or `` ` ``) for standard arrows · mouse wheel cycles · X swaps to the last one |
-| E | Reopen the Armory at a terminal between waves · N starts the next wave early |
+| E | Reopen the Armory at a terminal between waves · hold at a Supply Drop to crack it · N starts the next wave early |
 | P / Esc | Pause |
 
 ## What's in the game
@@ -50,7 +50,8 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 - **Stamina:** sprinting lasts 5 s (up to 9 s with Sprint Stamina) and refills after a short breather; run it dry and you're winded until it's back to 30%.
 - **Difficulty keeps climbing:** zombies hit harder and move faster every wave, the mix shifts toward runners and brutes, runners come in packs from wave 6, and white-eyed **elites** (tougher, faster, double rewards) appear from wave 8.
 - **Grappling hook (Q):** fire at any wall, pole, crane or container within 36 m and get reeled toward it, keeping your momentum when it lets go (Q again cuts the rope; 8 s cooldown). You always come back down to the street, and falls over 5 m hurt, so the reticle turns green / amber / red to show what the landing will cost. X switches back to your last arrow.
-- **Field objectives:** from wave 3, most waves throw up an optional goal mid-fight: hold a **Data Uplink** ring for 20 seconds while runners converge, or destroy a **Hive Nest** that keeps birthing the infected (the wave can't end while it lives). Both pay credits and drop supplies.
+- **Field objectives:** from wave 3, most waves throw up an optional goal mid-fight (never the same one twice running): hold a **Data Uplink** ring for 20 seconds while runners converge; destroy a **Hive Nest** that keeps birthing the infected (the wave can't end while it lives); claim a **Bounty** on a named, gold-eyed **Alpha** (a souped-up elite brute or runner, marked through walls) that keeps howling up runner packs, inside 90 seconds; or reach a parachuted **Supply Drop** and hold **E** beside it for 4 seconds to crack it open (a full quiver, a top-up of every equipped special and 30 HP) before the infected loot it. All pay scrap; the objective shows on the minimap.
+- **Sector alerts:** from wave 4, about two in five regular waves come with a twist, named on the wave banner and paid for with a bigger clear bonus: **Frenzy** (runners and climbers only), **Ironclad** (brutes in force), **Swarm** (nearly twice as many at half the health), **Blood Moon** (elites everywhere, from wave 6) and **Volatile** (bodies swell and burst a moment after they drop, hurting nearby infected and you, and chaining). Never on Warden waves, and never the same alert twice in a row. Tune them in `MUTS` (`objectives.js`).
 - **Weather that changes:** every minute or two the sky shifts between dry spells, drizzle, steady rain, wind-driven downpours with lightning and thunder, and snow that settles white on the streets and melts when the rain returns. Streets soak and dry gradually.
 - **Headshots and combos.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
