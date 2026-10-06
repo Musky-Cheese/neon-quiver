@@ -12,7 +12,7 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
+const SETTINGS = { sens: 1, music: true, volMaster: 1, volSfx: 1, volMusic: 1, volAmb: 1, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const SAVED_SETTINGS = loadLS('nq_settings', {});
@@ -20,6 +20,8 @@ Object.assign(SETTINGS, SAVED_SETTINGS);
 if ('quality' in SAVED_SETTINGS && !('auto' in SAVED_SETTINGS)) SETTINGS.auto = false;   // players who picked a quality before Auto existed keep their pick
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
+const VOLS = [['volMaster', 'master'], ['volSfx', 'sfx'], ['volMusic', 'music'], ['volAmb', 'amb']];
+for (const [k, b] of VOLS) AUD.vol[b] = clamp(+SETTINGS[k] || 0, 0, 1);
 
 /* ---------------- player ---------------- */
 const REGEN = { delay: 6 };   // out of combat = 6 s without taking a hit; the rate (1 HP every 4 s at base) comes from the armory
@@ -31,6 +33,8 @@ const PLAYER = {
   hp: 100, maxHp: 100, speedMult: 1, drawTime: 1, reloadTime: 0.62, dmgMult: 1, powerMult: 1, armor: 0, quiverMax: 20, regenInt: 4, swayK: 1, recoverR: 1.3,
   stam: 5, stamMax: 5, stamT: 0, winded: false, crouch: 0, eyeH: EYE, swayX: 0, swayY: 0, ammo: newAmmo(),
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
+  // where a sound happens, for AUD's 3D panner (height defaults to roughly head level)
+  at(x, z, y) { return { x, y: y === undefined ? this.y + 1.4 : y, z }; },
   panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
@@ -266,7 +270,7 @@ function updateProjectiles(dt) {
     if (!hitKind) { a.x = nx; a.y = ny; a.z = nz; continue; }
     const hx = a.x + (nx - a.x) * best, hy = a.y + (ny - a.y) * best, hz = a.z + (nz - a.z) * best;
     if (hitKind === 'n') {
-      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.panOf(hx, hz));
+      const nd = arrowDamage(a, A); objNestDamage(nd, hx, hy, hz); GAME.hits++; AUD.hit(false, PLAYER.at(hx, hz, hy));
       if (a.type === AT.BLAST) blastAt(hx, hy, hz); else if (a.type === AT.FROST) cryoAt(hx, hy, hz, null); else if (a.type === AT.SHOCK) shockAt(hx, hy, hz, null, nd); else if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       PROJ.splice(i, 1); continue;
     }
@@ -287,7 +291,7 @@ function updateProjectiles(dt) {
       floatText(hx, hy + 0.2, hz, Math.round(dmg).toString(), hitPart !== 'body' ? '#ffd23a' : '#ffffff', hitPart !== 'body' ? 1.3 : 1);
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
-      AUD.hit(hitPart !== 'body', PLAYER.panOf(hx, hz));
+      AUD.hit(hitPart !== 'body', PLAYER.at(hx, hz, hy));
       if (killed) { GAME.hitMarker(true, true); }
       if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
       if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
@@ -784,6 +788,7 @@ const camM = M4.create();
 function step(dt) {
   GAME.time += dt; STEPN.n++;
   const t = GAME.time;
+  AUD.listen(PLAYER.x, PLAYER.y + PLAYER.eyeH, PLAYER.z, PLAYER.yaw);
   if (GAME.state === 'playing') { updatePlayer(dt); updateBow(dt, INPUT); }
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
@@ -924,6 +929,9 @@ function wireUI() {
   $('menuBtn').addEventListener('click', () => { AUD.click(); toTitle(); });
   armoryWire();
   $('musicBtn').addEventListener('click', () => { AUD.init(); SETTINGS.music = !SETTINGS.music; AUD.setMusic(SETTINGS.music); saveLS('nq_settings', SETTINGS); syncMusicBtn(); });
+  for (const [k, b] of VOLS) for (const id of [k, k + '2']) { const s = $(id); s.value = SETTINGS[k];
+    s.addEventListener('input', () => { AUD.init(); SETTINGS[k] = +s.value; $(k).value = $(k + '2').value = s.value; AUD.setVolume(b, s.value); saveLS('nq_settings', SETTINGS); });
+    if (b === 'sfx' || b === 'master') s.addEventListener('change', () => AUD.thunk()); }   // a sample hit to judge the level by
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   // 'L' is the Laptop level: a deliberately cheaper pipeline for integrated graphics (r3.js).

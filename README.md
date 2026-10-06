@@ -105,7 +105,7 @@ The readable source is in `src/`:
 - `zombies.js`: enemy types, AI and procedural animation
 - `armory.js`: the between-waves Armory: catalog and prices (`ARMORY`), what each level does (`UPG`), the quiver loadout and the screen itself
 - `game.js`: player, arrows, arrow recovery, waves, HUD and the main loop
-- `audio.js`: synthesized sound effects and music
+- `audio.js`: synthesized sound effects, ambience and music, with reverb, 3D (HRTF) positioning and per-bus volume
 - `seg.js`: the 16-segment neon lettering
 
 After editing, run `python3 build.py`. It rebuilds `index.html`.

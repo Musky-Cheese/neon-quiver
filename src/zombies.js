@@ -303,7 +303,7 @@ function updateZombies(dt, time) {
       }
     }
     z.groan -= dt;
-    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), z.type === 'brute' ? 0.7 : z.type === 'runner' ? 1.3 : 1); z.jaw = 1; }
+    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), z.type === 'brute' ? 0.7 : z.type === 'runner' ? 1.3 : 1); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
     z.atkCd -= dt;
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
@@ -332,7 +332,7 @@ function cryoHit(x, y, z, target, slowK, dur) {
   for (let k = 0; k < 26; k++) { const a = Math.random() * TAU, v = rand(1, 4); emit(x, y, z, Math.cos(a) * v, rand(0.5, 2.5), Math.sin(a) * v, rand(0.4, 0.8), [1.2, 2.4, 3.6], rand(0.04, 0.1), 2, 2, 0.1); }
   flashLight(x, Math.max(0.6, y), z, [1.4, 2.8, 4], 7, 0.35);
   for (const f of FIRES) if (Math.hypot(f.x - x, f.z - z) < 2) f.t = 0;
-  AUD.frost(PLAYER.panOf(x, z));
+  AUD.frost(PLAYER.at(x, z));
   hazFrost(x, z);   // still ices over flood water and cools a cooking fuel tank
 }
 // Shock Arrow: current arcs from the struck zombie (or the impact point) to the nearest unhit neighbour, n hops.
@@ -359,7 +359,7 @@ function shockChain(x, y, z, first, hops, dmg, stun) {
   }
   if (ARCS.length > 24) ARCS.splice(0, ARCS.length - 24);
   flashLight(x, Math.max(0.8, y), z, [1.6, 2, 5], 9, 0.25);
-  AUD.zap(PLAYER.panOf(x, z), hit.length);
+  AUD.zap(PLAYER.at(x, z), hit.length);
 }
 // arcs are drawn as a few jittered glowing segments for a fraction of a second (no extra lights, no geometry)
 function updateArcs(dt) {
@@ -387,7 +387,7 @@ function tracerMark(x, z, target, dur, radius) {
     o.markT = Math.max(o.markT, dur); n++;
   }
   burst(x, 1, z, 14, ARROWS[AT.TRACER].glow, 3, 0.4, 0.05, 0, 2);
-  AUD.tag(PLAYER.panOf(x, z));
+  AUD.tag(PLAYER.at(x, z));
   return n;
 }
 // Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
@@ -445,7 +445,7 @@ function spitAt(z, P) {
   const dx = P.x - ox, dz = P.z - oz, dist = Math.hypot(dx, dz) || 1e-3, spd = 13, t = dist / spd;
   const vx = dx / t, vz = dz / t, vy = ((P.y || 0) + 1.1 - oy) / t + 0.5 * 9.5 * t;
   ZPROJ.push({ x: ox, y: oy, z: oz, vx, vy, vz, t: 0, life: 3, dmg: 9 * (1 + Math.max(0, GAME.wave - 1) * 0.02) });
-  AUD.spit(PLAYER.panOf(z.x, z.z));
+  AUD.spit(PLAYER.at(z.x, z.z));
   emit(ox, oy, oz, vx * 0.08, vy * 0.08 + 1, vz * 0.08, 0.3, [0.4, 0.9, 0.15], 0.06, 0, 1, 0.4);
 }
 function updateZProj(dt) {
@@ -486,11 +486,11 @@ function updateSpitter(z, dt, P) {
     if (!z.hitDone && z.atkT > 0.5) { z.hitDone = true; spitAt(z, P); z.spitCd = rand(2.6, 4.2); }
     if (z.atkT >= 1) z.state = 'walk';
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.05); z.jaw = 1; }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.05); z.jaw = 1; }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 function screamPulse(z) {
-  AUD.scream(PLAYER.panOf(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
+  AUD.scream(PLAYER.at(z.x, z.z)); shakeNear(z, 0.15); flashLight(z.x, 1.6, z.z, [1.3, 0.4, 1.6], 12, 0.5);
   for (const o of zombieCandidates(z.x - 9, z.x + 9, z.z - 9, z.z + 9)) { if (o === z || o.dead || o.state === 'drop' || o.type === 'boss') continue; if (Math.hypot(o.x - z.x, o.z - z.z) < 9) o.buffT = Math.max(o.buffT, 6); }
   for (let k = 0; k < 40; k++) { const a = Math.random() * TAU, v = rand(2, 6); emit(z.x, 1.4 * z.scale, z.z, Math.cos(a) * v, rand(0.5, 2), Math.sin(a) * v, 0.6, [0.9, 0.25, 1], 0.06, 1, 2, 0.2); }
 }
@@ -517,7 +517,7 @@ function updateScreamer(z, dt, P) {
     if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK, z.x, z.z); }
     if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.4, 0.8); }
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 40) { z.groan = rand(5, 9); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.15); z.jaw = Math.max(z.jaw, 0.6); }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 40) { z.groan = rand(5, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.14 - dist / 300, 0.03, 0.14), 1.15); z.jaw = Math.max(z.jaw, 0.6); }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 function findClimbWall(z) {
@@ -547,7 +547,7 @@ function updateClimber(z, dt, P) {
     z.climbCd -= dt;
     if (z.climbCd <= 0 && dist > 7 && dist < 26) {
       const wall = findClimbWall(z);
-      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.panOf(z.x, z.z), 0.12, 1.3); }
+      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.at(z.x, z.z), 0.12, 1.3); }
       else z.climbCd = rand(2, 4);
     }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
@@ -569,7 +569,7 @@ function updateClimber(z, dt, P) {
       z.climbState = 'pounce'; z.pounceT = 0;
       const spd = Math.min(d / 0.9, 14);
       z.dvx = dx / d * spd; z.dvz = dz / d * spd; z.dvy = 3.5;
-      AUD.pounce(PLAYER.panOf(z.x, z.z));
+      AUD.pounce(PLAYER.at(z.x, z.z));
     }
   } else if (z.climbState === 'pounce') {
     z.pounceT += dt; z.dvy -= 16 * dt;
@@ -582,7 +582,7 @@ function updateClimber(z, dt, P) {
       if (pd < 2.1 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * 1.3, z.x, z.z);
     }
   }
-  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 8); groanCd = 0.6; AUD.groan(PLAYER.panOf(z.x, z.z), clamp(0.15 - dist / 300, 0.03, 0.15), 1.25); z.jaw = 1; }
+  z.groan -= dt; if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 8); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.15 - dist / 300, 0.03, 0.15), 1.25); z.jaw = 1; }
   z.jaw = Math.max(0, z.jaw - dt * 1.2);
 }
 
