@@ -463,14 +463,15 @@ async function loadModels() {
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
   cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
-  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, modelWorldMatrix, cameraProjectionMatrix } = THREE.TSL;
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, modelWorldMatrix, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
 
-/* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry every frame ---- */
+/* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry at every render call ---- */
 const NQN = {};
 for (const [k, t] of Object.entries({ uTime: 'float', uFogCol: 'color', uFogDen: 'float', uNeon: 'float', uWin: 'float', uWinWarm: 'float', uGrid: 'float', uDyn: 'float',
   uDynVM: 'float', uWet: 'float', uRimCol: 'color', uEnvK: 'float', uAirK: 'float', uZFill: 'float', uZRim: 'float', uWind: 'float', uReflOn: 'float', uRain: 'float',
-  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float', uFogFar: 'vec2' })) NQN[k] = reference('value', t, NQU[k]);
-NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4'); NQN.uTexS = uniformArray(NQU.uTexS.value, 'vec2');
+  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float', uFogFar: 'vec2' })) NQN[k] = uniform(NQU[k].value, t).setGroup(renderGroup).onRenderUpdate(() => NQU[k].value);
+// shared by every draw: uploaded once per render pass, not once per object (the per-object path cost ~25 uniforms x every draw)
+NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4').setGroup(renderGroup); NQN.uTexS = uniformArray(NQU.uTexS.value, 'vec2').setGroup(renderGroup);
 // textures: one node each, pointed at whatever NQU holds (gpuSyncTextures, every frame)
 const GPU_BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); GPU_BLACK.needsUpdate = true;
 const GPU_WHITE = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); GPU_WHITE.needsUpdate = true;
@@ -483,7 +484,7 @@ function gpuSyncTextures() {
 // point lights for the glowing air (world position + range, colour x intensity): r3.js updateLights3 fills them
 const AIR_N = 16;   // = MAX_PL (r3.js)
 const AIR = { pos: Array.from({ length: AIR_N }, () => new THREE.Vector4()), col: Array.from({ length: AIR_N }, () => new THREE.Vector4()) };
-AIR.posN = uniformArray(AIR.pos, 'vec4'); AIR.colN = uniformArray(AIR.col, 'vec4');
+AIR.posN = uniformArray(AIR.pos, 'vec4').setGroup(renderGroup); AIR.colN = uniformArray(AIR.col, 'vec4').setGroup(renderGroup);
 
 /* ---- noise (NOISE_GLSL): real WGSL functions, not inlined at each of the ~60 call sites ---- */
 const h21 = Fn(([q]) => { const p = fract(q.mul(vec2(123.34, 456.21))).toVar(); p.addAssign(dot(p, p.add(45.32))); return fract(p.x.mul(p.y)); })
@@ -538,8 +539,6 @@ class NQLighting extends THREE.PhysicalLightingModel {
     c.iblIrradiance.mulAssign(NQP.envK.mul(0.25).mul(NQP.occ)); c.radiance.mulAssign(NQP.envK.mul(mix(1, NQP.occ, 0.6))); c.irradiance.mulAssign(NQP.occ);
     super.indirect(builder);
   }
-  // a pool slot that is off, or a lamp whose range ends short of this fragment, adds exactly 0: skip its BRDF (GLSL nqLightOn)
-  direct(data, builder) { If(dot(data.lightColor, vec3(1)).greaterThan(0), () => { super.direct(data, builder); }); }
 }
 // per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
 const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
@@ -921,9 +920,10 @@ function nqSurface(material, builder) {
   }
   // alpha: the blossom cards cut their flowers out of the atlas (alpha test, or alpha-to-coverage under MSAA)
   let a = hasMap ? mapS.a : float(1);
-  if (material.alphaTest > 0) {
-    if (material.alphaToCoverage) { a = smoothstep(material.alphaTest, fwidth(a).add(material.alphaTest), a).toVar(); Discard(a.lessThanEqual(0)); }
-    else Discard(a.lessThanEqual(material.alphaTest));
+  const at = material.nqAlphaTest || material.alphaTest;
+  if (at > 0) {
+    if (material.alphaToCoverage) { a = smoothstep(at, fwidth(a).add(at), a).toVar(); Discard(a.lessThanEqual(0)); }
+    else Discard(a.lessThanEqual(at));
   }
   if (builder.isOpaque()) a = float(1);
   diffuseColor.assign(vec4(base.mul(mix(1, nqOcc, 0.55)), a));
@@ -953,6 +953,10 @@ function nqFog(material, out) {
   c.assign(mix(c, vec3(1.0, 0.95, 0.9).mul(1.5), NQP.flash));
   return vec4(c, out.a);
 }
+// an alpha-tested cutout (the blossom cards) without material.alphaTest: three copies that onto the one shared shadow /
+// AO-prepass override material per draw, and every flip across 0 bumps its version, which makes every later draw in
+// the pass rebuild its cache key. The test runs in nqSurface instead, and the shadow keeps the flower shape via a mask.
+function gpuCutout(m, at) { m.nqAlphaTest = at; m.maskShadowNode = texture(m.map).a.greaterThan(at); }
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new NQMaterial(kind); m.vertexColors = true;
   m.userData.farOK = false;   // the distant-detail fade is a Classic budget: WebGPU always draws full detail
@@ -998,6 +1002,137 @@ function coneMaterialGPU(U) {
     const fogD = d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y));
     const c = reference('value', 'color', U.uLamp).mul(facing).mul(fall).mul(streaks).mul(0.1).mul(reference('value', 'float', U.uVolK)).mul(smoothstep(0.5, 3, d)).mul(exp(fogD.mul(-0.5)));
     return vec4(c, 0);
+  })();
+  return m;
+}
+
+/* ---------------- the rest of the GLSL effects (r3.js builds the objects, these give them TSL shading) ----------------
+   Fog for these is the FOG_GLSL formula: Laptop's extra density past a start distance comes in through uFogFar. */
+const fogD = (d) => d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y));
+const fogMix = (c, d) => mix(c, NQN.uFogCol, clampT(exp(fogD(d).negate()).oneMinus().mul(0.8), 0, 1));
+function basicGPU(o) { const m = new THREE.MeshBasicNodeMaterial(o); m.fog = false; m.lights = false; return m; }
+const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
+// signs: one instanced draw per texture size and blend mode, their canvases as the layers of one texture array
+function signArrayGPU(texs) {
+  const t0 = texs[0], w = t0.image.width, h = t0.image.height, row = w * 4, d = new Uint8Array(row * h * texs.length);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d', { willReadFrequently: true });
+  texs.forEach((t, L) => {   // rows bottom-up, as the GL upload (flipY) leaves them, so the sign shader's uv maths is unchanged
+    cx.clearRect(0, 0, w, h); cx.drawImage(t.image, 0, 0); const src = cx.getImageData(0, 0, w, h).data;
+    for (let y = 0; y < h; y++) d.set(src.subarray(y * row, (y + 1) * row), (L * h + (h - 1 - y)) * row);
+  });
+  const arr = new THREE.DataArrayTexture(d, w, h, texs.length);
+  Object.assign(arr, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType, colorSpace: t0.colorSpace, generateMipmaps: true, minFilter: t0.minFilter, magFilter: t0.magFilter,
+    anisotropy: t0.anisotropy, wrapS: t0.wrapS, wrapT: t0.wrapT, premultiplyAlpha: t0.premultiplyAlpha });
+  arr.needsUpdate = true; return arr;
+}
+function signMaterialGPU(arr, add) {
+  const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // as Classic: additive signs weigh by alpha
+  m.uA = uniform(1);
+  m.fragmentNode = Fn(() => {
+    const S = attribute('iSign', 'vec3'), col = attribute('iCol', 'vec3'), T = NQN.uTime, u = uv().toVar(), flick = float(1).toVar();
+    If(S.y.greaterThan(0.5), () => {   // holo billboards: torn scanlines and a fast shimmer
+      const row = floor(u.y.oneMinus().mul(24)), g = stepT(0.93, h21(vec2(row, floor(T.mul(6)).add(S.x))));
+      u.x.addAssign(g.mul(h21(vec2(row, T)).sub(0.5)).mul(0.08)); flick.assign(sin(u.y.mul(300).add(T.mul(20))).mul(0.2).add(0.8));
+    }).Else(() => { flick.assign(stepT(0.985, h21(vec2(floor(T.mul(9)), S.x))).mul(-0.85).add(1)); });   // neon: the odd dropout
+    const t = texture(arr, u).depth(int(S.z.add(0.5)));
+    const c = fogMix(t.rgb.mul(col).mul(flick), length(positionWorld.sub(cameraPosition)));
+    return vec4(c, t.a.mul(m.uA));
+  })();
+  return m;
+}
+function decalMaterialGPU(tex) {
+  const m = basicGPU({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  m.fragmentNode = Fn(() => { const t = texture(tex, uv()); return vec4(fogMix(t.rgb, length(positionWorld.sub(cameraPosition))), t.a.mul(attribute('iAlpha', 'float'))); })();
+  return m;
+}
+// screen-facing quads standing in for GL points (WebGPU points are always one pixel): corner -> clip-space offset in pixels
+const SPRITE_QUAD = (() => { const g = new THREE.InstancedBufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3)); g.setIndex([0, 1, 2, 0, 2, 3]); return g; })();
+const spriteClip = (mv, px) => { const clip = cameraProjectionMatrix.mul(mv).toVar(); return clip.add(vec4(attribute('position', 'vec3').xy.mul(px).div(GRADE_U.uRes).mul(clip.w), 0, 0)); };
+// sparks, blood, smoke: PART.data is [pos3, colour4, size1] per particle; a negative size means alpha-blended
+function particlesGPU(data) {
+  const g = new THREE.InstancedBufferGeometry(); g.index = SPRITE_QUAD.index; g.setAttribute('position', SPRITE_QUAD.attributes.position);
+  const buf = new THREE.InstancedInterleavedBuffer(data, 8); buf.setUsage(THREE.DynamicDrawUsage);
+  g.setAttribute('ppos', new THREE.InterleavedBufferAttribute(buf, 3, 0)); g.setAttribute('pcol', new THREE.InterleavedBufferAttribute(buf, 4, 3)); g.setAttribute('psize', new THREE.InterleavedBufferAttribute(buf, 1, 7));
+  g.instanceCount = 0; g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  const m = basicGPU({ transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
+  m.uH = uniform(500);
+  const ps = attribute('psize', 'float');
+  m.vertexNode = Fn(() => { const mv = modelViewMatrix.mul(vec4(attribute('ppos', 'vec3'), 1)); return spriteClip(mv, clampT(abs(ps).mul(m.uH).div(max(mv.z.negate(), 0.05)), 1, 256)); })();
+  m.fragmentNode = Fn(() => {
+    const C = varying(attribute('pcol', 'vec4')), blend = varying(ps.lessThan(0).select(float(1), float(0))), d = length(attribute('position', 'vec3').xy).mul(0.5);
+    const out = vec4(0).toVar();
+    If(blend.greaterThan(0.5), () => { const s = smoothstep(0.5, 0.3, d).mul(C.a); out.assign(vec4(C.rgb.mul(s), s)); })
+      .Else(() => { const a = smoothstep(0.5, 0, d); out.assign(vec4(C.rgb.mul(a.mul(a)).mul(C.a), 0)); });
+    return out;
+  })();
+  m.uniforms = { uH: m.uH };   // r3.js sets it like the GLSL material's
+  const mesh = new THREE.Mesh(g, m); mesh.userData.buf = buf; return mesh;
+}
+// rain: the drop buffer wrapped round the camera, falling, slanted by the wind, dry under ceilings (r3.js rainGeo)
+const RAIN_U = { uAlpha: uniform(0.5), uRainCol: uniform(new THREE.Color()), uDens: uniform(0.7), uWind: uniform(0.4) };
+const SNOW_U = { uAlpha: uniform(0.9), uCol: uniform(new THREE.Color()), uDens: uniform(0), uWind: uniform(0.3), uPx: uniform(1) };
+const indoorAt = (x, z, y) => NQN.uOccB.z.greaterThan(0).select(stepT(0.5, TEXN.indoor.sample(vec2(x, z).sub(NQN.uOccB.xy).mul(NQN.uOccB.zw)).level(0).r).mul(stepT(y, 4.6)), float(0));
+function rainGPU(geo) {
+  const U = RAIN_U, m = new THREE.LineBasicNodeMaterial({ transparent: true, depthWrite: false, ...ADD }); m.fog = false;
+  const P = attribute('position', 'vec3'), a2 = attribute('aP2', 'vec2'), T = NQN.uTime, cp = cameraPosition, S = 50;
+  const x = gmod(P.x.sub(cp.x), float(S)).sub(S * 0.5).add(cp.x), z = gmod(P.y.sub(cp.z), float(S)).sub(S * 0.5).add(cp.z);
+  const y = gmod(P.z.sub(T.mul(a2.x.mul(8).add(24)).mul(U.uDens.mul(0.3).add(0.85))), float(36)).sub(6).add(cp.y);
+  const patchD = sin(x.mul(0.09).add(T.mul(0.35))).mul(sin(z.mul(0.075).sub(T.mul(0.27)))).mul(0.5).add(0.5);
+  const dens = clampT(U.uDens.mul(patchD.mul(0.6).add(0.7)), 0, 1), rnd = fract(a2.x.mul(7.31).add(P.x.mul(0.137)).add(P.y.mul(0.071)));
+  const K = stepT(rnd, dens).mul(fract(rnd.mul(13.7)).mul(0.8).add(0.45)).mul(indoorAt(x, z, y).oneMinus());
+  const wind = U.uWind.mul(0.32).add(0.08).add(sin(T.mul(1.3).add(P.y.mul(0.21))).mul(0.12)), len = fract(rnd.mul(5.3)).mul(0.9).add(0.55).mul(0.9);
+  m.positionNode = vec3(x.add(a2.y.mul(wind).mul(len).mul(2)), y.add(a2.y.mul(len)), z.add(a2.y.mul(0.05)));
+  m.fragmentNode = vec4(U.uRainCol.mul(U.uAlpha).mul(varying(a2.y).mul(0.7).add(0.3)).mul(varying(K)), 0);
+  m.uniforms = U; return m;
+}
+// snow: one soft flake per drop that swirls and rides the wind (instanced quads over the drops' first vertices)
+function snowGPU(rainGeo, n) {
+  const g = new THREE.InstancedBufferGeometry(); g.index = SPRITE_QUAD.index; g.setAttribute('position', SPRITE_QUAD.attributes.position);
+  const src = rainGeo.attributes.position.array, a2 = rainGeo.attributes.aP2.array, p = new Float32Array(n * 3), s = new Float32Array(n);
+  for (let i = 0; i < n; i++) { p.set(src.subarray(i * 6, i * 6 + 3), i * 3); s[i] = a2[i * 4]; }
+  g.setAttribute('dpos', new THREE.InstancedBufferAttribute(p, 3)); g.setAttribute('dseed', new THREE.InstancedBufferAttribute(s, 1));
+  g.instanceCount = n; g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  const U = SNOW_U, m = basicGPU({ transparent: true, depthWrite: false, ...ADD });
+  const P = attribute('dpos', 'vec3'), sd = attribute('dseed', 'float'), T = NQN.uTime, cp = cameraPosition, S = 24;
+  const rnd = fract(sd.mul(7.31).add(P.x.mul(0.137)).add(P.y.mul(0.071)));
+  const sw = sin(T.mul(rnd.add(0.7)).add(P.x.mul(3.1))).mul(0.7), sw2 = cos(T.mul(rnd.mul(0.8).add(0.5)).add(P.y.mul(2.3))).mul(0.5);
+  const x = gmod(P.x.mul(0.48).add(U.uWind.mul(T).mul(3)).add(sw).sub(cp.x), float(S)).sub(S * 0.5).add(cp.x);
+  const z = gmod(P.y.mul(0.48).add(sw2).sub(cp.z), float(S)).sub(S * 0.5).add(cp.z);
+  const y = gmod(P.z.mul(0.55).sub(T.mul(rnd.mul(1.1).add(1.3))), float(20)).sub(4).add(cp.y);
+  const K = stepT(rnd, U.uDens).mul(fract(rnd.mul(13.7)).mul(0.5).add(0.5)).mul(indoorAt(x, z, y).oneMinus());
+  m.vertexNode = Fn(() => {
+    const mv = cameraViewMatrix.mul(vec4(x, y, z, 1));
+    const px = K.greaterThan(0).select(clampT(U.uPx.mul(fract(rnd.mul(5.3)).mul(0.07).add(0.07)).div(max(mv.z.negate(), 0.1)).mul(1000), 1.5, U.uPx.mul(16)), float(0));
+    return spriteClip(mv, px);
+  })();
+  m.fragmentNode = Fn(() => { const d = length(attribute('position', 'vec3').xy).mul(0.5); return vec4(U.uCol.mul(smoothstep(0.5, 0.12, d).mul(varying(K)).mul(U.uAlpha)), 0); })();
+  m.uniforms = U; return new THREE.Mesh(g, m);
+}
+// halos round bulbs: camera-facing quads pushed toward the eye, faded with distance and fog
+function haloMaterialGPU(VU) {
+  const m = basicGPU({ transparent: true, depthWrite: false, ...ADD });
+  const hp = attribute('hp', 'vec4'), hc = attribute('hc', 'vec3'), c = cameraViewMatrix.mul(vec4(hp.xyz, 1)), vD = varying(c.z.negate());
+  m.vertexNode = cameraProjectionMatrix.mul(vec4(c.xy.add(attribute('position', 'vec3').xy.mul(hp.w)), c.z.add(hp.w.mul(0.4)), c.w));
+  m.fragmentNode = Fn(() => {
+    const r = length(uv().sub(0.5)).mul(2), a = exp(r.mul(r).mul(-5)).mul(r.oneMinus()).mul(smoothstep(0.3, 2.5, vD));
+    const col = varying(hc.x.lessThan(0).select(reference('value', 'color', VU.uLamp).mul(0.35), hc));
+    return vec4(col.mul(max(a, 0)).mul(0.35).mul(reference('value', 'float', VU.uVolK)).mul(exp(fogD(vD).mul(-0.4))), 0);
+  })();
+  return m;
+}
+// shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down
+function glassMaterialGPU() {
+  const m = basicGPU({ transparent: true, depthWrite: false });
+  m.fragmentNode = Fn(() => {
+    const W = positionWorld, V = normalize(cameraPosition.sub(W)), N = normalize(normalWorldGeometry), ndv = abs(dot(N, V)), T = NQN.uTime, R = NQN.uRain;
+    const fr = pow(ndv.oneMinus(), 5).mul(0.96).add(0.04), fc = select(abs(N.x).greaterThan(0.5), W.zy, W.xy);
+    const beads = smoothstep(0.8, 0.95, vn(fc.mul(vec2(26, 14)))).mul(R.mul(0.6).add(0.3));
+    const runs = smoothstep(0.6, 0.95, vn(vec2(fc.x.mul(11), fc.y.mul(0.6).add(T.mul(0.25))))).mul(R);
+    const grime = smoothstep(1.1, 0, W.y).mul(0.5).add(smoothstep(0.55, 0.8, vn(fc.mul(1.3))).mul(0.25));
+    const refl = NQN.uFogCol.mul(2.2).add(NQN.uRimCol.mul(0.2)).add(0.02);
+    const col = attribute('color', 'vec3').mul(0.04).add(refl.mul(fr.add(0.08))).add(vec3(0.55, 0.6, 0.7).mul(beads.mul(0.07).add(runs.mul(0.06)))).add(vec3(0.05, 0.045, 0.04).mul(grime));
+    const a = clampT(fr.mul(0.75).add(0.07).add(grime.mul(0.25)).add(beads.mul(0.06)).add(runs.mul(0.06)), 0, 0.9);
+    return vec4(fogMix(col, length(W.sub(cameraPosition))), a);
   })();
   return m;
 }
@@ -1079,7 +1214,7 @@ const GPU_PROF = { names: new Map(), acc: {}, shadowCams: new Set(), busy: false
 class GPUProfInspector extends THREE.InspectorBase {
   beginRender(uid, scn, cam, rt) {
     let n;
-    if (GPU_PROF.tag) n = GPU_PROF.tag; else if (cam === camera) n = GPOST.pre && rt === GPOST.pre.renderTarget ? 'ao prepass' : 'world'; else if (cam === vmCamera) n = 'bow'; else if (GPU_PROF.shadowCams.has(cam)) n = 'shadows';
+    if (GPU_PROF.shadowCams.has(cam)) n = 'shadows'; else if (GPU_PROF.tag) n = GPU_PROF.tag; else if (cam === camera) n = GPOST.pre && rt === GPOST.pre.renderTarget ? 'ao prepass' : 'world'; else if (cam === vmCamera) n = 'bow';
     else { const s = (scn && scn.name) || ''; n = /Bloom/.test(s) ? 'bloom' : /AO|Denoise/.test(s) ? 'gtao' : /Render Pipeline/.test(s) ? 'grade' : 'post'; }
     GPU_PROF.names.set(uid, n);
   }
@@ -6012,7 +6147,7 @@ function releaseRig(z) {
 const _zset = new Set();
 function syncRigs() {
   _zset.clear(); for (const z of ZOMBIES) _zset.add(z);
-  for (const z of ZRIG.live) if (!_zset.has(z)) releaseRig(z);
+  for (const z of ZRIG.live) if (!_zset.has(z) && !z.warm) releaseRig(z);   // z.warm: warmShaders' stand-in body
 }
 
 function zAction(r, name) {
@@ -6367,7 +6502,6 @@ function signArray(texs) {
   return arr;
 }
 function buildSigns() {
-  return;   // preview: GL texture-array upload + GLSL sign shader, not ported yet
   const groups = new Map();
   for (const s of WORLD.signs) {
     const k = s.tex.image.width + 'x' + s.tex.image.height + (s.add ? '+' : '');
@@ -6377,10 +6511,10 @@ function buildSigns() {
   }
   for (const g of groups.values()) {
     const n = g.list.length;
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: signArray(g.texs) }, uTime: NQU.uTime, uA: { value: 1 }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol },
-      vertexShader: SIGN_VS, fragmentShader: SIGN_FS, transparent: g.add, depthWrite: !g.add, blending: g.add ? THREE.AdditiveBlending : THREE.NoBlending, side: THREE.DoubleSide });
+    const mat = signMaterialGPU(signArrayGPU(g.texs), g.add);
     fogMat(mat);
-    const geo = new THREE.InstancedBufferGeometry(); geo.index = PLANE.index; for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
+    const geo = new THREE.BufferGeometry(); geo.index = PLANE.index;   // WebGPU reads an InstancedBufferGeometry's own instanceCount, not the mesh's count
+    for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
@@ -6416,7 +6550,7 @@ ${FOG_GLSL}
 void main(){ vec4 t=texture2D(uTex,vUV); vec3 c=t.rgb; float d=length(vW-cameraPosition); c=mix(c,uFogCol,clamp((1.-exp(-NQ_FOGD(d)))*.8,0.,1.)); gl_FragColor=vec4(c,t.a*vA); }`;
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
-    const mat = new THREE.ShaderMaterial({ uniforms: { uTex: { value: DECAL_TEX[v] }, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uFogCol: NQU.uFogCol }, vertexShader: vs, fragmentShader: fs, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const mat = decalMaterialGPU(DECAL_TEX[v]);
     fogMat(mat);
     const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
     scene.add(m); DECAL_POOL.push(m);
@@ -6443,65 +6577,19 @@ function syncDecals() {
 }
 
 /* ---------------- particles + rain ---------------- */
-const partGeo = new THREE.BufferGeometry();
-const partBuf = new THREE.InterleavedBuffer(PART.data, 8); partBuf.setUsage(THREE.DynamicDrawUsage);
-partGeo.setAttribute('position', new THREE.InterleavedBufferAttribute(partBuf, 3, 0));
-partGeo.setAttribute('pcol', new THREE.InterleavedBufferAttribute(partBuf, 4, 3));
-partGeo.setAttribute('psize', new THREE.InterleavedBufferAttribute(partBuf, 1, 7));
-const partMat = new THREE.ShaderMaterial({
-  uniforms: { uH: { value: 500 } }, transparent: true, depthWrite: false,
-  blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
-  vertexShader: `attribute vec4 pcol; attribute float psize; uniform float uH; varying vec4 vC; varying float vBlend;
-void main(){ vec4 v = modelViewMatrix*vec4(position,1.); gl_Position = projectionMatrix*v; gl_PointSize = clamp(abs(psize)*uH/max(-v.z,0.05), 1., 256.); vC = pcol; vBlend = psize < 0. ? 1. : 0.; }`,
-  fragmentShader: `precision mediump float; varying vec4 vC; varying float vBlend;
-void main(){ vec2 c = gl_PointCoord-0.5; float d = length(c); float a = smoothstep(0.5,0.0,d);
-  if (vBlend > 0.5) { float s = smoothstep(0.5,0.3,d)*vC.a; gl_FragColor = vec4(vC.rgb*s, s); } else { a *= a; gl_FragColor = vec4(vC.rgb*a*vC.a, 0.); } }`,
-});
-const partPoints = new THREE.Points(partGeo, partMat); partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
+const partPoints = particlesGPU(PART.data), partBuf = partPoints.userData.buf, partGeo = partPoints.geometry, partMat = partPoints.material;
+partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
 
 const rainGeo = (function () {
   const p = new Float32Array(RAIN_N * 2 * 3), a = new Float32Array(RAIN_N * 2 * 2);
   for (let i = 0; i < RAIN_N; i++) { const x = Math.random() * 50, z = Math.random() * 50, y = Math.random() * 36, s = Math.random(); for (let e = 0; e < 2; e++) { const o = i * 2 + e; p[o * 3] = x; p[o * 3 + 1] = z; p[o * 3 + 2] = y; a[o * 2] = s; a[o * 2 + 1] = e; } }
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
-const rainMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.5 }, uRainCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0.7 }, uWind: { value: 0.4 } }, transparent: true, depthWrite: false,
-  blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime, uDens, uWind; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vA, vK;
-void main(){ float S = 50.;
-  float x = mod(position.x - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
-  float z = mod(position.y - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
-  float y = mod(position.z - uTime*(24.+aP2.x*8.)*(0.85 + 0.3*uDens), 36.) - 6. + cameraPosition.y;
-  // how much falls is the weather's call (weather.js); drifting patches keep it uneven, gusts swing the slant
-  float spell = uWind;
-  float patchD = 0.5 + 0.5 * sin(x * 0.09 + uTime * 0.35) * sin(z * 0.075 - uTime * 0.27);
-  float dens = clamp(uDens * (0.7 + 0.6 * patchD), 0., 1.);
-  float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
-  vK = step(rnd, dens) * (0.45 + 0.8 * fract(rnd * 13.7));
-  if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);   // dry under a ceiling
-  float wind = 0.08 + 0.32 * spell + 0.12 * sin(uTime * 1.3 + position.y * 0.21), len = 0.9 * (0.55 + 0.9 * fract(rnd * 5.3));
-  vec3 p = vec3(x + aP2.y * wind * len * 2., y + aP2.y * len, z + aP2.y * 0.05); vA = aP2.y;
-  gl_Position = projectionMatrix*viewMatrix*vec4(p,1.); }`,
-  fragmentShader: `precision mediump float; varying float vA, vK; uniform float uAlpha; uniform vec3 uRainCol; void main(){ gl_FragColor = vec4(uRainCol*uAlpha*(0.3+vA*0.7)*vK, 0.); }`,
-});
+const rainMat = rainGPU(rainGeo);
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
-const snowMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: NQU.uTime, uAlpha: { value: 0.9 }, uCol: { value: new THREE.Color() }, uIndoor: NQU.uIndoor, uOccB: NQU.uOccB, uDens: { value: 0 }, uWind: { value: 0.3 }, uPx: { value: 1 } },
-  transparent: true, depthWrite: false, blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-  vertexShader: `attribute vec2 aP2; uniform float uTime, uDens, uWind, uPx; uniform sampler2D uIndoor; uniform vec4 uOccB; varying float vK;
-void main(){ float S = 24.; float rnd = fract(aP2.x * 7.31 + position.x * 0.137 + position.y * 0.071);
-  float sw = sin(uTime * (0.7 + rnd) + position.x * 3.1) * 0.7, sw2 = cos(uTime * (0.5 + rnd * 0.8) + position.y * 2.3) * 0.5;
-  float x = mod(position.x * 0.48 + uWind * uTime * 3. + sw - cameraPosition.x, S) - S*0.5 + cameraPosition.x;
-  float z = mod(position.y * 0.48 + sw2 - cameraPosition.z, S) - S*0.5 + cameraPosition.z;
-  float y = mod(position.z * 0.55 - uTime*(1.3 + rnd * 1.1), 20.) - 4. + cameraPosition.y;
-  vK = step(rnd, uDens) * step(aP2.y, 0.5) * (0.5 + 0.5 * fract(rnd * 13.7));
-  if (uOccB.z > 0.) vK *= 1. - step(0.5, texture2D(uIndoor, (vec2(x, z) - uOccB.xy) * uOccB.zw).r) * step(y, 4.6);
-  vec4 mv = viewMatrix * vec4(x, y, z, 1.); gl_Position = projectionMatrix * mv;
-  gl_PointSize = vK > 0. ? clamp(uPx * (0.07 + 0.07 * fract(rnd * 5.3)) / max(-mv.z, 0.1) * 1000., 1.5, 16. * uPx) : 0.; }`,
-  fragmentShader: `precision mediump float; varying float vK; uniform float uAlpha; uniform vec3 uCol; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.12, d) * vK * uAlpha; gl_FragColor = vec4(uCol * a, 0.); }`,
-});
-const snowPts = new THREE.Points(rainGeo, snowMat); snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
+const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
+snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -6836,7 +6924,7 @@ function blossomAtlas() {
 }
 function buildBlossoms() {
   const B = WORLD.blossoms, N = B.length / 12; if (!N) return;
-  const mat = nqMaterial('static'); mat.map = blossomAtlas(); mat.alphaTest = 0.42; mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
+  const mat = nqMaterial('static'); mat.map = blossomAtlas(); gpuCutout(mat, 0.42); mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
   mat.defines.NQ_CARDS = 1; mat.needsUpdate = true;
   const cells = new Map(), CELL = 64;
   for (let i = 0; i < N; i++) { const k = Math.floor(B[i * 12] / CELL) + ',' + Math.floor(B[i * 12 + 2] / CELL); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(i); }
@@ -7008,27 +7096,7 @@ function buildWorld3() {
 function buildGlass() {
   if (!WORLD.glass.length) return;
   const gg = new Geo(); for (const q of WORLD.glass) gg.box(q.m, q.c, 0, 0);
-  const mat = new THREE.ShaderMaterial({
-    uniforms: { uTime: NQU.uTime, uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar, uRimCol: NQU.uRimCol, uRain: NQU.uRain },
-    transparent: true, depthWrite: false, vertexColors: true,
-    vertexShader: `varying vec3 vW, vN, vC; void main(){ vec4 w = modelMatrix*vec4(position,1.); vW = w.xyz; vN = normalize(mat3(modelMatrix)*normal); vC = color; gl_Position = projectionMatrix*viewMatrix*w; }`,
-    fragmentShader: `precision highp float; varying vec3 vW, vN, vC; uniform float uTime, uFogDen, uRain; uniform vec3 uFogCol, uRimCol;
-${FOG_GLSL}
-
-${NOISE_GLSL}
-void main(){
-  vec3 V = normalize(cameraPosition - vW), N = normalize(vN); float ndv = abs(dot(N, V));
-  float fr = 0.04 + 0.96 * pow(1. - ndv, 5.);
-  vec2 fc = abs(N.x) > 0.5 ? vW.zy : vW.xy;
-  float beads = smoothstep(0.8, 0.95, vn(fc * vec2(26., 14.))) * (0.3 + uRain * 0.6);
-  float runs = smoothstep(0.6, 0.95, vn(vec2(fc.x * 11., fc.y * 0.6 + uTime * 0.25))) * uRain;
-  float grime = smoothstep(1.1, 0.0, vW.y) * 0.5 + smoothstep(0.55, 0.8, vn(fc * 1.3)) * 0.25;
-  vec3 refl = uFogCol * 2.2 + uRimCol * 0.2 + vec3(0.02);
-  vec3 col = vC * 0.04 + refl * (fr + 0.08) + vec3(0.55, 0.6, 0.7) * (beads * 0.07 + runs * 0.06) + vec3(0.05, 0.045, 0.04) * grime;
-  float a = clamp(0.07 + fr * 0.75 + grime * 0.25 + beads * 0.06 + runs * 0.06, 0., 0.9);
-  float d = length(vW - cameraPosition); col = mix(col, uFogCol, clamp((1. - exp(-NQ_FOGD(d))) * 0.8, 0., 1.));
-  gl_FragColor = vec4(col, a);
-}` });
+  const mat = glassMaterialGPU();
   const chunks = spatialChunks(gg.build());
   for (let i = 0; i < chunks.length; i++) {
     if (i === 0) fogMat(mat);
@@ -7177,15 +7245,7 @@ function buildVolumes() {
     const m = new THREE.Mesh(g, coneMat); m.name = 'cones'; m.renderOrder = 8; m.frustumCulled = true; m.matrixAutoUpdate = false;
     scene.add(m); CONES.push(m);
   }
-  const mat = new THREE.ShaderMaterial({
-    uniforms: Object.assign({ uFogCol: NQU.uFogCol, uFogDen: NQU.uFogDen, uFogFar: NQU.uFogFar }, VOL_U), transparent: true, depthWrite: false,
-    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor,
-    vertexShader: `attribute vec4 hp; attribute vec3 hc; uniform vec3 uLamp; varying vec2 vUv; varying vec3 vC; varying float vD;
-void main(){ vec4 c = viewMatrix * vec4(hp.xyz, 1.); vD = -c.z; c.xy += position.xy * hp.w; c.z += hp.w * 0.4; vUv = uv; vC = hc.x < 0. ? uLamp * 0.35 : hc; gl_Position = projectionMatrix * c; }`,
-    fragmentShader: `precision mediump float; varying vec2 vUv; varying vec3 vC; varying float vD; uniform float uVolK, uFogDen;
-${FOG_GLSL}
-
-void main(){ float r = length(vUv - 0.5) * 2.; float a = exp(-r * r * 5.) * (1. - r) * smoothstep(0.3, 2.5, vD); gl_FragColor = vec4(vC * max(a, 0.) * 0.35 * uVolK * exp(-NQ_FOGD(vD) * 0.4), 0.); }` });
+  const mat = haloMaterialGPU(VOL_U);
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
   const quad = new THREE.PlaneGeometry(1, 1);
   for (const H of WORLD.halos.length ? [WORLD.halos] : []) {
@@ -7207,6 +7267,7 @@ const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
 NQU.uRefl.value = BLACK_TEX;
+const MIRROR_NEAR = 70, MIRROR_SMALL = /^(props|garden|forest|suburbs|glass|blossoms)/, _mirrorOff = [];
 function renderReflection(r) {
   const k = SETTINGS.laptop ? 0.38 : SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // Laptop keeps the wet look at roughly quarter pixel cost
   const resized = reflRT.width !== W || reflRT.height !== H;
@@ -7232,7 +7293,13 @@ function renderReflection(r) {
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
   for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
+  // WebGPU pays per draw on the CPU: small street props, trees and shopfront glass far from the eye can't be told
+  // apart in a rippled, half-resolution puddle, so the mirror leaves those chunks out past MIRROR_NEAR (buildings,
+  // signs, the skyline and anything nearby still reflect)
+  const mirrorOff = _mirrorOff; mirrorOff.length = 0;
+  for (const m of WORLD_MESHES) if (m.visible && MIRROR_SMALL.test(m.name)) { const c = m.geometry.boundingSphere; if (c && (c.center.x - PLAYER.x) ** 2 + (c.center.z - PLAYER.z) ** 2 > (MIRROR_NEAR + c.radius) ** 2) { m.visible = false; mirrorOff.push(m); } }
   farSuspend(); r.render(scene, reflCam); farResume();
+  for (const m of mirrorOff) m.visible = true;
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
@@ -7325,8 +7392,7 @@ function applyQuality3(q) {
 // Scene passes draw into render targets, whose program keys differ from the screen's, so compile against one.
 // Materials that may have no object yet (the bow viewmodel, instanced items) get a throwaway stand-in mesh.
 function warmShaders() {
-  R3.warm = { programs: 0, ms: 0 }; return;   // preview: pipelines build on first use
-  const t0 = performance.now(), before = renderer.info.programs.length;
+  const t0 = performance.now(), progs = () => NQ_GPU === 'webgpu' ? renderer.info.memory.programs : renderer.info.programs.length, before = progs();
   const g = new THREE.BufferGeometry(), n = 3;
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
@@ -7335,15 +7401,17 @@ function warmShaders() {
   stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
-  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5 } : null;
+  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {
-    renderer.setRenderTarget(msRT || (composer && composer.readBuffer) || null);
-    renderer.compile(scene, camera); renderer.compile(scene, vmCamera);
+    // WebGPU builds a pipeline per pass (mirror, world, bow, shadows, AO prepass) the first time it draws a material:
+    // draw one frame now with every stand-in in it, plus a spark and a smoke puff for the particle pipeline
+    emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
+    R3.warming = true; render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
-  R3.warm = { programs: renderer.info.programs.length - before, ms: Math.round(performance.now() - t0) };
+  finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }
 
 /* ---------------- per-frame sync + render ---------------- */
@@ -7378,10 +7446,10 @@ function render3(time, W, H, fov, cam) {
   updateLights3(cam);
   // dynamic geometry
   flushList(WORLD_ITEMS, false); flushList(VM_ITEMS, true);
-  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8); partGeo.setDrawRange(0, PART.n);
+  partBuf.needsUpdate = true; partBuf.updateRanges.length = 0; partBuf.addUpdateRange(0, Math.max(1, PART.n) * 8);
+  partGeo.instanceCount = PART.n;   // 0 skips the draw
   partMat.uniforms.uH.value = H / (2 * Math.tan(fov * Math.PI / 360));
   syncDecals();
-  gpuUnported();   // before the env capture renders the scene too
   GPU_PROF.tag = 'env map';
   updateEnv(cam);
   GPU_PROF.tag = null;
@@ -7401,14 +7469,8 @@ function render3(time, W, H, fov, cam) {
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try { composer.render(); } finally { scene.matrixWorldAutoUpdate = true; }
 }
-/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ----
-   Not ported yet (Phase 3) and kept off this renderer: the GLSL signs, decals, particles, rain, snow, halos and
-   shopfront glass. They sit on a layer no camera draws. */
-const _clr = new THREE.Color(); let _unportedN = -1;
-function gpuUnported() {
-  if (scene.children.length === _unportedN) return; _unportedN = scene.children.length;
-  scene.traverse((o) => { if (o.material && o.material.isShaderMaterial) o.layers.set(31); });
-}
+/* ---- the WebGPU frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ---- */
+const _clr = new THREE.Color();
 function renderGPU(T, W, H, time) {
   if (!GPOST.pipe || GPOST.key !== SETTINGS.quality + ':' + (SETTINGS.laptop ? 1 : 0)) buildPostGPU(SETTINGS.quality, !!SETTINGS.laptop);
   gpuSyncTextures();
@@ -7417,7 +7479,7 @@ function renderGPU(T, W, H, time) {
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = SETTINGS.quality === 0 ? 0.2 : SETTINGS.quality >= 2 ? 0.45 : 0.35;
   const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2 * (SETTINGS.laptop ? 1.15 : 1); B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
-  vmCamera.layers.set(VM_ITEMS.n > 0 && !DBG.noVM ? LAYER_VM : 30);
+  vmCamera.layers.set((VM_ITEMS.n > 0 && !DBG.noVM) || R3.warming ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
     GPU_PROF.tag = 'reflection';

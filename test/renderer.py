@@ -57,8 +57,10 @@ with sync_playwright() as p:
     check(pg.evaluate('document.getElementById("renderer").value') == 'webgpu', 'Settings shows WebGPU')
     pg.evaluate('NQ.play(); NQ.run(120)'); shot(pg, '3-play-webgpu')
     check(pg.evaluate('!!(NQ.GPOST.pipe && NQ.GPOST.world && NQ.GPOST.bloom)'), 'TSL post pipeline built (world, bow, bloom, grade)')
-    check(pg.evaluate('NQ.scene.children.filter(o => o.isMesh && o.material && o.material.isShaderMaterial && o.layers.mask & 1).length') == 0, 'no GLSL material left where a camera draws')
+    check(pg.evaluate('(() => { let n = 0; NQ.scene.traverse(o => { if (o.material && o.material.isShaderMaterial) n++; }); return n; })()') == 0, 'no GLSL material left in the scene')
     check(pg.evaluate('NQ.scene.children.some(o => o.isMesh && o.geometry.parameters && o.geometry.parameters.radius === 1000 && o.material.isNodeMaterial)'), 'sky dome is a node material')
+    check(pg.evaluate("NQ.scene.children.filter(o => (o.name === 'signs' || o.name === 'signsAdd') && o.material.isNodeMaterial).length") > 0, 'neon signs drawn by node materials')
+    check(pg.evaluate('NQ.R3.warm && NQ.R3.warm.programs') > 0, 'shaders warmed at load: %s' % pg.evaluate('JSON.stringify(NQ.R3.warm)'))
     real = [e for e in errs(E)]
     check(not real, 'no console errors on WebGPU ' + str(real[:4]))
     print('4. Settings → Renderer on the pause screen asks first, then reloads into Classic')

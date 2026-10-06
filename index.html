@@ -503,9 +503,9 @@ button, select, input { font-family: var(--f); }
    writes the import map for that build, then loads game-webgpu.js or game-webgl.js. Only one ever downloads.
    ============================================================ */
 (function () {
-  var BUNDLES = {"webgl": "game-webgl.js?v=d481ed69f1", "webgpu": "game-webgpu.js?v=b7e37b4876"};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
-  // The WebGPU build is a partial port (roadmap Phase 2: the shared material, sky, cones, mirror and post chain): it
-  // is offered, but Classic stays the preselected choice until the port is complete. Flip this when it is, and rename the storage key so everyone is asked again.
+  var BUNDLES = {"webgl": "game-webgl.js?v=ba089e6bb1", "webgpu": "game-webgpu.js?v=d348972a99"};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
+  // The WebGPU build draws everything Classic does (roadmap Phase 3) but is still being tuned for CPU cost: it is
+  // offered, but Classic stays the preselected choice until it is. Flip this when it is, and rename the storage key so everyone is asked again.
   var WEBGPU_PREVIEW = true, KEY = 'nq_renderer';
   var MAPS = {
     webgl: { 'three': './vendor/three.module.js', 'three/addons/': './vendor/addons/' },
@@ -587,7 +587,7 @@ button, select, input { font-family: var(--f); }
     go.addEventListener('click', launch);
     probe().then(function (r) {
       opts.webgpu.disabled = !r.ok;
-      $('bootGPUs').textContent = !r.ok ? r.why : r.soft ? 'Works here, but on a software adapter: expect it to be slow.' : WEBGPU_PREVIEW ? 'Ready. Preview: the city’s look is ported, signs, rain and particles aren’t yet.' : 'Ready on this GPU.';
+      $('bootGPUs').textContent = !r.ok ? r.why : r.soft ? 'Works here, but on a software adapter: expect it to be slow.' : WEBGPU_PREVIEW ? 'Ready. Preview: fully ported, still being tuned for speed.' : 'Ready on this GPU.';
       $('bootGPU').classList.toggle('na', !r.ok || !!r.soft);
       pick(best(r));
     });
