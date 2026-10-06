@@ -182,6 +182,13 @@ function dynL(p, r, cr, cg, cb) { const e = dynE(); e.p = p; e.r = r; e.c[0] = c
 function dynP(x, y, z, r, cr, cg, cb) { const e = dynE(); e.p = e.own; e.own[0] = x; e.own[1] = y; e.own[2] = z; e.r = r; e.c[0] = cr; e.c[1] = cg; e.c[2] = cb; }
 const byD = (a, b) => a.d - b.d;
 const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p[2] - cam[2]);
+// Static lights (shops, rooms, doorways) outnumber the pool indoors. Picking the N nearest every frame made rooms
+// swap their light on every step, so each one carries a fade weight (fw): the chosen set eases in/out, and a lit
+// light keeps its slot until an unlit one is clearly closer (STAT_STICK on d²). The static budget is fixed, so arrows
+// and pickups coming and going never push a room light out.
+const STAT_PL = 11, DYN_MIN = 2, STAT_FADE = 4, STAT_STICK = 0.6;
+const _statLit = []; let _statT = 0;
+const byFD = (a, b) => a.fd - b.fd;
 function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
@@ -209,8 +216,21 @@ function updateLights3(cam) {
     s.color.setRGB(T.lamp[0], T.lamp[1], T.lamp[2]); s.intensity = PL_K * l.r * 1.35; s.distance = l.r + 6;
   }
   // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
-  _stat.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) if (l.kind !== 'lamp' && d2c(l.p, cam) < 55 * 55) _stat.push(l);
-  _stat.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  const now = performance.now(), fdt = Math.min(0.1, Math.max(0, (now - _statT) / 1000)); _statT = now;
+  _stat.length = 0;
+  for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) {
+    if (l.kind === 'lamp') continue;
+    const d = d2c(l.p, cam); if (d >= 55 * 55) continue;
+    l.fd = l.fw > 0 ? d * STAT_STICK : d; l.ftick = R3.tick; _stat.push(l);
+  }
+  for (const l of _statLit) if (l.ftick !== R3.tick) { l.fd = Infinity; l.ftick = R3.tick; _stat.push(l); }   // out of range: fade out
+  _stat.sort(byFD);
+  _statLit.length = 0;
+  for (let i = 0; i < _stat.length; i++) {
+    const l = _stat[i], on = i < STAT_PL && l.fd !== Infinity;
+    l.fw = Math.min(1, Math.max(0, (l.fw || 0) + (on ? fdt : -fdt) * STAT_FADE));
+    if (l.fw > 0) _statLit.push(l);
+  }
   _dyn.length = 0; _dynN = 0;
   for (const d of DLIGHTS) { const k = d.life / d.max; dynL(d.p, d.r, d.c[0] * k, d.c[1] * k, d.c[2] * k); }
   for (const a of PROJ) if (!a.stuck && a.type !== 0) { const g = ARROWS[a.type].glow; dynP(a.x, a.y, a.z, 7, g[0] * 0.5, g[1] * 0.5, g[2] * 0.5); }
@@ -224,10 +244,14 @@ function updateLights3(cam) {
   let n = 0;
   const lightCap = MAX_PL;
   if (GAME.state !== 'title') { const g = ARROWS[BOW.type].glow; const hl = PL[n++]; setPL(hl, [BOW.handWorld[0] || cam[0], (BOW.handWorld[1] || cam[1]) + 0.25, BOW.handWorld[2] || cam[2]], [g[0] * 0.15 + 0.12, g[1] * 0.15 + 0.1, g[2] * 0.15 + 0.18], 2.2); hl.intensity *= 0.3; }
-  const nStat = Math.min(_stat.length, 8);
-  for (let i = 0; i < nStat && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
+  // lit static lights first (chosen ones, then any still fading out); a fade-out that doesn't fit is dropped
+  const statCap = lightCap - DYN_MIN;
+  for (const l of _statLit) {
+    if (n >= statCap) { l.fw = 0; continue; }
+    const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c;
+    const pl = PL[n++]; setPL(pl, l.p, c, l.r); pl.intensity *= l.fw;
+  }
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
-  for (let i = nStat; i < _stat.length && n < lightCap; i++) { const l = _stat[i]; const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c; setPL(PL[n++], l.p, c, l.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
   for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
 }
