@@ -173,7 +173,7 @@ function releaseRig(z) {
 const _zset = new Set();
 function syncRigs() {
   _zset.clear(); for (const z of ZOMBIES) _zset.add(z);
-  for (const z of ZRIG.live) if (!_zset.has(z)) releaseRig(z);
+  for (const z of ZRIG.live) if (!_zset.has(z) && !z.warm) releaseRig(z);   // z.warm: warmShaders' stand-in body
 }
 
 function zAction(r, name) {

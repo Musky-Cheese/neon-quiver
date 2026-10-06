@@ -5930,7 +5930,7 @@ function releaseRig(z) {
 const _zset = new Set();
 function syncRigs() {
   _zset.clear(); for (const z of ZOMBIES) _zset.add(z);
-  for (const z of ZRIG.live) if (!_zset.has(z)) releaseRig(z);
+  for (const z of ZRIG.live) if (!_zset.has(z) && !z.warm) releaseRig(z);   // z.warm: warmShaders' stand-in body
 }
 
 function zAction(r, name) {
@@ -7382,7 +7382,7 @@ function warmShaders() {
   stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
-  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5 } : null;
+  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {

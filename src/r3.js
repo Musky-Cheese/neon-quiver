@@ -656,7 +656,11 @@ function blossomAtlas() {
 }
 function buildBlossoms() {
   const B = WORLD.blossoms, N = B.length / 12; if (!N) return;
+//#if webgl
   const mat = nqMaterial('static'); mat.map = blossomAtlas(); mat.alphaTest = 0.42; mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
+//#else
+  const mat = nqMaterial('static'); mat.map = blossomAtlas(); gpuCutout(mat, 0.42); mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
+//#endif
   mat.defines.NQ_CARDS = 1; mat.needsUpdate = true;
   const cells = new Map(), CELL = 64;
   for (let i = 0; i < N; i++) { const k = Math.floor(B[i * 12] / CELL) + ',' + Math.floor(B[i * 12 + 2] / CELL); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(i); }
@@ -1067,6 +1071,9 @@ const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
 NQU.uRefl.value = BLACK_TEX;
+//#if webgpu
+const MIRROR_NEAR = 70, MIRROR_SMALL = /^(props|garden|forest|suburbs|glass|blossoms)/, _mirrorOff = [];
+//#endif
 function renderReflection(r) {
   const k = SETTINGS.laptop ? 0.38 : SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // Laptop keeps the wet look at roughly quarter pixel cost
   const resized = reflRT.width !== W || reflRT.height !== H;
@@ -1096,7 +1103,17 @@ function renderReflection(r) {
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
   for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
+//#if webgpu
+  // WebGPU pays per draw on the CPU: small street props, trees and shopfront glass far from the eye can't be told
+  // apart in a rippled, half-resolution puddle, so the mirror leaves those chunks out past MIRROR_NEAR (buildings,
+  // signs, the skyline and anything nearby still reflect)
+  const mirrorOff = _mirrorOff; mirrorOff.length = 0;
+  for (const m of WORLD_MESHES) if (m.visible && MIRROR_SMALL.test(m.name)) { const c = m.geometry.boundingSphere; if (c && (c.center.x - PLAYER.x) ** 2 + (c.center.z - PLAYER.z) ** 2 > (MIRROR_NEAR + c.radius) ** 2) { m.visible = false; mirrorOff.push(m); } }
+//#endif
   farSuspend(); r.render(scene, reflCam); farResume();
+//#if webgpu
+  for (const m of mirrorOff) m.visible = true;
+//#endif
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
@@ -1303,7 +1320,7 @@ function warmShaders() {
   stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
-  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5 } : null;
+  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {

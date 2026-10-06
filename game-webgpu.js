@@ -539,8 +539,6 @@ class NQLighting extends THREE.PhysicalLightingModel {
     c.iblIrradiance.mulAssign(NQP.envK.mul(0.25).mul(NQP.occ)); c.radiance.mulAssign(NQP.envK.mul(mix(1, NQP.occ, 0.6))); c.irradiance.mulAssign(NQP.occ);
     super.indirect(builder);
   }
-  // a pool slot that is off, or a lamp whose range ends short of this fragment, adds exactly 0: skip its BRDF (GLSL nqLightOn)
-  direct(data, builder) { If(dot(data.lightColor, vec3(1)).greaterThan(0), () => { super.direct(data, builder); }); }
 }
 // per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
 const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
@@ -922,9 +920,10 @@ function nqSurface(material, builder) {
   }
   // alpha: the blossom cards cut their flowers out of the atlas (alpha test, or alpha-to-coverage under MSAA)
   let a = hasMap ? mapS.a : float(1);
-  if (material.alphaTest > 0) {
-    if (material.alphaToCoverage) { a = smoothstep(material.alphaTest, fwidth(a).add(material.alphaTest), a).toVar(); Discard(a.lessThanEqual(0)); }
-    else Discard(a.lessThanEqual(material.alphaTest));
+  const at = material.nqAlphaTest || material.alphaTest;
+  if (at > 0) {
+    if (material.alphaToCoverage) { a = smoothstep(at, fwidth(a).add(at), a).toVar(); Discard(a.lessThanEqual(0)); }
+    else Discard(a.lessThanEqual(at));
   }
   if (builder.isOpaque()) a = float(1);
   diffuseColor.assign(vec4(base.mul(mix(1, nqOcc, 0.55)), a));
@@ -954,6 +953,10 @@ function nqFog(material, out) {
   c.assign(mix(c, vec3(1.0, 0.95, 0.9).mul(1.5), NQP.flash));
   return vec4(c, out.a);
 }
+// an alpha-tested cutout (the blossom cards) without material.alphaTest: three copies that onto the one shared shadow /
+// AO-prepass override material per draw, and every flip across 0 bumps its version, which makes every later draw in
+// the pass rebuild its cache key. The test runs in nqSurface instead, and the shadow keeps the flower shape via a mask.
+function gpuCutout(m, at) { m.nqAlphaTest = at; m.maskShadowNode = texture(m.map).a.greaterThan(at); }
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new NQMaterial(kind); m.vertexColors = true;
   m.userData.farOK = false;   // the distant-detail fade is a Classic budget: WebGPU always draws full detail
@@ -6144,7 +6147,7 @@ function releaseRig(z) {
 const _zset = new Set();
 function syncRigs() {
   _zset.clear(); for (const z of ZOMBIES) _zset.add(z);
-  for (const z of ZRIG.live) if (!_zset.has(z)) releaseRig(z);
+  for (const z of ZRIG.live) if (!_zset.has(z) && !z.warm) releaseRig(z);   // z.warm: warmShaders' stand-in body
 }
 
 function zAction(r, name) {
@@ -6921,7 +6924,7 @@ function blossomAtlas() {
 }
 function buildBlossoms() {
   const B = WORLD.blossoms, N = B.length / 12; if (!N) return;
-  const mat = nqMaterial('static'); mat.map = blossomAtlas(); mat.alphaTest = 0.42; mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
+  const mat = nqMaterial('static'); mat.map = blossomAtlas(); gpuCutout(mat, 0.42); mat.alphaToCoverage = true; mat.side = THREE.DoubleSide;
   mat.defines.NQ_CARDS = 1; mat.needsUpdate = true;
   const cells = new Map(), CELL = 64;
   for (let i = 0; i < N; i++) { const k = Math.floor(B[i * 12] / CELL) + ',' + Math.floor(B[i * 12 + 2] / CELL); if (!cells.has(k)) cells.set(k, []); cells.get(k).push(i); }
@@ -7264,6 +7267,7 @@ const _S = new THREE.Matrix4().makeScale(1, -1, 1);
 const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
 const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
 NQU.uRefl.value = BLACK_TEX;
+const MIRROR_NEAR = 70, MIRROR_SMALL = /^(props|garden|forest|suburbs|glass|blossoms)/, _mirrorOff = [];
 function renderReflection(r) {
   const k = SETTINGS.laptop ? 0.38 : SETTINGS.quality >= 2 ? 1 : 0.7, W = Math.max(4, Math.round(R3.W * k)), H = Math.max(4, Math.round(R3.H * k));   // Laptop keeps the wet look at roughly quarter pixel cost
   const resized = reflRT.width !== W || reflRT.height !== H;
@@ -7289,7 +7293,13 @@ function renderReflection(r) {
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
   for (const z of ZRIG.live) if (z.rig && (z.dead || (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2 > 10000)) { if (z.rig.mesh.visible) hiddenRigs.push(z.rig.mesh); z.rig.mesh.visible = false; }
+  // WebGPU pays per draw on the CPU: small street props, trees and shopfront glass far from the eye can't be told
+  // apart in a rippled, half-resolution puddle, so the mirror leaves those chunks out past MIRROR_NEAR (buildings,
+  // signs, the skyline and anything nearby still reflect)
+  const mirrorOff = _mirrorOff; mirrorOff.length = 0;
+  for (const m of WORLD_MESHES) if (m.visible && MIRROR_SMALL.test(m.name)) { const c = m.geometry.boundingSphere; if (c && (c.center.x - PLAYER.x) ** 2 + (c.center.z - PLAYER.z) ** 2 > (MIRROR_NEAR + c.radius) ** 2) { m.visible = false; mirrorOff.push(m); } }
   farSuspend(); r.render(scene, reflCam); farResume();
+  for (const m of mirrorOff) m.visible = true;
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
   NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
@@ -7391,7 +7401,7 @@ function warmShaders() {
   stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
-  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5 } : null;
+  const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
   const prev = renderer.getRenderTarget();
   try {

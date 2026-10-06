@@ -85,8 +85,6 @@ class NQLighting extends THREE.PhysicalLightingModel {
     c.iblIrradiance.mulAssign(NQP.envK.mul(0.25).mul(NQP.occ)); c.radiance.mulAssign(NQP.envK.mul(mix(1, NQP.occ, 0.6))); c.irradiance.mulAssign(NQP.occ);
     super.indirect(builder);
   }
-  // a pool slot that is off, or a lamp whose range ends short of this fragment, adds exactly 0: skip its BRDF (GLSL nqLightOn)
-  direct(data, builder) { If(dot(data.lightColor, vec3(1)).greaterThan(0), () => { super.direct(data, builder); }); }
 }
 // per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
 const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
@@ -468,9 +466,10 @@ function nqSurface(material, builder) {
   }
   // alpha: the blossom cards cut their flowers out of the atlas (alpha test, or alpha-to-coverage under MSAA)
   let a = hasMap ? mapS.a : float(1);
-  if (material.alphaTest > 0) {
-    if (material.alphaToCoverage) { a = smoothstep(material.alphaTest, fwidth(a).add(material.alphaTest), a).toVar(); Discard(a.lessThanEqual(0)); }
-    else Discard(a.lessThanEqual(material.alphaTest));
+  const at = material.nqAlphaTest || material.alphaTest;
+  if (at > 0) {
+    if (material.alphaToCoverage) { a = smoothstep(at, fwidth(a).add(at), a).toVar(); Discard(a.lessThanEqual(0)); }
+    else Discard(a.lessThanEqual(at));
   }
   if (builder.isOpaque()) a = float(1);
   diffuseColor.assign(vec4(base.mul(mix(1, nqOcc, 0.55)), a));
@@ -500,6 +499,10 @@ function nqFog(material, out) {
   c.assign(mix(c, vec3(1.0, 0.95, 0.9).mul(1.5), NQP.flash));
   return vec4(c, out.a);
 }
+// an alpha-tested cutout (the blossom cards) without material.alphaTest: three copies that onto the one shared shadow /
+// AO-prepass override material per draw, and every flip across 0 bumps its version, which makes every later draw in
+// the pass rebuild its cache key. The test runs in nqSurface instead, and the shadow keeps the flower shape via a mask.
+function gpuCutout(m, at) { m.nqAlphaTest = at; m.maskShadowNode = texture(m.map).a.greaterThan(at); }
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new NQMaterial(kind); m.vertexColors = true;
   m.userData.farOK = false;   // the distant-detail fade is a Classic budget: WebGPU always draws full detail
