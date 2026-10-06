@@ -7008,11 +7008,13 @@ function buildOcclusion() {
   NQU.uIndoor.value = tin;
 }
 
-/* ---------------- environment: one cube capture per district, swapped as you walk ---------------- */
+/* ---------------- environment: one cube capture per district, swapped as you walk ----------------
+   scene.environment is set once and never swapped: WebGPURenderer rebuilds every object's render state, in every pass,
+   when the scene's environment texture changes (well over a second on a fast desktop). Each district keeps its own
+   cube capture; crossing into it re-convolves that cube into the one PMREM target the scene points at. */
 let pmrem = null;
-const ENV = { cache: {}, cur: null, old: null, vis: true, refl: 0 };
-const cubeRT = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType });
-const cubeCam = new THREE.CubeCamera(0.5, 1200, cubeRT); scene.add(cubeCam);
+const ENV = { cubes: {}, done: {}, live: null, cur: null, vis: true, refl: 0 };   // done: districts whose cube shows the current Look
+const cubeCam = new THREE.CubeCamera(0.5, 1200, new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType })); scene.add(cubeCam);
 // Hide what must not be baked into the cube (particles, rain, zombies, instanced batches) for one face render.
 function envHide(on) {
   if (on) { ENV.vis = partPoints.visible; partPoints.visible = false; rainLines.visible = false; snowPts.visible = false; ENV.refl = NQU.uReflOn.value; NQU.uReflOn.value = 0; }
@@ -7020,38 +7022,30 @@ function envHide(on) {
   for (const z of ZRIG.live) if (z.rig) z.rig.mesh.visible = !on;
   for (const m of BATCHES[0].values()) if (m.im) m.im.visible = on ? false : m.n > 0;
 }
-function envFace(face) {   // one cube face, exactly as CubeCamera.update renders it
+function envFace(rt, face) {   // one cube face, exactly as CubeCamera.update renders it
   const prevT = renderer.getRenderTarget(), env = scene.environment; scene.environment = null;
   if (cubeCam.coordinateSystem !== renderer.coordinateSystem) { cubeCam.coordinateSystem = renderer.coordinateSystem; cubeCam.updateCoordinateSystem(); }
   cubeCam.updateMatrixWorld(true);
   envHide(true); if (face === 0) renderer.shadowMap.needsUpdate = true;
-  const gm = cubeRT.texture.generateMipmaps; if (face < 5) cubeRT.texture.generateMipmaps = false;   // mips build on the last face
-  renderer.setRenderTarget(cubeRT, face); renderer.render(scene, cubeCam.children[face]);
-  envHide(false); cubeRT.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
+  const gm = rt.texture.generateMipmaps; if (face < 5) rt.texture.generateMipmaps = false;   // mips build on the last face
+  renderer.setRenderTarget(rt, face); renderer.render(scene, cubeCam.children[face]);
+  envHide(false); rt.texture.generateMipmaps = gm; renderer.setRenderTarget(prevT); scene.environment = env;
 }
-function envFinish(d) {
-  if (ENV.cache[d.id]) ENV.cache[d.id].dispose();
-  ENV.cache[d.id] = pmrem.fromCubemap(cubeRT.texture);
-  return ENV.cache[d.id];
-}
-function captureEnv(d) {   // all six faces, then the PMREM, in one frame
-  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+function captureEnv(d) {   // all six faces of this district's cube, in one frame
+  const rt = ENV.cubes[d.id] || (ENV.cubes[d.id] = new THREE.CubeRenderTarget(128, { type: THREE.HalfFloatType }));
   cubeCam.position.set(d.env[0], d.env[1], d.env[2]);
-  for (let f = 0; f < 6; f++) envFace(f);
-  return envFinish(d);
+  for (let f = 0; f < 6; f++) envFace(rt, f);
+  return rt;
 }
 function updateEnv(cam) {
-  if (ENV_DIRTY) {   // new Look: every capture is stale. Keep the one on screen alive until its replacement is ready.
-    for (const k in ENV.cache) if (ENV.cache[k].texture !== scene.environment) ENV.cache[k].dispose(); else ENV.old = ENV.cache[k];
-    ENV.cache = {}; ENV_DIRTY = false;
-  }
+  if (ENV_DIRTY) { ENV.done = {}; ENV.cur = null; ENV_DIRTY = false; }   // new Look: every capture is stale (the cubes are kept and redrawn)
   const d = districtAt(cam[0], cam[2]);
-  let rt = ENV.cache[d.id];
-  if (!rt) rt = captureEnv(d);
-  if (rt && scene.environment !== rt.texture) {
-    scene.environment = rt.texture;
-    if (ENV.old && ENV.old !== rt) { ENV.old.dispose(); ENV.old = null; }
-  }
+  if (ENV.cur === d.id) return;
+  if (!pmrem) pmrem = new THREE.PMREMGenerator(renderer);
+  if (!ENV.done[d.id]) { captureEnv(d); ENV.done[d.id] = true; }
+  ENV.live = pmrem.fromCubemap(ENV.cubes[d.id].texture, ENV.live);   // into the same target every time
+  if (scene.environment !== ENV.live.texture) scene.environment = ENV.live.texture;
+  ENV.cur = d.id;
 }
 
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
