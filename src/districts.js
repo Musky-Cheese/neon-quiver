@@ -169,8 +169,9 @@ function buildDistricts(C) {
   // entrance arch
   for (const az of [-6.5, 6.5]) { B(76, 3.5, az, 0.5, 7, 0.5, [0.25, 0.05, 0.05], 0, 4); WORLD.circles.push({ x: 76, z: az, r: 0.35, h: 7 }); }
   B(76, 7.2, 0, 0.6, 0.5, 14.5, [0.25, 0.05, 0.05], 0, 4);
-  addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  B(76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each NIGHT MARKET sign reads on its own side, not mirrored through the other
+  addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
+  addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(billboardTexture(2), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
   WORLD.supplies.push({ kind: 'terminal', x: 79, z: 25, ry: Math.PI / 2 + 0.3, d: 'market' }, { kind: 'cache', x: 134, z: -2, d: 'market' }, { kind: 'cache', x: 108, z: -27, d: 'market' });
 
@@ -604,7 +605,10 @@ function buildDistricts(C) {
     addSign(signTexture('SUBURBS', '#29e7ff', 'font'), 106.25, 8.3, 116, Math.PI / 2, 8, 2, [1.3, 1.3, 1.3], 0, true);
     { const bx = 110.8, bz = 124.6; B(bx, 1.4, bz, 3, 2.8, 3, [0.16, 0.16, 0.17], 0, 8); B(bx - 1.52, 1.7, bz, 0.04, 1.0, 2.2, [0.3, 0.4, 0.42], 0.8); B(bx, 2.95, bz, 3.4, 0.2, 3.4, DARK, 0, 4); solid(bx - 1.5, bx + 1.5, 0, 2.8, bz - 1.5, bz + 1.5);
       WORLD.lights.push({ p: [bx - 2.5, 2.2, bz], r: 8, c: [0.9, 1.1, 1.2], shop: true }); }
-    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, DARK, 0, 4); rot(108.6, 3.2, 118.9, 0.14, 4.6, 0.14, [0.8, 0.1, 0.08], 0.3, 0, 0.55, 0, 0);   // the boom, left up
+    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, DARK, 0, 4); B(108.6, 1.32, 121.1, 0.42, 0.34, 0.5, [0.75, 0.62, 0.08], 0, 8);   // the boom, left up: hinged on its post, striped, no glow
+    { const a = 0.48, py = 1.38, pz = 121.1, dy = Math.cos(a), dz = -Math.sin(a);
+      for (let i = 0; i < 9; i++) { const t = 0.3 + i * 0.5; rot(108.6, py + dy * t, pz + dz * t, 0.12, 0.5, 0.12, i % 2 ? [0.72, 0.7, 0.66] : [0.62, 0.06, 0.05], 0, 8, -a, 0, 0); }
+      rot(108.6, py - dy * 0.35, pz - dz * 0.35, 0.26, 0.45, 0.26, DARK, 0, 4, -a, 0, 0); }   // counterweight
     WORLD.circles.push({ x: 108.6, z: 121.1, r: 0.2, h: 1.2 });
     addSign(signTexture('DANGER  FLAMMABLE', '#ff3040', 'panel'), 107.85, 2.1, 103, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);
     addSign(signTexture('NO NAKED FLAMES', '#ff3040', 'panel'), 107.85, 2.1, 129, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);

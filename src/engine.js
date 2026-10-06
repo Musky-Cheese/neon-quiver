@@ -229,7 +229,7 @@ uniform float uTime, uWind;`)
 #else
   vNqC = vec4(color.rgb, 1.0); vNqM = nqm;
 #ifdef USE_INSTANCING_COLOR
-  vNqC.rgb *= instanceColor;   // per-instance paint (Meshy cars)
+  if (nqm.y > 24.5 && nqm.y < 25.5) vNqC.rgb *= instanceColor;   // per-instance paint (Meshy cars): paint only, not glass or tyres
 #endif
 #endif
 #ifdef NQ_INST
@@ -611,6 +611,21 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
   } else if (mat > 23.5 && mat < 24.5) {    // beacons and hazard lights: a short flash on each light's own beat
     float ph = h21(floor(vNqW.xz * 0.5) + floor(vNqW.y * 0.25)), cyc = fract(uTime * (0.5 + 0.35 * ph) + ph);
     emis *= 0.06 + 1.7 * smoothstep(0., 0.04, cyc) * (1. - smoothstep(0.16, 0.34, cyc)); rimK = 0.;
+  } else if (mat > 24.5 && mat < 25.5) {    // wreck paint (Meshy cars): years-old, faded on top, rusting at the arches and sills
+    float wear = vNqM.x; emis = iemit * dynK;   // nqm.x is the baked wear mask here, not a glow
+    float n1 = vn(vNqW.xz * 2.3 + vNqW.y * 1.7), n2 = vnf(fcW * 7.3 + N0.xz * 3.1);
+    float oxid = smoothstep(0.35, 0.95, N0.y) * (0.5 + 0.5 * n1);   // sun-baked hood and roof: chalky, paler, duller
+    base = mix(base, vec3(dot(base, vec3(0.333))) * 1.2 + 0.025, oxid * 0.5);
+    float rustM = smoothstep(0.62, 0.9, wear * 0.7 + n1 * 0.45 + n2 * 0.3) + smoothstep(0.86, 0.95, n2) * 0.6;
+    rustM = clamp(rustM, 0., 1.);
+    base = mix(base, mix(vec3(0.15, 0.06, 0.025), vec3(0.3, 0.12, 0.04), n2), rustM);
+    float dirt = smoothstep(0.85, 0.12, vNqW.y) * (0.5 + 0.5 * n1);
+    base = mix(base, vec3(0.045, 0.04, 0.035), dirt * 0.6);
+    float scr = smoothstep(0.93, 1.0, vnf(vec2(fcW.x * 38., fcW.y * 2.5 + N0.y * 7.)));
+    base += scr * 0.05 * (1. - rustM);
+    rough = mix(mix(0.28, 0.55, oxid), 0.92, max(rustM, dirt * 0.8)) + streak * 0.05 * wetK;
+    metal = 0.22 * (1. - rustM); envK = uEnvK * mix(1.5, 0.25, max(rustM, dirt)); rimK = 0.9;
+    bumpH = -scr * 0.0008 + rustM * n2 * 0.003;
   } else if (mat > 4.5 && mat < 5.5) {      // hologram
     float sl = 0.65 + 0.35*sin(vNqW.y*60. + uTime*8.);
     emis += base*sl*1.6; base *= 0.0;

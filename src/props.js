@@ -22,7 +22,7 @@ function pFoot(x, z, ry, lx0, lx1, lz0, lz1, y1) {
 /* Wrecked cars are Meshy models now (r3.js loadMeshyCars): every spot that used to get a procedural car records a
    spot instead. The old builder still runs into a throwaway mesh so it rolls the same dice and the rest of the
    city's random layout doesn't shift; its collision circles stay, its pod lights don't. */
-const CAR_PAINTS = [[0.55, 0.06, 0.07], [0.06, 0.18, 0.5], [0.62, 0.62, 0.6], [0.75, 0.52, 0.04], [0.07, 0.3, 0.14], [0.6, 0.22, 0.04], [0.33, 0.34, 0.36], [0.04, 0.04, 0.05], [0.32, 0.06, 0.4], [0.05, 0.38, 0.42]];
+const CAR_PAINTS = [[0.493, 0.102, 0.087], [0.131, 0.189, 0.348], [0.725, 0.711, 0.652], [0.696, 0.551, 0.232], [0.261, 0.319, 0.203], [0.58, 0.29, 0.116], [0.348, 0.362, 0.377], [0.072, 0.072, 0.08], [0.609, 0.551, 0.435], [0.189, 0.319, 0.334]];   // faded, sun-bleached paints: these cars have sat in the rain for years
 function propHoverCar(g, R, x, z, ry, paint, variant = 0) {
   const h = WORLD.halos.length; propHoverCarProc(new Geo(), R, x, z, ry, paint, variant); WORLD.halos.length = h;
   const n = WORLD.carSpots.length, k = ((Math.floor(x * 7.31) * 73856093) ^ (Math.floor(z * 3.17) * 19349663)) >>> 0;

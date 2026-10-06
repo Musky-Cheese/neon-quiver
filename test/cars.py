@@ -13,7 +13,7 @@ with sync_playwright() as p:
     spots = pg.evaluate(f"""() => {{ const N = window.NQ; N.SETTINGS.quality = {Q}; N.play(); N.clear(); N.noLoop(true);
       return N.WORLD.carSpots.map(s => [s.x, s.z, s.kind]); }}""")
     print(len(spots), 'cars:', sum(1 for s in spots if s[2] == 'van'), 'vans')
-    pick = [s for s in spots if abs(s[0]) < 70 and abs(s[1]) < 70][:6]
+    pick = [s for s in spots if abs(s[0]) < 70 and abs(s[1]) < 70][:int(sys.argv[3]) if len(sys.argv) > 3 else 6]
     tiles = []
     for i, (x, z, k) in enumerate(pick):
         a = 0.6 + i * 1.1; d = 7.5; cx, cz = x + math.sin(a) * d, z + math.cos(a) * d
@@ -21,7 +21,7 @@ with sync_playwright() as p:
         url = pg.evaluate(f"""() => {{ const N = window.NQ; N.pose({{ x: {cx}, z: {cz}, y: 0, yaw: {yaw}, pitch: -0.12, roll: 0 }}); N.DBG.noVM = true;
           for (let i = 0; i < 3; i++) N.renderOnce(); return document.getElementById('gl').toDataURL('image/jpeg', 0.85); }}""")
         tiles.append(Image.open(io.BytesIO(base64.b64decode(url.split(',')[1]))).resize((400, 225)))
-    print('errors:', errs[:6])
+    print('errors:', errs[:int(sys.argv[3]) if len(sys.argv) > 3 else 6])
     g = Image.new('RGB', (1200, 450))
     for i, t in enumerate(tiles): g.paste(t, ((i % 3) * 400, (i // 3) * 225))
     g.save(out, quality=82); b.close()
