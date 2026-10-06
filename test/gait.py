@@ -8,7 +8,7 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 1280, 'height': 400}); E = []
     pg.on('pageerror', lambda e: E.append(str(e)))
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
-    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=120000)
+    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=600000, polling=500)
     pg.evaluate("""(L) => { const N = window.NQ; N.SETTINGS.quality = 2; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; N.setTheme(L);
       const G = [['walker','walk','shirt'],['walker','walk_b','jacket'],['walker','walk_c','bloat'],['runner','run','lean'],['runner','run_b','shirt'],['brute','heavy','shirt']];
       window.__zs = G.map(([k, g, top], i) => { const z = N.spawnZombie(k, 0, 24 + i * 1.6, 3); z.gait = g; z.top = top; z.bare = top === 'lean'; z.seed = i * 5.1; z.z0 = z.z; return z; }); }""", LOOK)

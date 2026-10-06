@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Neon Quiver</title>
 <meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">
+<script type="importmap">{"imports":{"three":"./vendor/three.webgpu.js","three/webgpu":"./vendor/three.webgpu.js","three/tsl":"./vendor/three.tsl.js","three/addons/":"./vendor/addons/"}}</script>
+<link rel="modulepreload" href="vendor/three.webgpu.js">
+<link rel="modulepreload" href="vendor/three.core.js">
 <meta property="og:title" content="Neon Quiver">
 <meta property="og:description" content="Draw. Release. Survive the horde. A first-person archer vs. zombies game in a rain-soaked cyberpunk city.">
 <meta property="og:image" content="https://musky-cheese.github.io/neon-quiver/ads/social-1200x628.jpg">
@@ -121,6 +124,8 @@ button, select, input { font-family: var(--f); }
 .settings.audio { display: grid; grid-template-columns: repeat(2, max-content); }
 .settings.audio label { justify-content: space-between; }
 .settings select { background: #120d22; color: var(--ink); border: 1px solid var(--line); padding: 5px 8px; font-size: 12px; letter-spacing: 0.1em; }
+.settings .setting-ro { display: flex; gap: 8px; align-items: center; }
+.settings .setting-ro b { font-weight: 400; color: var(--ink); letter-spacing: 0.08em; text-transform: none; }
 .linkbtn { appearance: none; background: none; border: 1px solid var(--line); color: var(--ink); padding: 6px 10px; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; cursor: pointer; }
 .linkbtn:hover, .linkbtn:focus-visible { border-color: var(--cyan); color: var(--cyan); outline: none; }
 .bests { display: flex; gap: 28px; }
@@ -240,11 +245,6 @@ button, select, input { font-family: var(--f); }
 
 #swWarn { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--amber); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
 #swWarn b { color: var(--amber); }
-#gpuNote { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50; width: min(640px, calc(100% - 32px)); box-sizing: border-box; display: flex; gap: 16px; align-items: center; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--cyan); color: var(--ink); font-size: 14px; line-height: 1.45; letter-spacing: 0.02em; user-select: text; }
-#gpuNote b { color: var(--cyan); }
-#gpuNote code { display: block; margin-top: 4px; font-size: 12px; color: var(--dim); word-break: break-word; }
-#gpuNote .btn { padding: 8px 16px; font-size: 13px; flex: none; }
-#gpuNote:not([hidden]) ~ #swWarn { top: 128px; }
 #swWarn code { font-size: 13px; color: var(--cyan); }
 #swWarn .btn { padding: 8px 16px; font-size: 13px; flex: none; }
 #sysErr { position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 16px; background: rgba(7, 8, 15, 0.92); font-family: "Chakra Petch", var(--f); color: #EEF1F8; }
@@ -270,26 +270,6 @@ button, select, input { font-family: var(--f); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
-/* ---------------- boot: renderer choice (src/boot.js) ---------------- */
-#scr-boot { z-index: 40; background: radial-gradient(ellipse at 30% 20%, rgba(255, 46, 136, 0.12), transparent 55%), radial-gradient(ellipse at 80% 90%, rgba(41, 231, 255, 0.1), transparent 50%), var(--bg); padding: clamp(16px, 5vh, 56px) 16px; }
-.boot-panel { place-self: center; width: min(760px, 100%); display: grid; gap: 18px; }
-.boot-title { margin: 0; font-size: clamp(44px, 8vw, 84px); line-height: 0.95; font-weight: 700; font-style: italic; letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 28px rgba(255, 46, 136, 0.35); }
-.boot-title span { color: var(--mag); text-shadow: 0 0 22px rgba(255, 46, 136, 0.7); }
-.boot-lead { margin: 0; font-size: clamp(16px, 1.5vw, 19px); line-height: 1.4; color: var(--ink); max-width: 62ch; }
-.boot-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-.boot-opt { --c: var(--cyan); appearance: none; text-align: left; font: inherit; color: var(--ink); cursor: pointer; display: grid; grid-template-columns: 1fr auto; align-content: start; gap: 6px 12px; padding: 18px 20px 16px; background: var(--panel); border: 1px solid var(--line); position: relative; clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
-#bootGPU { --c: var(--mag); }
-.boot-opt::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--c); box-shadow: 0 0 10px var(--c); opacity: 0.35; transition: opacity 0.15s; }
-.boot-opt:hover:not(:disabled), .boot-opt:focus-visible { border-color: color-mix(in srgb, var(--c) 55%, transparent); outline: none; }
-.boot-opt[aria-checked=true] { border-color: var(--c); background: color-mix(in srgb, var(--c) 9%, rgba(11, 8, 22, 0.9)); box-shadow: inset 0 0 28px -12px var(--c); }
-.boot-opt[aria-checked=true]::before { opacity: 1; }
-.boot-opt:disabled { cursor: not-allowed; opacity: 0.55; }
-.boot-name { font-size: 26px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
-.boot-tag { align-self: center; font-size: 11px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--c); }
-.boot-desc { grid-column: 1 / -1; font-size: 14px; line-height: 1.4; color: var(--dim); }
-.boot-stat { grid-column: 1 / -1; font-size: 12px; letter-spacing: 0.08em; color: var(--lime); min-height: 1.4em; }
-.boot-opt.na .boot-stat { color: var(--amber); }
-#bootGo { justify-self: start; }
 
 </style>
 </head>
@@ -322,8 +302,9 @@ button, select, input { font-family: var(--f); }
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
-        <label for="renderer">Renderer <select id="renderer"><option value="webgpu">WebGPU</option><option value="webgl">WebGL2 (Classic)</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="2" selected>High</option><option value="3">Ultra</option></select></label>
+        <label for="res">Resolution <select id="res"><option value="auto" selected>Auto</option><option value="100">100%</option><option value="85">85%</option><option value="75">75%</option><option value="67">67%</option><option value="50">50%</option></select></label>
+        <span class="setting-ro">Renderer <b id="backend">…</b></span>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="settings audio">
@@ -373,8 +354,9 @@ button, select, input { font-family: var(--f); }
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
-        <label for="renderer2">Renderer <select id="renderer2"><option value="webgpu">WebGPU</option><option value="webgl">WebGL2 (Classic)</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="2" selected>High</option><option value="3">Ultra</option></select></label>
+        <label for="res2">Resolution <select id="res2"><option value="auto" selected>Auto</option><option value="100">100%</option><option value="85">85%</option><option value="75">75%</option><option value="67">67%</option><option value="50">50%</option></select></label>
+        <span class="setting-ro">Renderer <b id="backend2">…</b></span>
       </div>
       <div class="settings audio" style="justify-content:center">
         <label for="volMaster2">Volume <input id="volMaster2" type="range" min="0" max="1" step="0.05" value="1"></label>
@@ -432,27 +414,6 @@ button, select, input { font-family: var(--f); }
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
-  <!-- first visit: pick the renderer (src/boot.js) before the game module loads -->
-  <section id="scr-boot" class="screen" hidden aria-labelledby="bootH">
-    <div class="boot-panel">
-      <div class="eyebrow">Sector 7 · Before you go in</div>
-      <h1 class="boot-title" id="bootH">Neon <span>Quiver</span></h1>
-      <p class="boot-lead">Pick how the city is drawn. You can change it any time in Settings → Renderer.</p>
-      <div class="boot-opts" role="radiogroup" aria-label="Renderer">
-        <button type="button" class="boot-opt" id="bootGPU" role="radio" aria-checked="false" aria-describedby="bootGPUs">
-          <span class="boot-name">WebGPU</span><span class="boot-tag">Next generation</span>
-          <span class="boot-desc">The new renderer, built for high-end GPUs. New effects land here first.</span>
-          <span class="boot-stat" id="bootGPUs"></span>
-        </button>
-        <button type="button" class="boot-opt" id="bootGL" role="radio" aria-checked="true">
-          <span class="boot-name">WebGL2</span><span class="boot-tag">Classic</span>
-          <span class="boot-desc">The original renderer, with every quality tier from Fast to Ultra. Runs in any current browser.</span>
-          <span class="boot-stat">Ready.</span>
-        </button>
-      </div>
-      <div class="row"><button class="btn primary" id="bootGo" type="button">Start</button></div>
-    </div>
-  </section>
   <!-- crash / GPU-reset screen: plain script, so it still works if the game module never loads -->
   <div id="sysErr" role="alert" hidden>
     <div class="sys-panel">
@@ -472,8 +433,7 @@ button, select, input { font-family: var(--f); }
       var e = document.getElementById('sysErr'), ng = document.getElementById('nogl'); if (!e || (ng && !ng.hidden)) return;
       document.getElementById('sysErrE').textContent = eyebrow; document.getElementById('sysErrT').textContent = title;
       document.getElementById('sysErrM').textContent = msg; var c = document.getElementById('sysErrC'); c.textContent = code || ''; c.hidden = !code;
-      opt = opt || {}; var b1 = document.getElementById('sysErrBtn'), b2 = document.getElementById('sysErrBtn2'), B = window.NQ_BOOT;
-      if (!opt.btn2 && B && B.gpu === 'webgpu' && eyebrow !== 'RENDERER') { opt.btn2 = 'Reload in ' + B.names.webgl; opt.act2 = function () { B.choose('webgl'); }; }   // WebGPU trouble: offer Classic
+      opt = opt || {}; var b1 = document.getElementById('sysErrBtn'), b2 = document.getElementById('sysErrBtn2');
       b1.textContent = opt.btn || 'Reload'; acts.sysErrBtn = opt.act || function () { location.reload(); };
       b2.textContent = opt.btn2 || ''; b2.hidden = !opt.btn2; acts.sysErrBtn2 = opt.act2 || null;
       e.hidden = false;
@@ -483,127 +443,49 @@ button, select, input { font-family: var(--f); }
       var s = err && (err.stack || err.message) || String(err);
       show('ERROR', 'Something went wrong', 'The game hit an error and stopped. Reloading usually fixes it, and your best score is saved. If it keeps happening, send the line below to the developer.', String(s).slice(0, 360));
     };
-    // before the game is up, a WebGPU build that breaks falls back to Classic (src/boot.js) instead of stopping
-    function early(err) { if (window.NQ_READY) return; if (window.NQ_BOOT && window.NQ_BOOT.fallback(err)) return; if (!(window.NQ_BOOT && window.NQ_BOOT.falling)) window.NQ_FATAL(err); }
+    // anything that breaks before the game is up stops it with a message instead of a frozen loading screen
+    function early(err) { if (window.NQ_READY) return; window.NQ_FATAL(err); }
     window.addEventListener('error', function (ev) { early(ev.error || ev.message); });
     window.addEventListener('unhandledrejection', function (ev) { early(ev.reason); });
     document.addEventListener('click', function (ev) { var f = ev.target && acts[ev.target.id]; if (f) f(); });
   })();
   </script>
-  <div id="gpuNote" role="alert" hidden><div><b>WebGPU couldn't start</b>, so the game is running on WebGL2 (Classic). You can try WebGPU again in Settings → Renderer.<code id="gpuNoteC"></code></div><button id="gpuNoteX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
-  <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
+  <div id="nogl" hidden>Neon Quiver needs WebGPU or WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>
 
 <script>
 'use strict';
 /* ============================================================
-   NEON QUIVER — boot: pick the renderer before the game module loads
-   Plain script (build.py inlines it into index.html, ahead of any module). It decides WebGPU or WebGL2 (Classic),
-   writes the import map for that build, then loads game-webgpu.js or game-webgl.js. Only one ever downloads.
+   NEON QUIVER — boot: decide the backend, then load the game module
+   Plain script (build.py inlines it into index.html, ahead of any module). There is one renderer, three.js's
+   WebGPURenderer, drawing the same TSL shaders on WebGPU or, where WebGPU can't start, on its own WebGL2 backend.
+   This only asks the browser for a real WebGPU adapter + device and tells the module whether to force WebGL2.
+   ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var BUNDLES = {"webgl": "game-webgl.js?v=ba089e6bb1", "webgpu": "game-webgpu.js?v=d348972a99"};   // build.py: { webgl: 'game-webgl.js?v=…', webgpu: 'game-webgpu.js?v=…' }
-  // The WebGPU build draws everything Classic does (roadmap Phase 3) but is still being tuned for CPU cost: it is
-  // offered, but Classic stays the preselected choice until it is. Flip this when it is, and rename the storage key so everyone is asked again.
-  var WEBGPU_PREVIEW = true, KEY = 'nq_renderer';
-  var MAPS = {
-    webgl: { 'three': './vendor/three.module.js', 'three/addons/': './vendor/addons/' },
-    webgpu: { 'three': './vendor/three.webgpu.js', 'three/webgpu': './vendor/three.webgpu.js', 'three/tsl': './vendor/three.tsl.js', 'three/addons/': './vendor/addons/' },
-  };
-  var NAMES = { webgl: 'WebGL2 (Classic)', webgpu: 'WebGPU' };
-  function loadLS(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
-  function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
-  function $(id) { return document.getElementById(id); }
-  var q = new URLSearchParams(location.search);
-  var B = window.NQ_BOOT = { gpu: null, preview: WEBGPU_PREVIEW, names: NAMES, probe: probe, fallback: fallback, choose: choose, falling: false };
+  var GAME_JS = "game.js?v=72d4013490";   // build.py: 'game.js?v=…'
+  var q = new URLSearchParams(location.search), forced = q.get('gpu');
+  var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 
   /* ---- can this browser really run WebGPU? Ask for an adapter and a device, not just navigator.gpu ---- */
-  var _probe = null;
   function probe() {
-    if (_probe) return _probe;
-    _probe = new Promise(function (ok) {
+    return new Promise(function (ok) {
       var to = setTimeout(function () { ok({ ok: false, why: 'The graphics adapter didn’t answer.' }); }, 4000);
       function done(r) { clearTimeout(to); ok(r); }
       if (!window.isSecureContext) return done({ ok: false, why: 'WebGPU needs a secure page (https or localhost).' });
-      if (!navigator.gpu) return done({ ok: false, why: 'This browser doesn’t support WebGPU yet.' });
+      if (!navigator.gpu) return done({ ok: false, why: 'This browser doesn’t support WebGPU.' });
       navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).then(function (a) {
         if (!a) return done({ ok: false, why: 'No WebGPU adapter: it may be switched off for this GPU or driver.' });
-        var i = a.info || {}, name = [i.vendor, i.architecture, i.description].filter(Boolean).join(' ');
-        var soft = !!(i.isFallbackAdapter || a.isFallbackAdapter) || /swiftshader|llvmpipe|software|basic render/i.test(name);
-        return a.requestDevice().then(function (d) { d.destroy(); done({ ok: true, soft: soft, name: name }); });
+        return a.requestDevice().then(function (d) { d.destroy(); done({ ok: true }); });
       }).catch(function (e) { done({ ok: false, why: 'WebGPU failed to start: ' + String(e && e.message || e).slice(0, 120) }); });
     });
-    return _probe;
   }
-  // the best option that works: WebGPU on real hardware once it's out of preview, otherwise Classic
-  function best(r) { return r.ok && !r.soft && !WEBGPU_PREVIEW ? 'webgpu' : 'webgl'; }
+  function start() { var s = document.createElement('script'); s.type = 'module'; s.src = GAME_JS; s.onerror = function () { if (window.NQ_FATAL) window.NQ_FATAL(new Error(GAME_JS + ' failed to load')); }; document.body.appendChild(s); }
 
-  /* ---- load the chosen build: its import map, then its module ---- */
-  function start(kind) {
-    if (B.gpu) return; B.gpu = kind; document.documentElement.setAttribute('data-gpu', kind);
-    var im = document.createElement('script'); im.type = 'importmap'; im.textContent = JSON.stringify({ imports: MAPS[kind] }); document.head.appendChild(im);
-    var pre = document.createElement('link'); pre.rel = 'modulepreload'; pre.href = MAPS[kind].three; document.head.appendChild(pre);   // fetch three.js alongside the game, not after it
-    var s = document.createElement('script'); s.type = 'module'; s.src = BUNDLES[kind];
-    s.onerror = function () { if (!fallback(new Error('The WebGPU build failed to load.')) && window.NQ_FATAL) window.NQ_FATAL(new Error(BUNDLES[kind] + ' failed to load')); };
-    document.body.appendChild(s);
-  }
-  // Settings → Renderer: remember, reload into the other build
-  function choose(kind) {
-    saveLS(KEY, kind);
-    if (q.has('gpu')) q.delete('gpu');
-    var s = q.toString(); location.replace(location.pathname + (s ? '?' + s : '') + location.hash);
-  }
-  // WebGPU didn't start (no adapter, init failed, device lost or a startup error): remember Classic, say why, reload once
-  function fallback(err) {
-    if (B.gpu !== 'webgpu' || B.falling || window.NQ_READY) return false;
-    B.falling = true;
-    try { sessionStorage.setItem('nq_gpu_note', String(err && (err.message || err) || 'unknown error').slice(0, 240)); } catch (e) { }
-    saveLS(KEY, 'webgl');
-    if (q.get('gpu') === 'webgpu') q.set('gpu', 'webgl');
-    var s = q.toString(); location.replace(location.pathname + (s ? '?' + s : '') + location.hash);
-    return true;
-  }
-
-  /* ---- after a fallback: tell the player what happened ---- */
-  function note(why) {
-    var n = $('gpuNote'); if (!n || window.__NQ_CAPTURE) return;
-    $('gpuNoteC').textContent = why || ''; $('gpuNoteC').hidden = !why; n.hidden = false;
-    $('gpuNoteX').onclick = function () { n.hidden = true; };
-  }
-  var why = null; try { why = sessionStorage.getItem('nq_gpu_note'); sessionStorage.removeItem('nq_gpu_note'); } catch (e) { }
-
-  /* ---- first visit: the choice screen ---- */
-  function screen() {
-    var scr = $('scr-boot'), opts = { webgl: $('bootGL'), webgpu: $('bootGPU') }, go = $('bootGo'), sel = 'webgl';
-    function pick(k) { if (opts[k].disabled) return; sel = k; for (var j in opts) opts[j].setAttribute('aria-checked', j === k ? 'true' : 'false'); go.textContent = 'Start with ' + NAMES[k]; }
-    function launch() { saveLS(KEY, sel); scr.hidden = true; $('loading').hidden = false; start(sel); }
-    $('loading').hidden = true; scr.hidden = false; pick('webgl'); opts.webgpu.disabled = true; $('bootGPUs').textContent = 'Checking…';
-    for (var k in opts) (function (k) { opts[k].addEventListener('click', function () { pick(k); }); opts[k].addEventListener('dblclick', function () { pick(k); launch(); }); })(k);
-    scr.addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') { pick(sel === 'webgl' ? 'webgpu' : 'webgl'); opts[sel].focus(); e.preventDefault(); }
-      else if (e.key === 'Enter' && e.target !== go) { if (e.target === opts.webgl || e.target === opts.webgpu) pick(e.target === opts.webgl ? 'webgl' : 'webgpu'); launch(); e.preventDefault(); }
-    });
-    go.addEventListener('click', launch);
-    probe().then(function (r) {
-      opts.webgpu.disabled = !r.ok;
-      $('bootGPUs').textContent = !r.ok ? r.why : r.soft ? 'Works here, but on a software adapter: expect it to be slow.' : WEBGPU_PREVIEW ? 'Ready. Preview: fully ported, still being tuned for speed.' : 'Ready on this GPU.';
-      $('bootGPU').classList.toggle('na', !r.ok || !!r.soft);
-      pick(best(r));
-    });
-    go.focus();
-  }
-
-  var forced = q.get('gpu'), saved = loadLS(KEY, null);
-  if (forced !== 'webgl' && forced !== 'webgpu') forced = null;
-  if (saved !== 'webgl' && saved !== 'webgpu') saved = null;
-  if (forced === 'webgpu' && !navigator.gpu) { why = why || 'This browser doesn\u2019t support WebGPU yet.'; start('webgl'); }
-  else if (forced) start(forced);   // ?gpu=webgl / ?gpu=webgpu: tests and benchmarks; not remembered
-  else if (saved === 'webgpu' && !navigator.gpu) { why = why || 'This browser no longer offers WebGPU.'; saveLS(KEY, 'webgl'); start('webgl'); }
-  else if (saved) start(saved);   // returning players skip the screen
-  else if (navigator.webdriver && !q.has('boot')) probe().then(function (r) { start(best(r)); });   // automation takes the preselection (add ?boot to see the screen)
-  else screen();
-  if (why) note(why);
+  if (forced === 'webgl') { B.forceWebGL = true; B.why = 'Forced by ?gpu=webgl.'; start(); }
+  else if (forced === 'webgpu') start();
+  else probe().then(function (r) { if (!r.ok) { B.forceWebGL = true; B.why = r.why; } start(); });
 })();
 
 </script>

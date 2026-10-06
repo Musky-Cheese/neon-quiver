@@ -26,8 +26,9 @@
       <div class="settings">
         <label for="sens">Sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look">Look <select id="look"></select></label>
-        <label for="quality">Quality <select id="quality"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
-        <label for="renderer">Renderer <select id="renderer"><option value="webgpu">WebGPU</option><option value="webgl">WebGL2 (Classic)</option></select></label>
+        <label for="quality">Quality <select id="quality"><option value="2" selected>High</option><option value="3">Ultra</option></select></label>
+        <label for="res">Resolution <select id="res"><option value="auto" selected>Auto</option><option value="100">100%</option><option value="85">85%</option><option value="75">75%</option><option value="67">67%</option><option value="50">50%</option></select></label>
+        <span class="setting-ro">Renderer <b id="backend">…</b></span>
         <button class="linkbtn" id="musicBtn" type="button">Title music: On</button>
       </div>
       <div class="settings audio">
@@ -77,8 +78,9 @@
       <div class="settings" style="justify-content:center">
         <label for="sens2">Sensitivity <input id="sens2" type="range" min="0.3" max="2.5" step="0.05" value="1"></label>
         <label for="look2">Look <select id="look2"></select></label>
-        <label for="quality2">Quality <select id="quality2"><option value="A">Auto</option><option value="0">Fast</option><option value="L">Laptop</option><option value="1" selected>Balanced</option><option value="2">Sharp</option><option value="3">Ultra</option></select></label>
-        <label for="renderer2">Renderer <select id="renderer2"><option value="webgpu">WebGPU</option><option value="webgl">WebGL2 (Classic)</option></select></label>
+        <label for="quality2">Quality <select id="quality2"><option value="2" selected>High</option><option value="3">Ultra</option></select></label>
+        <label for="res2">Resolution <select id="res2"><option value="auto" selected>Auto</option><option value="100">100%</option><option value="85">85%</option><option value="75">75%</option><option value="67">67%</option><option value="50">50%</option></select></label>
+        <span class="setting-ro">Renderer <b id="backend2">…</b></span>
       </div>
       <div class="settings audio" style="justify-content:center">
         <label for="volMaster2">Volume <input id="volMaster2" type="range" min="0" max="1" step="0.05" value="1"></label>
@@ -136,27 +138,6 @@
   </section>
 
   <div id="loading">Unsealing Sector 7…</div>
-  <!-- first visit: pick the renderer (src/boot.js) before the game module loads -->
-  <section id="scr-boot" class="screen" hidden aria-labelledby="bootH">
-    <div class="boot-panel">
-      <div class="eyebrow">Sector 7 · Before you go in</div>
-      <h1 class="boot-title" id="bootH">Neon <span>Quiver</span></h1>
-      <p class="boot-lead">Pick how the city is drawn. You can change it any time in Settings → Renderer.</p>
-      <div class="boot-opts" role="radiogroup" aria-label="Renderer">
-        <button type="button" class="boot-opt" id="bootGPU" role="radio" aria-checked="false" aria-describedby="bootGPUs">
-          <span class="boot-name">WebGPU</span><span class="boot-tag">Next generation</span>
-          <span class="boot-desc">The new renderer, built for high-end GPUs. New effects land here first.</span>
-          <span class="boot-stat" id="bootGPUs"></span>
-        </button>
-        <button type="button" class="boot-opt" id="bootGL" role="radio" aria-checked="true">
-          <span class="boot-name">WebGL2</span><span class="boot-tag">Classic</span>
-          <span class="boot-desc">The original renderer, with every quality tier from Fast to Ultra. Runs in any current browser.</span>
-          <span class="boot-stat">Ready.</span>
-        </button>
-      </div>
-      <div class="row"><button class="btn primary" id="bootGo" type="button">Start</button></div>
-    </div>
-  </section>
   <!-- crash / GPU-reset screen: plain script, so it still works if the game module never loads -->
   <div id="sysErr" role="alert" hidden>
     <div class="sys-panel">
@@ -176,8 +157,7 @@
       var e = document.getElementById('sysErr'), ng = document.getElementById('nogl'); if (!e || (ng && !ng.hidden)) return;
       document.getElementById('sysErrE').textContent = eyebrow; document.getElementById('sysErrT').textContent = title;
       document.getElementById('sysErrM').textContent = msg; var c = document.getElementById('sysErrC'); c.textContent = code || ''; c.hidden = !code;
-      opt = opt || {}; var b1 = document.getElementById('sysErrBtn'), b2 = document.getElementById('sysErrBtn2'), B = window.NQ_BOOT;
-      if (!opt.btn2 && B && B.gpu === 'webgpu' && eyebrow !== 'RENDERER') { opt.btn2 = 'Reload in ' + B.names.webgl; opt.act2 = function () { B.choose('webgl'); }; }   // WebGPU trouble: offer Classic
+      opt = opt || {}; var b1 = document.getElementById('sysErrBtn'), b2 = document.getElementById('sysErrBtn2');
       b1.textContent = opt.btn || 'Reload'; acts.sysErrBtn = opt.act || function () { location.reload(); };
       b2.textContent = opt.btn2 || ''; b2.hidden = !opt.btn2; acts.sysErrBtn2 = opt.act2 || null;
       e.hidden = false;
@@ -187,14 +167,13 @@
       var s = err && (err.stack || err.message) || String(err);
       show('ERROR', 'Something went wrong', 'The game hit an error and stopped. Reloading usually fixes it, and your best score is saved. If it keeps happening, send the line below to the developer.', String(s).slice(0, 360));
     };
-    // before the game is up, a WebGPU build that breaks falls back to Classic (src/boot.js) instead of stopping
-    function early(err) { if (window.NQ_READY) return; if (window.NQ_BOOT && window.NQ_BOOT.fallback(err)) return; if (!(window.NQ_BOOT && window.NQ_BOOT.falling)) window.NQ_FATAL(err); }
+    // anything that breaks before the game is up stops it with a message instead of a frozen loading screen
+    function early(err) { if (window.NQ_READY) return; window.NQ_FATAL(err); }
     window.addEventListener('error', function (ev) { early(ev.error || ev.message); });
     window.addEventListener('unhandledrejection', function (ev) { early(ev.reason); });
     document.addEventListener('click', function (ev) { var f = ev.target && acts[ev.target.id]; if (f) f(); });
   })();
   </script>
-  <div id="gpuNote" role="alert" hidden><div><b>WebGPU couldn't start</b>, so the game is running on WebGL2 (Classic). You can try WebGPU again in Settings → Renderer.<code id="gpuNoteC"></code></div><button id="gpuNoteX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
   <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
-  <div id="nogl" hidden>Neon Quiver needs WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
+  <div id="nogl" hidden>Neon Quiver needs WebGPU or WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>

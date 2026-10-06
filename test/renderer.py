@@ -1,116 +1,105 @@
-# Renderer choice (src/boot.js): boot screen, both bundles, fallback to Classic, Settings → Renderer.
+# One renderer, two backends (src/boot.js + engine.js): WebGPURenderer on WebGPU where a real adapter + device start,
+# otherwise on its own WebGL2 backend. Same TSL shaders on both. Checks the backend pick, ?gpu=webgl, the Settings
+# label, device loss, and High / Ultra frames (MSAA, mirror, GTAO, textures, timestamps) on each backend.
 # Serve the repo on :8765 first (python3 -m http.server 8765). Screenshots go to test/out/renderer/.
-import os, sys, json
+# usage: python3 test/renderer.py [quick]   (quick: skip the Ultra frames, the slowest part)
+import os, sys
 from playwright.sync_api import sync_playwright
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out', 'renderer'); os.makedirs(OUT, exist_ok=True)
 URL = 'http://localhost:8765/index.html'
 GL = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']   # no WebGPU adapter
 # SwiftShader WebGPU adapter. Without Vulkan, headless Chromium's Dawn drops the device ~50 ms in, even on a bare clear loop
 GPU = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader']
+QUICK = 'quick' in sys.argv[1:]
 FAILS = []
-def check(ok, msg): print(('  ok   ' if ok else '  FAIL ') + msg); ok or FAILS.append(msg)
-def page(b, init=None):
-    pg = b.new_page(viewport={'width': 1280, 'height': 720}); E = []
+def check(ok, msg): print(('  ok   ' if ok else '  FAIL ') + msg, flush=True); ok or FAILS.append(msg)
+SET = lambda q, res='auto': 'localStorage.setItem("nq_settings", JSON.stringify({ v: 2, quality: %d, res: %s }))' % (q, '"auto"' if res == 'auto' else res)
+KEEP = lambda js: 'localStorage.getItem("nq_settings") || ' + js   # init scripts run on every load: only seed a first visit
+def page(b, init=KEEP(SET(2, 50))):   # 50% resolution: quicker software frames
+    pg = b.new_page(viewport={'width': 960, 'height': 540}); E = []
     pg.on('pageerror', lambda e: E.append('PAGE ' + str(e)[:300])); pg.on('console', lambda m: m.type == 'error' and E.append(m.text[:300]))
-    pg.add_init_script(FAST)
     if init: pg.add_init_script(init)
     return pg, E
 # SwiftShader frames are slow: once the game is up, its loop is paused and frames are drawn on demand
-def ready(pg, t=240000): pg.wait_for_function('window.NQ_READY === true', timeout=t, polling=500); pg.evaluate('NQ.noLoop(true)')
+def ready(pg, t=900000): pg.wait_for_function('window.NQ_READY === true', timeout=t, polling=500); pg.evaluate('NQ.noLoop(true)')
 def shot(pg, n):
     if pg.evaluate('!!window.NQ_READY'): pg.evaluate('NQ.renderOnce()')
-    pg.screenshot(path=os.path.join(OUT, n + '.png'), timeout=600000)   # a full WebGPU frame on SwiftShader takes a minute or more
-FAST = 'localStorage.getItem("nq_settings") || localStorage.setItem("nq_settings", JSON.stringify({ quality: 0, auto: false }))'   # Fast tier: quicker software frames
-def ls(pg, k): return pg.evaluate(f'localStorage.getItem("{k}")')
+    pg.screenshot(path=os.path.join(OUT, n + '.png'), timeout=900000)   # a full frame on SwiftShader takes a minute or more
 def errs(E): return [e for e in E if 'favicon' not in e]
+def no_glsl(pg): return pg.evaluate('(() => { let n = 0; NQ.scene.traverse(o => { const m = o.material; if (m && (m.isShaderMaterial || !m.isNodeMaterial)) n++; }); return n; })()') == 0
+ULTRA_JS = '''() => { const N = NQ; N.play(); N.clear(); N.GAME.toSpawn = 0; N.GAME.intermission = true; N.GAME.interT = 1e9;
+  Object.assign(N.WX, { state: 'snow', forced: 'snow', precip: 0.7, snow: 1, wet: 1, cover: 0.3, flash: 0 });
+  for (let i = 0; i < 40; i++) N.emit(1 + Math.random(), 1.2 + Math.random(), 8, Math.random() - 0.5, 1, 0, 0.5, [2.4, 1.0, 0.15], 0.12);
+  const z = N.spawnZombie('walker', 3, 7, 1); z.speed = 0;
+  const P = { x: 2, z: 12, y: 0, yaw: 0.3, pitch: -0.1, roll: 0 }; for (let i = 0; i < 4; i++) { N.pose(P); N.step(1 / 60); } N.pose(P); N.particles(0.016); N.renderOnce(); N.renderOnce(); }'''
+def ultra(pg, E, tag):
+    pg.evaluate(ULTRA_JS)
+    check(pg.evaluate('NQ.NQU.uReflOn.value') == 1 and pg.evaluate('NQ.TEXN.refl.value.isRenderTargetTexture === true'), tag + ': wet-street mirror on')
+    check(pg.evaluate('!!(NQ.GPOST.ao && NQ.GPOST.pre)') and pg.evaluate('NQ.GPOST.world.options.samples') == 4, tag + ': GTAO prepass + 4x MSAA on Ultra')
+    pg.wait_for_function("NQ.ULTRA.state === 'ready'", timeout=600000, polling=1000); check(pg.evaluate('NQ.NQU.uTexOn.value') == 1, tag + ': surface textures on')
+    if not pg.evaluate("NQ.renderer.hasFeature('timestamp-query')"): print('  skip ' + tag + ': no timestamp queries on this browser/backend')
+    else:
+        for i in range(12):   # timestamps resolve asynchronously and are collected by the next frame's poll
+            pg.wait_for_timeout(5000); pg.evaluate('NQ.renderOnce()')
+            if pg.evaluate('NQ.GPU_PROF.ok'): break
+        acc = pg.evaluate('Object.keys(NQ.GPU_PROF.acc)'); check(len(acc) > 0, tag + ': GPU timestamps: ' + ', '.join(acc))
+    shot(pg, tag + '-ultra')
+    from PIL import Image, ImageStat   # the saved screenshot: a WebGL canvas reads back blank once it has been shown
+    px = sum(ImageStat.Stat(Image.open(os.path.join(OUT, tag + '-ultra.png')).convert('RGB')).mean) / 3
+    check(px > 8, tag + ': Ultra frame is not black (mean %.1f)' % px)
+    check(not errs(E), tag + ': no console errors on Ultra ' + str(errs(E)[:4]))
 with sync_playwright() as p:
-    print('1. no WebGPU adapter: boot screen, WebGPU greyed out, Classic preselected')
+    print('1. no WebGPU adapter: WebGL2 backend, said in Settings with the reason')
     b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GL); pg, E = page(b)
-    pg.goto(URL + '?boot&nowarn'); pg.wait_for_function('document.getElementById("bootGPU").classList.contains("na")', timeout=10000)
-    check(pg.is_visible('#scr-boot'), 'boot screen shown')
-    check(pg.evaluate('document.getElementById("bootGPU").disabled'), 'WebGPU option disabled: ' + pg.inner_text('#bootGPUs'))
-    check(pg.get_attribute('#bootGL', 'aria-checked') == 'true', 'Classic preselected')
-    shot(pg, '1-boot-nowebgpu')
-    pg.click('#bootGo'); ready(pg)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and json.loads(ls(pg, 'nq_renderer')) == 'webgl', 'started Classic and remembered it')
-    check(pg.evaluate('document.getElementById("renderer").querySelector("option[value=webgpu]").disabled'), 'Settings: WebGPU greyed out')
-    check(not errs(E), 'no console errors ' + str(errs(E)[:3])); shot(pg, '1-title-classic')
-    E.clear(); pg.goto(URL + '?nowarn'); ready(pg)
-    check(not pg.is_visible('#scr-boot') and pg.evaluate('NQ_BOOT.gpu') == 'webgl', 'returning player skips the screen')
-    print('2. ?gpu=webgpu without WebGPU: falls back to Classic and says so')
-    E.clear(); pg.goto(URL + '?gpu=webgpu&nowarn'); ready(pg)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl', 'started Classic: ' + pg.url)
-    check(pg.is_visible('#gpuNote'), 'notice shown: ' + pg.inner_text('#gpuNoteC')); shot(pg, '2-fallback-note')
-    check(not [e for e in errs(E) if 'WebGPU' not in e], 'no unexpected console errors ' + str(errs(E)[:3]))
+    pg.goto(URL + '?nowarn'); ready(pg)
+    check(pg.evaluate('NQ.backend()') == 'webgl2' and pg.evaluate('NQ.renderer.backend.isWebGLBackend') is True, 'running on the WebGL2 backend')
+    check(pg.evaluate('NQ_BOOT.forceWebGL') is True and pg.evaluate('NQ_BOOT.why') != '', 'probe reason: ' + pg.evaluate('NQ_BOOT.why'))
+    check(pg.inner_text('#backend') == 'WebGL2 (compatibility)' and pg.evaluate('NQ_BOOT.why') in (pg.get_attribute('#backend', 'title') or ''), 'Settings label: ' + pg.inner_text('#backend'))
+    check(pg.evaluate('[...document.getElementById("quality").options].map(o => o.textContent).join()') == 'High,Ultra', 'Quality offers High and Ultra only')
+    check(pg.evaluate('[...document.getElementById("res").options].map(o => o.value).join()') == 'auto,100,85,75,67,50', 'Resolution: Auto + fixed percentages')
+    check(not pg.query_selector('#scr-boot') and not pg.query_selector('#renderer'), 'no renderer choice screen or selector left')
+    check(no_glsl(pg), 'every material in the scene is a node material')
+    check(pg.evaluate('!!(NQ.GPOST.pipe && NQ.GPOST.world && NQ.GPOST.bloom)') and pg.evaluate('NQ.GPOST.world.options.samples') == 4, 'TSL post pipeline built, 4x MSAA')
+    check(not errs(E), 'no console errors ' + str(errs(E)[:3])); shot(pg, '1-title-webgl2')
+    pg.evaluate("NQ.play(); NQ.bow('drawing', 1, 2); NQ.run(60)"); shot(pg, '1-play-webgl2')
+    if not QUICK: E.clear(); pg.evaluate(SET(3, 100)); pg.goto(URL + '?nowarn&prof=1'); ready(pg); ultra(pg, E, '1-webgl2')
     b.close()
 
-    print('3. WebGPU adapter (SwiftShader): offered but not preselected (software / preview); pick it')
+    print('2. WebGPU adapter (SwiftShader): WebGPU backend; ?gpu=webgl forces WebGL2')
     b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b)
-    pg.goto(URL + '?boot&nowarn'); pg.wait_for_function('!document.getElementById("bootGPU").disabled', timeout=10000)
-    check(pg.get_attribute('#bootGL', 'aria-checked') == 'true', 'Classic preselected: ' + pg.inner_text('#bootGPUs'))
-    pg.click('#bootGPU'); check(pg.get_attribute('#bootGPU', 'aria-checked') == 'true', 'WebGPU selectable')
-    pg.wait_for_timeout(400); shot(pg, '3-boot-webgpu')
-    pg.click('#bootGo'); ready(pg, 600000)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgpu' and pg.evaluate('NQ.renderer.backend.isWebGPUBackend') is True, 'running on the WebGPU backend')
-    check(pg.evaluate('typeof NQ.renderer.render') == 'function' and pg.evaluate('NQ.GPU.name') != '', 'GPU name: ' + pg.evaluate('NQ.GPU.name'))
-    pg.evaluate('NQ.run(30)'); shot(pg, '3-title-webgpu')
-    check(pg.evaluate('document.getElementById("renderer").value') == 'webgpu', 'Settings shows WebGPU')
-    pg.evaluate('NQ.play(); NQ.run(120)'); shot(pg, '3-play-webgpu')
-    check(pg.evaluate('!!(NQ.GPOST.pipe && NQ.GPOST.world && NQ.GPOST.bloom)'), 'TSL post pipeline built (world, bow, bloom, grade)')
-    check(pg.evaluate('(() => { let n = 0; NQ.scene.traverse(o => { if (o.material && o.material.isShaderMaterial) n++; }); return n; })()') == 0, 'no GLSL material left in the scene')
-    check(pg.evaluate('NQ.scene.children.some(o => o.isMesh && o.geometry.parameters && o.geometry.parameters.radius === 1000 && o.material.isNodeMaterial)'), 'sky dome is a node material')
-    check(pg.evaluate("NQ.scene.children.filter(o => (o.name === 'signs' || o.name === 'signsAdd') && o.material.isNodeMaterial).length") > 0, 'neon signs drawn by node materials')
+    pg.goto(URL + '?nowarn'); ready(pg)
+    check(pg.evaluate('NQ.backend()') == 'webgpu' and pg.evaluate('NQ.renderer.backend.isWebGPUBackend') is True and pg.evaluate('NQ_BOOT.forceWebGL') is False, 'running on the WebGPU backend')
+    check(pg.inner_text('#backend') == 'WebGPU', 'Settings label: ' + pg.inner_text('#backend'))
+    check(pg.evaluate('NQ.GPU.name') != '', 'GPU name: ' + pg.evaluate('NQ.GPU.name'))
+    check(no_glsl(pg), 'every material in the scene is a node material')
     check(pg.evaluate('NQ.R3.warm && NQ.R3.warm.programs') > 0, 'shaders warmed at load: %s' % pg.evaluate('JSON.stringify(NQ.R3.warm)'))
-    real = [e for e in errs(E)]
-    check(not real, 'no console errors on WebGPU ' + str(real[:4]))
-    print('4. Settings → Renderer on the pause screen asks first, then reloads into Classic')
-    E.clear(); pg.evaluate('NQ.GAME.pause()'); pg.wait_for_timeout(300)
-    pg.select_option('#renderer2', 'webgl'); check(pg.is_visible('#sysErr') and pg.is_visible('#sysErrBtn2'), 'confirm shown')
-    shot(pg, '4-pause-confirm'); pg.click('#sysErrBtn2'); check(not pg.is_visible('#sysErr') and pg.evaluate('NQ_BOOT.gpu') == 'webgpu', 'Keep playing: nothing changes')
-    pg.select_option('#renderer2', 'webgl'); pg.click('#sysErrBtn'); ready(pg)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and json.loads(ls(pg, 'nq_renderer')) == 'webgl', 'switched to Classic')
-    print('5. title screen switch back to WebGPU reloads straight away')
-    pg.select_option('#renderer', 'webgpu'); ready(pg, 600000)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgpu', 'back on WebGPU')
+    check(not errs(E), 'no console errors on WebGPU ' + str(errs(E)[:4])); shot(pg, '2-title-webgpu')
+    pg.evaluate("NQ.play(); NQ.bow('drawing', 1, 2); NQ.run(60)"); shot(pg, '2-play-webgpu')
+    print('3. WebGPU device lost mid-game: pause and explain, Reload only')
+    pg.evaluate('NQ.renderer.onDeviceLost({ api: "WebGPU", message: "simulated loss", reason: "unknown" })'); pg.wait_for_timeout(500)
+    check(pg.is_visible('#sysErr') and pg.text_content('#sysErrBtn') == 'Reload' and not pg.is_visible('#sysErrBtn2'), 'GRAPHICS screen: ' + pg.inner_text('#sysErrT'))
+    check(pg.evaluate('NQ.GAME.state') == 'paused' and pg.evaluate('NQ.GPU.lost') is True, 'game paused, frames stopped')
+    shot(pg, '3-device-lost')
+    E.clear(); pg.goto(URL + '?nowarn&gpu=webgl&prof=1'); ready(pg)
+    check(pg.evaluate('NQ.backend()') == 'webgl2' and pg.evaluate('NQ_BOOT.why') == 'Forced by ?gpu=webgl.', '?gpu=webgl draws on WebGL2 though WebGPU works')
+    if pg.evaluate("NQ.renderer.hasFeature('timestamp-query')"):   # this adapter's ANGLE exposes EXT_disjoint_timer_query_webgl2
+        for i in range(12):
+            pg.wait_for_timeout(5000); pg.evaluate('NQ.renderOnce()')
+            if pg.evaluate('NQ.GPU_PROF.ok'): break
+        check(len(pg.evaluate('Object.keys(NQ.GPU_PROF.acc)')) > 0, 'WebGL2 GPU timestamps: ' + ', '.join(pg.evaluate('Object.keys(NQ.GPU_PROF.acc)')))
+    else: print('  skip WebGL2 timestamps: no EXT_disjoint_timer_query here')
+    shot(pg, '3-webgl2-forced')
+    check(not [e for e in errs(E) if 'toInspector' not in e], 'no console errors ' + str(errs(E)[:3]))
+    if not QUICK: E.clear(); pg.evaluate(SET(3, 100)); pg.goto(URL + '?nowarn&prof=1'); ready(pg); ultra(pg, E, '2-webgpu')
     b.close()
 
-    print('6. WebGPU device lost during startup: falls back to Classic')
-    LOSE = '''(() => { const rd = GPUAdapter.prototype.requestDevice; let n = 0;
-      GPUAdapter.prototype.requestDevice = async function (d) { const dev = await rd.call(this, d); if (++n === 2 || !window.NQ_BOOT || NQ_BOOT.gpu === 'webgpu') {   // the game's device, not boot.js's probe
-        const lost = new Promise((r) => setTimeout(() => r({ reason: 'unknown', message: 'simulated loss' }), DELAY)); Object.defineProperty(dev, 'lost', { get: () => lost }); } return dev; }; })();'''
-    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b, LOSE.replace('DELAY', '200'))
-    pg.goto(URL + '?gpu=webgpu&nowarn'); ready(pg, 600000)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and pg.is_visible('#gpuNote'), 'Classic + notice: ' + pg.inner_text('#gpuNoteC'))
-    b.close()
-    print('6b. no adapter for the game (three would quietly use its WebGL2 backend): falls back to Classic')
-    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b, 'navigator.gpu && (navigator.gpu.requestAdapter = async () => null)')
-    pg.goto(URL + '?gpu=webgpu&nowarn'); ready(pg, 600000)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and 'gpu=webgl' in pg.url and pg.is_visible('#gpuNote'), 'Classic + notice: ' + pg.inner_text('#gpuNoteC'))
-    b.close()
-    print('7. WebGPU device lost mid-game: pause + explain, with a way back to Classic')
-    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b)
-    pg.goto(URL + '?gpu=webgpu&nowarn'); ready(pg, 600000)
-    pg.evaluate('NQ.renderer.onDeviceLost({ api: "WebGPU", message: "simulated loss", reason: "unknown" })')
-    pg.wait_for_timeout(500)
-    check(pg.is_visible('#sysErr') and 'reload in' in pg.inner_text('#sysErrBtn2').lower(), 'GRAPHICS screen: ' + pg.inner_text('#sysErrT'))
-    shot(pg, '7-device-lost')
-    pg.click('#sysErrBtn2'); ready(pg)
-    check(pg.evaluate('NQ_BOOT.gpu') == 'webgl' and json.loads(ls(pg, 'nq_renderer')) == 'webgl', 'Reload in Classic: switched')
-    b.close()
-
-    print('8. WebGPU on Ultra in the rain: MSAA, wet-street mirror, GTAO, Ultra textures, per-pass GPU timing (?prof=1)')
-    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU); pg, E = page(b, 'localStorage.setItem("nq_settings", JSON.stringify({ quality: 3, auto: false }))')
-    pg.goto(URL + '?gpu=webgpu&nowarn&prof=1'); ready(pg, 600000)
-    pg.evaluate('''() => { const N = NQ; N.play(); N.clear(); N.GAME.toSpawn = 0; N.GAME.intermission = true; N.GAME.interT = 1e9;
-      Object.assign(N.WX, { state: 'rain', forced: 'rain', precip: 0.6, snow: 0, wet: 1, cover: 0, flash: 0 });
-      const P = { x: -14, z: -12, y: 0, yaw: -0.9, pitch: 0.05, roll: 0 }; for (let i = 0; i < 8; i++) { N.pose(P); N.step(1 / 60); } N.pose(P); N.renderOnce(); N.renderOnce(); }''')
-    check(pg.evaluate('NQ.NQU.uReflOn.value') == 1 and pg.evaluate('NQ.TEXN.refl.value.isRenderTargetTexture === true'), 'wet-street mirror on')
-    check(pg.evaluate('!!(NQ.GPOST.ao && NQ.GPOST.pre)') and pg.evaluate('NQ.GPOST.world.options.samples') == 4, 'GTAO prepass + 4x MSAA on Ultra')
-    pg.wait_for_function('NQ.GPU_PROF.ok', timeout=600000, polling=2000)
-    acc = pg.evaluate('Object.keys(NQ.GPU_PROF.acc)')
-    check('world' in acc and 'bloom' in acc and 'gtao' in acc, 'GPU timestamps per pass: ' + ', '.join(acc))
-    shot(pg, '8-ultra-webgpu')
-    check(not errs(E), 'no console errors on WebGPU Ultra ' + str(errs(E)[:4]))
+    print('4. the probe finds no adapter (driver switched off): WebGL2 backend, no reload loop')
+    b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=GPU)
+    pg, E = page(b, KEEP(SET(2, 50)) + ';navigator.gpu && (navigator.gpu.requestAdapter = async () => null)')
+    pg.goto(URL + '?nowarn'); ready(pg)
+    check(pg.evaluate('NQ.backend()') == 'webgl2' and 'adapter' in pg.evaluate('NQ_BOOT.why'), 'WebGL2: ' + pg.evaluate('NQ_BOOT.why'))
+    check(pg.evaluate('performance.getEntriesByType("navigation").length') == 1 and 'gpu=' not in pg.url, 'loaded once, URL untouched')
+    check(not errs(E), 'no console errors ' + str(errs(E)[:3]))
     b.close()
 
 print('FAILED: %d' % len(FAILS) if FAILS else 'ALL OK'); sys.exit(1 if FAILS else 0)

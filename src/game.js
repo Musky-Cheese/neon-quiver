@@ -12,12 +12,19 @@ const DEF_SKIN = [0.5, 0.5, 0.5];
 function drawItem(mesh, m, col, emit, flash = 0, list = WORLD_ITEMS, skin) { if (DRAW_SUPPRESS.on || !mesh) return; list.push(mesh, m, col, emit || ZERO3, flash || 0, skin || DEF_SKIN); }
 
 /* ---------------- settings (per-viewer) ---------------- */
-const SETTINGS = { sens: 1, music: true, volMaster: 1, volSfx: 1, volMusic: 1, volAmb: 1, quality: 1, laptop: false, look: 'noir', auto: true };   // auto: the game picks (and steps down) the quality tier
+// quality: 2 = High, 3 = Ultra. res: 'auto' (resolution scales itself when frames run slow) or a fixed percentage
+const SETTINGS = { sens: 1, music: true, volMaster: 1, volSfx: 1, volMusic: 1, volAmb: 1, quality: 2, res: 'auto', look: 'noir', v: 2 };
+const QUALITY_NAMES = { 2: 'High', 3: 'Ultra' }, RES_STEPS = [100, 85, 75, 67, 50];
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
 const SAVED_SETTINGS = loadLS('nq_settings', {});
 Object.assign(SETTINGS, SAVED_SETTINGS);
-if ('quality' in SAVED_SETTINGS && !('auto' in SAVED_SETTINGS)) SETTINGS.auto = false;   // players who picked a quality before Auto existed keep their pick
+if (SAVED_SETTINGS.v !== 2) {   // from the Fast/Laptop/Balanced/Sharp/Ultra + Auto ladder: Ultra stays Ultra, everything else is High now
+  SETTINGS.quality = SAVED_SETTINGS.quality >= 3 && !SAVED_SETTINGS.auto ? 3 : 2; SETTINGS.res = 'auto'; SETTINGS.v = 2;
+  delete SETTINGS.laptop; delete SETTINGS.auto; if ('quality' in SAVED_SETTINGS) saveLS('nq_settings', SETTINGS);
+}
+if (SETTINGS.quality !== 2 && SETTINGS.quality !== 3) SETTINGS.quality = 2;
+if (SETTINGS.res !== 'auto' && !RES_STEPS.includes(SETTINGS.res)) SETTINGS.res = 'auto';
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
 setTheme(SETTINGS.look);
 const VOLS = [['volMaster', 'master'], ['volSfx', 'sfx'], ['volMusic', 'music'], ['volAmb', 'amb']];
@@ -798,10 +805,7 @@ function step(dt) {
       z._pdt = (z._pdt || 0) + dt;
       const zd2 = (z.x - PLAYER.x) ** 2 + (z.z - PLAYER.z) ** 2, phase = STEPN.n + (z.seed * 10 | 0);
       if (z.rig && z.state === 'dying' && z.dieT > 4 && z.dieT < CORPSE_SETTLE && phase % 12) continue;
-      // Laptop spends animation work where it can actually be seen: half rate past 30 m and quarter rate past 60 m.
-      // Other modes retain the original 45/90 m thresholds.
-      const animNear2 = SETTINGS.laptop ? 900 : 2025, animFar2 = SETTINGS.laptop ? 3600 : 8100;
-      if (z.rig && z.state !== 'dying' && ((zd2 > animFar2 && phase % 4) || (zd2 > animNear2 && phase % 2))) continue;
+      if (z.rig && z.state !== 'dying' && ((zd2 > 8100 && phase % 4) || (zd2 > 2025 && phase % 2))) continue;   // half rate past 45 m, quarter past 90 m
       poseZombieRig(z, z.chill > 0 && z.chillK <= 0 && !z.dead ? 0 : z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateArcs(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
   if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
@@ -817,40 +821,11 @@ function step(dt) {
 
 const PERF = { scale: 1, acc: 0, n: 0, pressure: 0, fAcc: 0, fN: 0, fSlow: 0 };
 const FRAME_ERR = { n: 0 };
-/* ---------------- Auto quality ----------------
-   The ladder, cheapest first. First visit: a few seconds of the title screen are timed and the tier steps down until it
-   holds about 40 fps (and a strong desktop GPU steps up to Sharp). In a run, if resolution scaling has already hit its
-   floor and frames still miss ~30 fps for 4 s, it drops one more tier and says so. Ultra is only ever picked by hand. */
-const TIERS = [{ q: 0, lap: false, name: 'Fast' }, { q: 1, lap: true, name: 'Laptop' }, { q: 1, lap: false, name: 'Balanced' }, { q: 2, lap: false, name: 'Sharp' }];
-const AUTOQ = { phase: 'off', t: 0, acc: 0, n: 0, slowT: 0, done: false };
-function tierIndex() { return SETTINGS.quality >= 2 ? 3 : SETTINGS.quality === 0 ? 0 : SETTINGS.laptop ? 1 : 2; }
-function setTier(i, why) {
-  const T = TIERS[clamp(i, 0, TIERS.length - 1)]; if (tierIndex() === TIERS.indexOf(T) && SETTINGS.quality < 3) return false;
-  SETTINGS.quality = T.q; SETTINGS.laptop = T.lap; PERF.scale = 1; PERF.acc = 0; PERF.n = 0; saveLS('nq_settings', SETTINGS); syncQualityUI();
-  if (why && GAME.state === 'playing') GAME.toast(`GRAPHICS ${T.name.toUpperCase()} · AUTO`, '#38e1f2');
-  return true;
-}
-function autoQuality(raw) {
-  if (!SETTINGS.auto || SETTINGS.quality >= 3 || document.hidden) return;
-  const A = AUTOQ;
-  if (GAME.state === 'title' && !A.done) {   // benchmark on the title screen: 1 s to settle, then 2.5 s of frames per tier
-    A.t += raw; if (A.t < 1) return;
-    A.acc += raw; A.n++;
-    if (A.t < 3.5) return;
-    const avg = A.acc / A.n, i = tierIndex(); A.t = 0; A.acc = 0; A.n = 0;
-    if (avg > 0.025 && i > 0) { setTier(i - 1); return; }                                          // under ~40 fps: one tier cheaper, measure again
-    if (avg < 0.0095 && i === 2 && !GPU.integrated && !A.up) { A.up = true; setTier(3); return; }   // over ~105 fps on a desktop GPU: try Sharp
-    if (A.up && avg > 0.014 && i === 3) setTier(2);                                                 // Sharp didn't hold: back to Balanced
-    A.done = true; return;
-  }
-  if (GAME.state !== 'playing') { A.slowT = 0; return; }
-  if (PERF.scale <= 0.42 && raw > 0.033) A.slowT += raw; else A.slowT = Math.max(0, A.slowT - raw * 0.5);
-  if (A.slowT > 4) { A.slowT = 0; const i = tierIndex(); if (i > 0) setTier(i - 1, true); }
-}
 function frame(now) {
   requestAnimationFrame(frame);
   now /= 1000; const raw = now - lastT; let dt = Math.min(0.05, raw); lastT = now;
-  if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
+  if (SETTINGS.res !== 'auto') PERF.scale = 1;
+  else if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
     PERF.acc += raw; PERF.n++;
     if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
     // fast path for genuinely slow machines: a third of a second where nearly every frame misses 30 fps steps the
@@ -869,7 +844,6 @@ function frame(now) {
     if (!GAME.frozen) step(dt);
     // the Armory is an opaque full-screen board, and a lost GPU context can't draw: skip the 3D frame and the HUD
     if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
-    if (!window.__NQ_CAPTURE && raw < 0.5) autoQuality(raw);
     FRAME_ERR.n = 0;
   } catch (e) {
     // one bad frame is survivable; three in a row means the game is wedged: stop and say so instead of freezing silently
@@ -894,12 +868,14 @@ function setCamera(time) {
   return [x, y, z];
 }
 function render(time) {
-  // resolution: pixel budget per quality level, plus automatic scaling if frames run slow
-  const q = SETTINGS.quality;   // Ultra never drops resolution behind your back
-  const budget = (q === 0 ? 1.0e6 : SETTINGS.laptop ? 1.4e6 : q >= 2 ? 8.3e6 : 2.4e6) * (q >= 3 ? 1 : PERF.scale);   // Laptop targets native 720p-class displays; High / Ultra render up to native 4K
+  // resolution: up to native 4K (Ultra supersamples at 1.5x), times the Resolution setting: Auto scales the pixel
+  // count down when frames run slow and back up when they don't; a fixed percentage scales width and height
+  const q = SETTINGS.quality, auto = SETTINGS.res === 'auto';
+  const budget = 8.3e6 * (auto ? PERF.scale : 1);
   const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
-  let dpr = Math.min(2, devicePixelRatio || 1); if (q >= 3) dpr = Math.min(2.25, dpr * 1.5);   // Ultra supersamples: renders at 1.5x and scales down
+  let dpr = Math.min(2, devicePixelRatio || 1); if (q >= 3) dpr = Math.min(2.25, dpr * 1.5);
   if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
+  if (!auto) dpr *= SETTINGS.res / 100;
   if (window.__NQ_CAPTURE) dpr = window.__NQ_CAPTURE_DPR || 1;
   const W = Math.max(1, Math.round(cw * dpr)), H = Math.max(1, Math.round(ch * dpr));
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
@@ -915,10 +891,11 @@ function render(time) {
   render3(time, W, H, fov, cam);
 }
 /* ---------------- UI wiring ---------------- */
-// quality dropdowns: 'A' is Auto (the tier it settled on is shown next to it)
+// quality (High / Ultra) and resolution (Auto / fixed %) dropdowns, on the title screen and in the pause menu
 function syncQualityUI() {
-  const v = SETTINGS.auto ? 'A' : SETTINGS.laptop && SETTINGS.quality === 1 ? 'L' : String(SETTINGS.quality), cur = TIERS[tierIndex()];
-  for (const id of ['quality', 'quality2']) { const s = $(id); if (!s) continue; s.value = v; const o = s.querySelector('option[value="A"]'); if (o) o.textContent = SETTINGS.auto && SETTINGS.quality < 3 ? `Auto (${cur.name})` : 'Auto'; }
+  for (const id of ['quality', 'quality2']) { const s = $(id); if (s) s.value = String(SETTINGS.quality); }
+  for (const id of ['res', 'res2']) { const s = $(id); if (s) s.value = String(SETTINGS.res); }
+  for (const id of ['backend', 'backend2']) { const e = $(id); if (!e) continue; e.textContent = BACKEND_NAME(); e.title = NQ_BACKEND === 'webgpu' ? '' : 'WebGPU isn\u2019t available here, so the game draws through WebGL2. ' + ((window.NQ_BOOT && window.NQ_BOOT.why) || ''); }
 }
 function syncMusicBtn() { const b = $('musicBtn'); if (b) b.textContent = 'Title music: ' + (SETTINGS.music ? 'On' : 'Off'); }
 function wireUI() {
@@ -934,35 +911,11 @@ function wireUI() {
     if (b === 'sfx' || b === 'master') s.addEventListener('change', () => AUD.thunk()); }   // a sample hit to judge the level by
   for (const id of ['sens', 'sens2']) { const s = $(id); s.value = SETTINGS.sens; s.addEventListener('input', () => { SETTINGS.sens = +s.value; $('sens').value = $('sens2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
   for (const id of ['look', 'look2']) { const s = $(id); s.innerHTML = THEME_ORDER.map(k => `<option value="${k}">${THEMES[k].name}</option>`).join(''); s.value = SETTINGS.look; s.addEventListener('change', () => { SETTINGS.look = s.value; setTheme(s.value); $('look').value = $('look2').value = s.value; saveLS('nq_settings', SETTINGS); }); }
-  // 'L' is the Laptop level: a deliberately cheaper pipeline for integrated graphics (r3.js).
-  for (const id of ['quality', 'quality2']) { const s = $(id); s.addEventListener('change', () => {
-    PERF.scale = 1;
-    if (s.value === 'A') { SETTINGS.auto = true; AUTOQ.done = false; AUTOQ.t = 0; AUTOQ.acc = 0; AUTOQ.n = 0; AUTOQ.up = false; }
-    else { SETTINGS.auto = false; SETTINGS.laptop = s.value === 'L'; SETTINGS.quality = s.value === 'L' ? 1 : +s.value; }
-    saveLS('nq_settings', SETTINGS); syncQualityUI(); }); }
+  for (const id of ['quality', 'quality2']) { const s = $(id); s.addEventListener('change', () => { SETTINGS.quality = +s.value === 3 ? 3 : 2; saveLS('nq_settings', SETTINGS); syncQualityUI(); }); }
+  for (const id of ['res', 'res2']) { const s = $(id); s.addEventListener('change', () => { SETTINGS.res = s.value === 'auto' ? 'auto' : +s.value; PERF.scale = 1; PERF.acc = 0; PERF.n = 0; saveLS('nq_settings', SETTINGS); syncQualityUI(); }); }
   syncQualityUI();
   syncMusicBtn();
-  wireRendererUI();
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
-}
-/* Settings → Renderer: boot.js chose this bundle before the module loaded; switching saves the choice and reloads
-   into the other one (asking first if a run would be lost). Hidden in the single-file artifact, which has no boot.js. */
-function wireRendererUI() {
-  const B = window.NQ_BOOT, sel = ['renderer', 'renderer2'].map($).filter(Boolean);
-  for (const s of sel) {
-    if (!B) { s.closest('label').hidden = true; continue; }
-    for (const o of s.options) o.textContent = B.names[o.value] + (o.value === 'webgpu' && B.preview ? ' (preview)' : '');
-    s.value = NQ_GPU;
-    s.addEventListener('change', () => {
-      const v = s.value; for (const t of sel) t.value = NQ_GPU;   // stays on the current one until the reload
-      if (v === NQ_GPU) return;
-      if (GAME.state === 'title') { B.choose(v); return; }
-      window.NQ_SYS.show('RENDERER', 'Switch to ' + B.names[v] + '?', 'The game reloads to change renderer, so this run ends here. Your best score is saved.', '', { btn: 'Switch and reload', act: () => B.choose(v), btn2: 'Keep playing', act2: () => window.NQ_SYS.hide() });
-    });
-  }
-  if (B && NQ_GPU !== 'webgpu') B.probe().then((r) => {   // grey WebGPU out where it can't run, with the reason on hover
-    for (const s of sel) { const o = s.querySelector('option[value="webgpu"]'); if (!r.ok) { o.disabled = true; o.textContent = B.names.webgpu + ' (unavailable)'; s.title = r.why; } }
-  });
 }
 function toTitle() {
   GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true; hazReset();
@@ -971,39 +924,28 @@ function toTitle() {
 }
 function updateTitleStats() { $('bestScore').textContent = GAME.best ? GAME.best.toLocaleString() : '—'; $('bestWave').textContent = GAME.bestWave || '—'; }
 
-/* ---------------- GPU check: software-rendering warning, first-run quality pick ---------------- */
+/* ---------------- GPU check: software-rendering warning ---------------- */
 function gpuName() {
-//#if webgpu
-  try { const i = renderer.backend.device.adapterInfo || {}; return [i.vendor, i.architecture, i.description].filter(Boolean).join(' '); } catch (e) { return ''; }
-//#else
-  try { const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info'); return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || ''); } catch (e) { return ''; }
-//#endif
+  try {
+    if (NQ_BACKEND === 'webgpu') { const i = renderer.backend.device.adapterInfo || {}; return [i.vendor, i.architecture, i.description].filter(Boolean).join(' '); }
+    const gl = renderer.backend.gl, ext = gl.getExtension('WEBGL_debug_renderer_info'); return String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+  } catch (e) { return ''; }
 }
 function gpuCheck() {
   const g = gpuName(), q = new URLSearchParams(location.search);
   const soft = /swiftshader|llvmpipe|softpipe|microsoft basic render|software/i.test(g);
   if (soft && !q.has('nowarn') && !window.__NQ_CAPTURE) { $('swWarn').hidden = false; $('swWarnX').addEventListener('click', () => { $('swWarn').hidden = true; }); }
-  // first run only: integrated GPUs start on Laptop. A saved choice is never overridden.
-  const integrated = /intel|iris|uhd|radeon\(tm\) graphics|radeon graphics|\b(680|740|760|780|880|890)m\b|adreno|apple/i.test(g) && !/\b(arc(\(tm\))? a\d+|rx|rtx|gtx|radeon pro)\b/i.test(g);
-  if (!('quality' in SAVED_SETTINGS) && integrated && !soft) { SETTINGS.quality = 1; SETTINGS.laptop = true; }
-  if (!('quality' in SAVED_SETTINGS) && soft) { SETTINGS.quality = 0; SETTINGS.laptop = false; }   // software rendering: start at the bottom of the ladder
-  GPU.name = g; GPU.soft = soft; GPU.integrated = integrated;
-  // the browser can take the GPU away (sleep, driver reset, another tab hogging it): pause, explain, and pick up again when it's back
-  canvas.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault(); GPU.lost = true; if (GAME.state === 'playing') GAME.pause();
-    if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. Waiting for it to come back. If the picture doesn\'t return in a few seconds, reload: your best score is saved.');
-  });
-  canvas.addEventListener('webglcontextrestored', () => { GPU.lost = false; R3.quality = -1; if (window.NQ_SYS) window.NQ_SYS.hide(); });
+  GPU.name = g; GPU.soft = soft;
 }
-// WebGPU (renderer.onDeviceLost, engine.js): lost while starting up → Classic (src/boot.js); lost mid-game → pause and
-// explain. A lost device doesn't come back the way a WebGL context does, so the way on is a reload.
+// renderer.onDeviceLost (engine.js), on either backend: before the game is up that's a fatal error; mid-game, pause and
+// explain. A lost device doesn't come back by itself, so the way on is a reload.
 function gpuDeviceLost(info) {
   const why = 'Device lost' + (info && info.message ? ': ' + info.message : '') + (info && info.reason ? ' (' + info.reason + ')' : '');
-  if (!window.NQ_READY) { if (window.NQ_BOOT && window.NQ_BOOT.fallback(new Error(why))) return; if (window.NQ_FATAL) window.NQ_FATAL(new Error(why)); return; }
+  if (!window.NQ_READY) { if (window.NQ_FATAL) window.NQ_FATAL(new Error(why)); return; }
   GPU.lost = true; if (GAME.state === 'playing') GAME.pause();
-  if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. WebGPU needs a reload to pick up again: your best score is saved.', why);
+  if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. Reload to pick up again: your best score is saved.', why);
 }
-const GPU = { name: '', soft: false, integrated: false, lost: false };
+const GPU = { name: '', soft: false, lost: false };
 
 /* ---------------- boot ---------------- */
 async function boot() {
@@ -1030,7 +972,7 @@ async function boot() {
 }
 /* ---------------- capture / debug API (used to render ad assets) ---------------- */
 window.NQ = {
-  DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, FAR, warmShaders, nqMaterial, FAR_MATS_N: () => FAR_MATS.length, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
+  DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, warmShaders, nqMaterial, backend: () => NQ_BACKEND, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
   OBJ, objStart, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
@@ -1042,15 +984,13 @@ window.NQ = {
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   AUD,
-  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, AUTOQ, autoQuality, setTier, tierIndex, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
+  bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, PERF, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-//#if webgpu
   GPOST, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
-//#endif
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

@@ -1,10 +1,16 @@
-"""Shared helpers for the perf harness: serve the repo on a free port, launch SwiftShader Chromium, seed Math.random."""
+"""Shared helpers for the perf harness: serve the repo on a free port, launch SwiftShader Chromium, seed Math.random.
+   NQ_BACKEND=webgpu runs on a SwiftShader WebGPU adapter; the default (webgl) has no adapter, so the game draws on
+   WebGPURenderer's WebGL2 backend, where the GPU syncs (gl.readPixels) in these scripts work."""
 import os, socket, threading, http.server, functools
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 CHROME = '/opt/pw-browsers/chromium'
-ARGS = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']
+ARGS_GL = ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist']   # no WebGPU adapter
+# SwiftShader WebGPU adapter. Without Vulkan, headless Chromium's Dawn drops the device ~50 ms in, even on a bare clear loop
+ARGS_GPU = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader']
+BACKEND = os.environ.get('NQ_BACKEND', 'webgl')
+ARGS = ARGS_GPU if BACKEND == 'webgpu' else ARGS_GL
 # deterministic Math.random (mulberry32) so rain, flicker, spawns and shake are identical run to run
 SEED_JS = """(() => { let a = 0x9e3779b9; window.__nqSeed = (s) => { a = s | 0; }; Math.random = function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
   t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();"""
@@ -26,7 +32,7 @@ def open_game(pw, url, w, h, capture=True, query='', loop=True):
     pg.on('console', lambda m: m.type == 'error' and errs.append('CONSOLE ' + m.text[:300]))
     # loop=False: the game's own rAF loop never runs, so nothing steps (or draws random numbers) on wall-clock time
     pg.add_init_script(SEED_JS + ('' if loop else 'window.requestAnimationFrame = () => 0;') + ('window.__NQ_CAPTURE = true; window.__NQ_CAPTURE_DPR = 1;' if capture else ''))
-    pg.goto(url + query); pg.wait_for_function('window.NQ_READY === true', timeout=900000, polling=500)   # timer, not rAF: headless frames can stall
+    pg.goto(url + (query + '&' if query else '?') + 'gpu=' + BACKEND); pg.wait_for_function('window.NQ_READY === true', timeout=900000, polling=500)   # timer, not rAF: headless frames can stall
     return b, pg, errs
 
 # camera spots: every district's environment-capture point (so a bigger map adds spots automatically),

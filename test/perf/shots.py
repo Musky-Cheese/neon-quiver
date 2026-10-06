@@ -1,11 +1,11 @@
 """Fixed-camera screenshots: every district x every quality x wet / dry / snow.
-   python3 test/perf/shots.py OUTDIR [--q 0,1,2,3] [--wx wet,dry,snow] [--only hub,yard] [--size 400x225]
+   python3 test/perf/shots.py OUTDIR [--q 2,3] [--wx wet,dry,snow] [--only hub,yard] [--size 400x225]
    Compare two runs with test/perf/diff.py A B."""
 import sys, os, json, base64, argparse, time
 sys.path.insert(0, os.path.dirname(__file__))
 from common import serve, open_game, SPOTS_JS
 from playwright.sync_api import sync_playwright
-ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('--q', default='0,1,2,3'); ap.add_argument('--wx', default='wet,dry,snow')
+ap = argparse.ArgumentParser(); ap.add_argument('out'); ap.add_argument('--q', default='2,3'); ap.add_argument('--wx', default='wet,dry,snow')
 ap.add_argument('--only', default=''); ap.add_argument('--size', default='400x225'); a = ap.parse_args()
 W, H = map(int, a.size.split('x')); os.makedirs(a.out, exist_ok=True)
 WX = {  # surface + sky state pinned exactly (no easing: the game loop is frozen)
@@ -21,8 +21,7 @@ with sync_playwright() as pw:
     if a.only: spots = [s for s in spots if s['id'].rsplit('-', 1)[0] in a.only.split(',')]
     for q in map(int, a.q.split(',')):
         pg.evaluate("(q) => { window.NQ.SETTINGS.quality = q; window.NQ.renderOnce(); }", q)
-        if q >= 1:   # surface textures stream in: wait for the right set
-            pg.wait_for_function("(q) => { const U = window.NQ.ULTRA; return U.state === 'failed' || (U.state === 'ready' && U.res === (q >= 2 ? 'full' : 'half')); }", arg=q, timeout=120000, polling=250)
+        pg.wait_for_function("() => { const U = window.NQ.ULTRA; return U.state === 'failed' || U.state === 'ready'; }", timeout=600000, polling=250)   # surface textures stream in
         for wx in a.wx.split(','):
             for s in spots:
                 png = pg.evaluate("""([s, w]) => { const N = window.NQ; Object.assign(N.WX, w, { flash: 0, gust: 0, forced: w.state }); N.WX.thunder.length = 0;

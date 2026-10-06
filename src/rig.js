@@ -118,17 +118,6 @@ async function loadMeshyZombies(pick) {   // pick(name) -> bool: load a subset (
 // each body keeps its model for life: chosen from its seed, so a crowd mixes every outfit the breed has
 function mzFor(z) { const l = MZ_BY[z.type]; if (!l) return null; return MZ[l[Math.floor(((z.seed * 9.173) % 1 + 1) % 1 * l.length) % l.length]]; }
 
-function zDepthMat(own) {
-  const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-  dm.onBeforeCompile = (sh) => {
-    sh.uniforms.uHide = own.uHide;
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\nattribute float part; uniform float uHide[${ZPARTS}];`)
-      .replace('#include <project_vertex>', '#include <project_vertex>\n  if (uHide[int(part + 0.5)] > 0.5) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);');
-  };
-  dm.customProgramCacheKey = () => 'nq-zdepth';
-  return dm;
-}
-
 function makeRig(z) {
   const mz = mzFor(z);
   const key = mz ? 'mz|' + mz.name : zVariant(z);
@@ -139,10 +128,7 @@ function makeRig(z) {
     if (mz) { mat.defines.NQ_ZTEX = 1; mat.map = mz.map; mat.normalMap = mz.normalMap; mat.normalScale.set(1, 1); mat.customProgramCacheKey = () => 'nq-zombie-tex'; }
     const mesh = new THREE.SkinnedMesh(mz ? mz.geo : zGeometry(key), mat);
     mesh.name = 'zmesh'; mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 2.2); mesh.castShadow = true; mesh.receiveShadow = true;
-    mesh.customDepthMaterial = zDepthMat(mat.userData.u);
-//#if webgpu
     mesh.userData.u = mat.userData.u;   // gpu.js reads each body's tints, flash and hidden parts off the mesh (shadow pass included)
-//#endif
     const T = mz || ZRIG;
     const root = T.rootTemplate.clone(true);
     const byName = {}; root.traverse(o => { if (o.isBone) byName[o.name] = o; });
@@ -260,7 +246,6 @@ function poseZombieRig(z, dt, time) {
   // ---------- root transform ----------
   const m = r.mesh;
   m.position.set(z.x, z.y - (z.sink || 0), z.z); m.rotation.set(P.rootRx, z.yaw, P.rootRz, 'YXZ'); m.scale.setScalar(z.scale);
-  m.castShadow = SETTINGS.quality > 0 || (PLAYER.x - z.x) ** 2 + (PLAYER.z - z.z) ** 2 < 400;   // Low: only nearby bodies cast shadows
   for (const o of r.nodes) o.updateMatrix();   // same result as the renderer's auto-update, done once here
   m.updateMatrixWorld(true); r.poseN++;
   // ---------- hit volumes from the skeleton ----------

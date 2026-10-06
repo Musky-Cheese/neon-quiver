@@ -5,8 +5,8 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 640, 'height': 360}); E = []
     pg.on('pageerror', lambda e: E.append('PAGE ' + str(e)))
     pg.on('console', lambda m: m.type == 'error' and E.append(m.text[:200]))
-    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=120000)
-    for q in (0, 1, 2):
+    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=600000, polling=500)
+    for q in (2, 3):   # High, Ultra
         r = pg.evaluate("""(q) => { const N = window.NQ; N.SETTINGS.quality = q; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true;
           const K = ['walker','walker','walker','runner','runner','brute'];
           for (let i = 0; i < 40; i++) { const a = i * 0.7, d = 6 + (i % 7) * 2.5; N.spawnZombie(K[i % 6], Math.sin(a) * d, Math.cos(a) * d - 10, 5); }

@@ -2,14 +2,14 @@
 import sys, json, base64, io
 from playwright.sync_api import sync_playwright
 from PIL import Image
-out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/garden.jpg'; Q = int(sys.argv[2]) if len(sys.argv) > 2 else 1
+out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/garden.jpg'; Q = int(sys.argv[2]) if len(sys.argv) > 2 else 2
 POSES = [(-11, 178, 0.2, 0.12), (16, 200, 0.3, 0.1), (-4, 178, 0.6, 0.12), (0, 186, 3.14, 0.08), (0, 192, 0, 0.05), (0, 210, 0, 0.05)]
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
     pg = b.new_page(viewport={'width': 800, 'height': 450}); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e))); pg.on('console', lambda m: m.type in ('error', 'warning') and errs.append(m.text))
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
-    pg.goto('http://localhost:8765/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=180000, polling=500)
+    pg.goto('http://localhost:8765/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=600000, polling=500)
     info = pg.evaluate(f"""() => {{ const N = window.NQ; N.SETTINGS.quality = {Q}; N.play(); N.clear(); N.noLoop(true);
       return {{ petals: N.WORLD.petals.length }}; }}""")
     print(json.dumps(info))

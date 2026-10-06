@@ -13,7 +13,7 @@ def go(rel):
         if m.startswith('three/addons/'): go(m[len('three/addons/'):])
         elif m.startswith('.'): go(os.path.normpath(os.path.join(os.path.dirname(rel),m)))
         else: print('??',m)
-for f in ['postprocessing/EffectComposer.js','postprocessing/Pass.js','postprocessing/ShaderPass.js','postprocessing/UnrealBloomPass.js','postprocessing/GTAOPass.js','loaders/GLTFLoader.js','utils/BufferGeometryUtils.js']: go(f)
+for f in ['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js', 'tsl/display/BloomNode.js', 'tsl/display/GTAONode.js', 'tsl/display/DenoiseNode.js']: go(f)
 print(sorted(seen))
-# the WebGPU build (game-webgpu.js): three.webgpu.js shares three.core.js with three.module.js; three.tsl.js is the TSL entry point
-for f in ['three.module.js', 'three.core.js', 'three.webgpu.js', 'three.tsl.js']: shutil.copy(J + '../../build/' + f, 'vendor/' + f)
+# three.webgpu.js (WebGPURenderer, with its own WebGL2 backend) imports three.core.js; three.tsl.js is the TSL entry point
+for f in ['three.core.js', 'three.webgpu.js', 'three.tsl.js']: shutil.copy(J + '../../build/' + f, 'vendor/' + f)

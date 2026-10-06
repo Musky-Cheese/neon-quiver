@@ -2,17 +2,17 @@
 
 A first-person archery survival game that runs in the browser. Sector 7 is under quarantine: a rain-soaked cyberpunk city at night, with the plaza at its heart and districts all around it. Hold the bow, draw, release, and survive endless zombie waves that find you wherever you go.
 
-- **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the street lamps, mirror-accurate reflections in the puddles with rain ripples, light cones in the rain, procedural brick, concrete, steel and asphalt detail, bloom, and ambient occlusion on the High setting.
-- **Small download:** about 1 MB on a first visit (the page, three.js and the zombie model). The WebGPU renderer fetches three's larger WebGPU build instead (plus its node post-processing for bloom and ambient occlusion), about 0.33 MB more compressed.
+- **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the street lamps, mirror-accurate reflections in the puddles with rain ripples, light cones in the rain, procedural brick, concrete, steel and asphalt detail, bloom, and real-time ambient occlusion on Ultra.
+- **Download:** about 1.7 MB compressed on a first visit (the page, the game, three.js's WebGPU build with its node post-processing, and the zombie rig). The textured zombie models and the surface textures (3.7 MB) stream in behind it.
 - **Rigged zombies:** one skinned mesh per infected, rigged and animated in Blender (`models/zombie.glb`, built by `tools/make_rig.py`). Walk, run, heavy, crawl, attack, slam and roar clips blend into hit reactions and physics-driven deaths.
-- **Desktop only:** keyboard and mouse, in any current Chrome, Edge, Firefox or Safari with WebGL2.
-- **Two renderers:** the first time you open the game it asks how to draw the city: **WebGPU** or **WebGL2 (Classic)**. It checks for a working WebGPU adapter and greys that option out (with the reason) when the browser can't run it. Your choice is remembered, and **Settings → Renderer** (title or pause screen) switches it with a reload. If WebGPU fails to start, or the GPU drops out while it loads, the game falls back to Classic by itself and tells you why. WebGPU now draws everything Classic does (the same materials, lighting, wet-street mirror, signs, rain, snow, particles, decals, glass, bloom, ambient occlusion and grade, written in three's node shading language), and costs less on the graphics card. It is still marked as a preview, and Classic stays the preselected choice, while its CPU cost per frame is brought down.
+- **Desktop only:** keyboard and mouse, in any current Chrome, Edge, Firefox or Safari with WebGPU or WebGL2.
+- **One renderer, two backends:** the game draws with three.js's WebGPURenderer and shaders written in TSL (three's node shading language). Where the browser has a working WebGPU adapter it runs on **WebGPU**; where it doesn't (no WebGPU, no adapter for this GPU or driver, or WebGPU fails to start) the same renderer and shaders run on its **WebGL2 compatibility** backend, with the same look. There is nothing to choose: **Settings** (title or pause screen) shows which backend is drawing, and hovering it on WebGL2 says why WebGPU wasn't used.
 
 ## Play locally
 
 Serve the folder, then open it: `python3 -m http.server`, then `http://localhost:8000`. (Opening `index.html` straight from disk won't work, because browsers block ES modules on `file://`.)
 
-To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` (the page and its boot script) and one game bundle per renderer: `game-webgl.js` and `game-webgpu.js`. The page loads only the one you picked. Add `?gpu=webgl` or `?gpu=webgpu` to the URL to force a renderer without changing your saved choice (handy for comparing them with `?prof=1`), or `?boot` to see the choice screen again under automation.
+To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` (the page and its boot script) and `game.js` (the game). Add `?gpu=webgl` to the URL to force the WebGL2 backend even where WebGPU works (handy for checking it, and for comparing the two with `?prof=1`), or `?gpu=webgpu` to skip the WebGPU check.
 
 ## Deploy
 
@@ -55,14 +55,13 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 - **Headshots and combos.** Chain kills to build a score multiplier.
 - **The city:** a procedural skyline, neon signs, holo billboards, flying traffic, a monorail crossing overhead, rain and bloom.
 - Best score and best wave are saved in the browser.
-- **Surface textures on Balanced and up:** photo-scanned PBR textures (half resolution on Balanced, full on Sharp/Ultra, none on Fast) and real stone sills, lintels, ledges and cornices on street-facing buildings at every quality level.
-- **Laptop mode for integrated graphics:** targets a 720p-class pixel budget, keeps lower-resolution wet-street reflections at a reduced refresh rate, uses fewer dynamic lights and smaller shadow maps, updates distant zombie rigs less often, and skips MSAA, bloom and streamed surface textures. First-time players on detected integrated GPUs start here automatically; desktop quality modes are unchanged.
+- **Quality: High or Ultra** (Settings → Quality). Both draw the full city: photo-scanned PBR surface textures, 4x MSAA, the wet-street mirror at full resolution, bloom, lamp shadows and real stone sills, lintels, ledges and cornices on street-facing buildings. New players start on High.
+- **Resolution** (Settings → Resolution): **Auto** (the default) renders up to native 4K and lowers the resolution by itself when frames run slow, raising it again when they don't; or pick a fixed 100%, 85%, 75%, 67% or 50%, which never changes. It scales the quality level's own render size, so on Ultra 100% still means 1.5x supersampling. Saved settings from older versions move to High (Ultra stays Ultra), with Auto resolution.
 - **Hero cherry trees:** three Meshy-authored sakuras anchor the garden while sharing one 389 KB model and one instanced draw call; the surrounding forest keeps the lightweight procedural LODs.
-- **Ultra quality** (Settings → Quality → Ultra) is for strong desktop GPUs: full-resolution photo-scanned PBR surface textures (asphalt, concrete, brick, rusted and corrugated steel, pavers, plaster) projected triplanar in world space on top of the city's own shading, real-time GTAO contact shadows, 1.5x supersampling, 4x-resolution moon/sun shadows over a wider area, and full-rate 2x-resolution shadows on all six nearby lamps. It never lowers resolution automatically. Textures download on demand: about 0.8 MB on Balanced, 3.7 MB on Sharp/Ultra.
-- **Auto quality (the default for new players):** the first few seconds on the title screen are timed and the game settles on the best tier that holds about 40 fps (Fast, Laptop, Balanced, or Sharp on a strong desktop GPU; Ultra is only ever picked by hand). If a fight still drags once resolution scaling has bottomed out, it drops one more tier and says so. The quality menu shows what Auto picked; choosing a tier by hand turns Auto off.
-- **Built to keep running:** if the browser resets the graphics card (after sleep, or a busy GPU) the game pauses, says so, and carries on when the GPU is back. If something breaks, an error screen explains it and offers a reload instead of a frozen picture.
-- **Look pass:** the infected get a soft camera-side fill and a two-tone neon rim so they read against the city, wet sheen on heads and shoulders in the rain, and brighter eyes. Towers have more life in their windows (office floors left on, blue TV rooms), mast beacons and car hazards blink on their own beat, clouds glow from the city below, working hover-car pods light the street, canopies sway with the weather and let light through their edges, and blossom petals ride the gusts. Laptop mode keeps bloom at a quarter of the resolution. Art direction sheets for all of it live on the design canvas.
-- Add `?prof=1` to the URL for a performance overlay: GPU time per render pass, CPU frame time, draw calls and triangles. Classic times its passes with `EXT_disjoint_timer_query_webgl2`, WebGPU with timestamp queries (shadows, wet-street mirror, env map, world, bow, AO prepass, GTAO, bloom, grade); either needs a browser that exposes them.
+- **Ultra quality** adds to High: real-time GTAO contact shadows, 1.5x supersampling, 4x-resolution moon/sun shadows over a wider area, the wet-street mirror refreshed every frame, and full-rate 2x-resolution shadows on all six nearby lamps. The surface textures (asphalt, concrete, brick, rusted and corrugated steel, pavers, plaster) are projected triplanar in world space on top of the city's own shading on both levels.
+- **Built to keep running:** if the browser resets the graphics card (after sleep, or a busy GPU) the game pauses, says so, and offers a reload (your best score is saved). If something breaks, an error screen explains it and offers a reload instead of a frozen picture.
+- **Look pass:** the infected get a soft camera-side fill and a two-tone neon rim so they read against the city, wet sheen on heads and shoulders in the rain, and brighter eyes. Towers have more life in their windows (office floors left on, blue TV rooms), mast beacons and car hazards blink on their own beat, clouds glow from the city below, working hover-car pods light the street, canopies sway with the weather and let light through their edges, and blossom petals ride the gusts. Art direction sheets for all of it live on the design canvas.
+- Add `?prof=1` to the URL for a performance overlay: the backend, GPU time per render pass from timestamp queries (shadows, wet-street mirror, env map, world, bow, AO prepass, GTAO, bloom, grade), CPU frame time, draw calls and triangles. It needs a browser that exposes timestamp queries; on the WebGL2 backend the passes inside the post pipeline are timed together under one entry.
 
 ## Ad and marketing assets (`ads/`)
 
@@ -95,11 +94,10 @@ Each part is built from blended spheres, voxel-remeshed and smoothed, then sculp
 
 The readable source is in `src/`:
 
-- `boot.js`: the renderer choice screen, run before any game code: probes WebGPU, remembers the pick, loads `game-webgl.js` or `game-webgpu.js` and falls back to Classic when WebGPU fails
-
-- `engine.js`: math, geometry and the shared material (surface detail, windows, puddles, reflections)
-- `gpu.js`: the WebGPU build's shaders in TSL (three's node shading language): the same shared material, sky, light cones, signs, decals, particles, rain, snow, halos and glass, the post chain (bloom, GTAO, grade) and the per-pass GPU timer
-- `r3.js`: the three.js scene, lights, reflections, light cones, post-processing
+- `boot.js`: runs before any game code: checks for a working WebGPU adapter and device, tells the game whether to use the WebGL2 backend, then loads `game.js`
+- `engine.js`: math, geometry, the renderer and the shared shader uniforms
+- `gpu.js`: every shader, in TSL (three's node shading language): the shared material (surface detail, windows, puddles, reflections), sky, light cones, signs, decals, particles, rain, snow, halos and glass, the post chain (MSAA, GTAO, bloom, grade) and the per-pass GPU timer
+- `r3.js`: the three.js scene, lights, shadows, the wet-street mirror, env maps, quality settings and the frame
 - `city.js`: plaza, buildings, signs and traffic
 - `districts.js`: the Rail Yard, Night Market, Docks, Freight Line, Warrens, Suburbs, Sakura Gardens, Flooded Metro and Refinery
 - `hazards.js`: flood water and Cryo ice, the Refinery's exploding fuel tanks, and the Metro and Refinery's pouring pipes, flare stack, steam plumes and ambient sound
@@ -112,7 +110,7 @@ The readable source is in `src/`:
 - `audio.js`: synthesized sound effects, ambience and music, with reverb, 3D (HRTF) positioning and per-bus volume
 - `seg.js`: the 16-segment neon lettering
 
-After editing, run `python3 build.py`. It rebuilds `index.html`, `game-webgl.js`, `game-webgpu.js` and `build/artifact.html` (a single-file Classic build). Both bundles come from the same `src/` files: lines between `//#if webgl` (or `//#if webgpu`) and `//#endif` go into that bundle only, and `NQ_GPU` says at runtime which one is running. The WebGPU bundle imports `three/webgpu` (`vendor/three.webgpu.js`, same three.js release) and three's TSL bloom, GTAO and denoise nodes (`vendor/addons/tsl/display/`).
+After editing, run `python3 build.py`. It rebuilds `index.html` and `game.js`. The game imports `three/webgpu` (`vendor/three.webgpu.js`, which loads `vendor/three.core.js`), `three/tsl`, and three's TSL bloom, GTAO and denoise nodes (`vendor/addons/tsl/display/`). `tools/vendor_three.py` refreshes `vendor/` from a three.js release.
 
 Balance numbers you will probably want to tune live near the top of their files: `ZTYPES` in `zombies.js` (health, speed and damage per enemy), `ARMORY` / `UPG` / `ALLOT` in `armory.js` (prices, upgrade effects, special arrows per wave), and `GAME.startWave` / `GAME.spawnOne` in `game.js` (wave sizes and the enemy mix).
 

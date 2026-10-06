@@ -1,10 +1,9 @@
-//#if webgpu
 /* ============================================================
-   NEON QUIVER — the WebGPU renderer's shaders, in TSL (roadmap Phase 2)
-   The same look as the GLSL in engine.js / r3.js, rebuilt as node materials: the shared surface material (windows,
-   puddles, surface detail, vertex-mask tinting for the infected and the gauntlets), the sky dome, light cones, and the
-   post chain (bloom, GTAO, colour grade) on a RenderPipeline. r3.js drives it (renderGPU); src/ builds it into
-   game-webgpu.js only.
+   NEON QUIVER — every shader in the game, in TSL
+   Node materials for WebGPURenderer (WebGPU, or its WebGL2 backend): the shared surface material (windows, puddles,
+   surface detail, vertex-mask tinting for the infected and the gauntlets), the sky dome, light cones, signs, decals,
+   particles, rain, snow, halos, glass, and the post chain (MSAA, GTAO, bloom, colour grade) on a RenderPipeline.
+   r3.js drives it (renderGPU).
    ============================================================ */
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
@@ -15,7 +14,7 @@ const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArr
 const NQN = {};
 for (const [k, t] of Object.entries({ uTime: 'float', uFogCol: 'color', uFogDen: 'float', uNeon: 'float', uWin: 'float', uWinWarm: 'float', uGrid: 'float', uDyn: 'float',
   uDynVM: 'float', uWet: 'float', uRimCol: 'color', uEnvK: 'float', uAirK: 'float', uZFill: 'float', uZRim: 'float', uWind: 'float', uReflOn: 'float', uRain: 'float',
-  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float', uFogFar: 'vec2' })) NQN[k] = uniform(NQU[k].value, t).setGroup(renderGroup).onRenderUpdate(() => NQU[k].value);
+  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float' })) NQN[k] = uniform(NQU[k].value, t).setGroup(renderGroup).onRenderUpdate(() => NQU[k].value);
 // shared by every draw: uploaded once per render pass, not once per object (the per-object path cost ~25 uniforms x every draw)
 NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4').setGroup(renderGroup); NQN.uTexS = uniformArray(NQU.uTexS.value, 'vec2').setGroup(renderGroup);
 // textures: one node each, pointed at whatever NQU holds (gpuSyncTextures, every frame)
@@ -32,7 +31,7 @@ const AIR_N = 16;   // = MAX_PL (r3.js)
 const AIR = { pos: Array.from({ length: AIR_N }, () => new THREE.Vector4()), col: Array.from({ length: AIR_N }, () => new THREE.Vector4()) };
 AIR.posN = uniformArray(AIR.pos, 'vec4').setGroup(renderGroup); AIR.colN = uniformArray(AIR.col, 'vec4').setGroup(renderGroup);
 
-/* ---- noise (NOISE_GLSL): real WGSL functions, not inlined at each of the ~60 call sites ---- */
+/* ---- noise: real shader functions, not inlined at each of the ~60 call sites ---- */
 const h21 = Fn(([q]) => { const p = fract(q.mul(vec2(123.34, 456.21))).toVar(); p.addAssign(dot(p, p.add(45.32))); return fract(p.x.mul(p.y)); })
   .setLayout({ name: 'nqH21', type: 'float', inputs: [{ name: 'q', type: 'vec2' }] });
 const vn = Fn(([p]) => {
@@ -71,7 +70,7 @@ const nqTri = (L, W, N, sc) => {
   return { a, ro, n: normalize(nx.zyx.mul(w.x).add(ny.xzy.mul(w.y)).add(nz.xyz.mul(w.z))) };
 };
 
-/* ---- one physically based material family for everything solid (engine.js nqMaterial, GLSL) ----
+/* ---- one physically based material family for everything solid ----
    Values the surface code works out and the later stages need (bump height, emission, rim, wet mirror, sky
    visibility...) travel as shader-wide properties. */
 const NQP = {
@@ -80,7 +79,7 @@ const NQP = {
   occ: property('float', 'nqOcc'), texN: property('vec3', 'nqTexN'), texK: property('float', 'nqTexK'), flash: property('float', 'nqFlash'), N0: property('vec3', 'nqN0'),
 };
 class NQLighting extends THREE.PhysicalLightingModel {
-  indirect(builder) {   // the GLSL's lights_fragment_maps edit: sky visibility and envK scale the ambient and the env map
+  indirect(builder) {   // sky visibility and envK scale the ambient and the env map
     const c = builder.context;
     c.iblIrradiance.mulAssign(NQP.envK.mul(0.25).mul(NQP.occ)); c.radiance.mulAssign(NQP.envK.mul(mix(1, NQP.occ, 0.6))); c.irradiance.mulAssign(NQP.occ);
     super.indirect(builder);
@@ -142,7 +141,7 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
   setupOutput(builder, out) { return super.setupOutput(builder, nqFog(this, out)); }
 }
 
-/* ---- the surface: material id -> albedo, roughness, metal, emission, bump (the GLSL color_fragment) ---- */
+/* ---- the surface: material id -> albedo, roughness, metal, emission, bump ---- */
 function nqSurface(material, builder) {
   const kind = material.nqKind, D = material.defines, zp = kind === 'zombie', vm = kind === 'vm', inst = kind === 'inst' || vm, city = !zp && !vm;
   const geo = builder.geometry, ca = geo.getAttribute('color');
@@ -446,7 +445,7 @@ function nqSurface(material, builder) {
   }).Else(() => { rimK.assign(1); });
   const texN = NQP.texN, texK = NQP.texK; texN.assign(N0); texK.assign(0);
   if (city) {
-    If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {   // Ultra/Sharp/Balanced: CC0 photo detail, triplanar
+    If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {   // High and Ultra: CC0 photo detail, triplanar
       const li = int(nqTL.add(0.5)), sc = NQN.uTexS.element(li), mean = NQN.uTexM.element(li);
       const tr = nqTri(li, W, N0, sc.x);
       const det = pow(tr.a, vec3(2.2)).div(max(mean.rgb, vec3(0.02)));          // photo detail relative to the layer's average colour
@@ -478,7 +477,7 @@ function nqSurface(material, builder) {
 /* ---- after lighting: fog (thinner high up), the glowing air round nearby lights, the hit flash ---- */
 function nqFog(material, out) {
   const W = positionWorld, d = length(W.sub(cameraPosition)), c = out.rgb.toVar();
-  const fog = exp(d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y)).negate()).oneMinus().mul(mix(1, 0.55, clampT(W.y.div(180), 0, 1)));
+  const fog = exp(d.mul(NQN.uFogDen).negate()).oneMinus().mul(mix(1, 0.55, clampT(W.y.div(180), 0, 1)));
   c.assign(mix(c, NQN.uFogCol, clampT(fog, 0, 1)));
   if (material.nqKind !== 'vm') If(NQN.uAirK.greaterThan(0.0001), () => {
     // light scattered by the rain haze between the eye and this surface, integrated along the view ray per point light
@@ -505,7 +504,6 @@ function nqFog(material, out) {
 function gpuCutout(m, at) { m.nqAlphaTest = at; m.maskShadowNode = texture(m.map).a.greaterThan(at); }
 function nqMaterial(kind) {   // kind: 'static' | 'inst' | 'vm' | 'zombie'
   const m = new NQMaterial(kind); m.vertexColors = true;
-  m.userData.farOK = false;   // the distant-detail fade is a Classic budget: WebGPU always draws full detail
   m.userData.u = kind === 'zombie' ? { uPT: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPS: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uPE: { value: Array.from({ length: ZPARTS }, () => new THREE.Vector3()) }, uHide: { value: new Array(ZPARTS).fill(0) }, uFlash: { value: 0 }, uSeed: { value: 0 } } : {};
   return m;
 }
@@ -545,16 +543,16 @@ function coneMaterialGPU(U) {
     const h = clampT(uv().y, 0, 1);   // MSAA samples can land just outside the triangle: pow() of a negative is NaN
     const fall = pow(h, 1.8).mul(smoothstep(0, 0.25, h).mul(0.75).add(0.25));
     const streaks = vn(vec2(atan(Nn.z, Nn.x.add(1e-5)).mul(9), W.y.mul(1.4).add(NQN.uTime.mul(9)))).mul(0.35).add(0.65);
-    const fogD = d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y));
+    const fogD = d.mul(NQN.uFogDen);
     const c = reference('value', 'color', U.uLamp).mul(facing).mul(fall).mul(streaks).mul(0.1).mul(reference('value', 'float', U.uVolK)).mul(smoothstep(0.5, 3, d)).mul(exp(fogD.mul(-0.5)));
     return vec4(c, 0);
   })();
   return m;
 }
 
-/* ---------------- the rest of the GLSL effects (r3.js builds the objects, these give them TSL shading) ----------------
-   Fog for these is the FOG_GLSL formula: Laptop's extra density past a start distance comes in through uFogFar. */
-const fogD = (d) => d.mul(NQN.uFogDen).add(max(d.sub(NQN.uFogFar.x), 0).mul(NQN.uFogFar.y));
+/* ---------------- the effects (r3.js builds the objects, these give them TSL shading) ----------------
+   Fog for these: 1 - exp(-d * density), at 80% strength. */
+const fogD = (d) => d.mul(NQN.uFogDen);
 const fogMix = (c, d) => mix(c, NQN.uFogCol, clampT(exp(fogD(d).negate()).oneMinus().mul(0.8), 0, 1));
 function basicGPU(o) { const m = new THREE.MeshBasicNodeMaterial(o); m.fog = false; m.lights = false; return m; }
 const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
@@ -572,7 +570,7 @@ function signArrayGPU(texs) {
   arr.needsUpdate = true; return arr;
 }
 function signMaterialGPU(arr, add) {
-  const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // as Classic: additive signs weigh by alpha
+  const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // additive signs weigh by alpha
   m.uA = uniform(1);
   m.fragmentNode = Fn(() => {
     const S = attribute('iSign', 'vec3'), col = attribute('iCol', 'vec3'), T = NQN.uTime, u = uv().toVar(), flick = float(1).toVar();
@@ -611,7 +609,7 @@ function particlesGPU(data) {
       .Else(() => { const a = smoothstep(0.5, 0, d); out.assign(vec4(C.rgb.mul(a.mul(a)).mul(C.a), 0)); });
     return out;
   })();
-  m.uniforms = { uH: m.uH };   // r3.js sets it like the GLSL material's
+  m.uniforms = { uH: m.uH };   // r3.js sets it through .uniforms, like the other effect materials
   const mesh = new THREE.Mesh(g, m); mesh.userData.buf = buf; return mesh;
 }
 // rain: the drop buffer wrapped round the camera, falling, slanted by the wind, dry under ceilings (r3.js rainGeo)
@@ -689,9 +687,9 @@ const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: 
   uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0) };
 const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
-function buildPostGPU(q, laptop) {
+function buildPostGPU(q) {
   if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); }
-  const samples = q >= 1 && !laptop ? 4 : 0;
+  const samples = 4;
   const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
   world.name = 'world'; vmP.name = 'bow';
   vmP.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));   // transparent wherever the bow isn't, whoever triggers the pass
@@ -699,7 +697,7 @@ function buildPostGPU(q, laptop) {
   let aoN = null, pre = null;
   if (q >= 3) {   // Ultra: real-time GTAO for contact shadows at feet, corners, under cars and between bodies
     // from its own depth + view-normal prepass of the opaque city, without MSAA (GTAO can't read a multisampled depth
-    // buffer), as Classic's GTAOPass does; glass, glows and cones are left out, so they cast no fake occlusion
+    // buffer), as three's GTAOPass does; glass, glows and cones are left out, so they cast no fake occlusion
     pre = pass(scene, camera); pre.name = 'aoPrepass'; pre.transparent = false;
     const nm = new THREE.NodeMaterial(); nm.fragmentNode = vec4(normalView, 1); nm.side = THREE.DoubleSide; pre.overrideMaterial = nm;
     const pd = pre.getTextureNode('depth'), pn = pre.getTextureNode('output');
@@ -715,7 +713,6 @@ function buildPostGPU(q, laptop) {
   const comb = convertToTexture(Fn(() => { const c = col.toVar(); return vec4(select(c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4)), c, vec3(0)), 1); })());
   comb.name = 'composite';
   const bl = bloom(comb, 0.6, 0.55, 1.0);
-  if (laptop) bl.setResolutionScale(0.25);   // Laptop keeps the glow at a quarter of the pixels, like Classic
   const blT = bl.getTextureNode();
   const S = (u) => comb.sample(u).rgb.add(blT.sample(u).rgb);
   const U = GRADE_U;
@@ -750,8 +747,8 @@ function buildPostGPU(q, laptop) {
     return vec4(c, 1);
   });
   const pipe = new THREE.RenderPipeline(renderer, grade());
-  pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma, as in Classic
-  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, key: q + ':' + (laptop ? 1 : 0) });
+  pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, key: q });
 }
 
 /* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------
@@ -780,4 +777,3 @@ function gpuProfPoll() {
     GPU_PROF.ok = true;
   }).catch(() => { }).finally(() => { GPU_PROF.busy = false; });
 }
-//#endif

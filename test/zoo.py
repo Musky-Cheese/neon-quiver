@@ -15,7 +15,7 @@ with sync_playwright() as p:
     pg.on('pageerror', lambda e: E.append(str(e)))
     pg.on('console', lambda m: E.append(m.text) if m.type == 'error' else None)
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1; window.__LOOK = ' + repr(sys.argv[5] if len(sys.argv) > 5 else ''))
-    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=120000)
+    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=600000, polling=500)
     pg.evaluate(JS_SETUP, T)
     tiles = []
     VIEWS = [(0, 34.6, 0.0, 0.08), (-1.2, 32.2, -0.35, 0.02), (-4.2, 31.25, 0.0, 0.12), (0.6, 31.3, 0.0, 0.1), (-0.6, 31.9, 0.0, 0.22)]

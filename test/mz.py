@@ -3,7 +3,7 @@ types: comma list (default walker). Each type: front, 3/4 and side views at 2.4 
 import sys, base64, io
 from playwright.sync_api import sync_playwright
 from PIL import Image
-out = sys.argv[1]; TYPES = (sys.argv[2] if len(sys.argv) > 2 else 'walker').split(','); Q = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+out = sys.argv[1]; TYPES = (sys.argv[2] if len(sys.argv) > 2 else 'walker').split(','); Q = int(sys.argv[3]) if len(sys.argv) > 3 else 2
 T = float(sys.argv[4]) if len(sys.argv) > 4 else 0.8
 with sync_playwright() as p:
     b = p.chromium.launch(executable_path='/opt/pw-browsers/chromium', args=['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'])
@@ -11,7 +11,7 @@ with sync_playwright() as p:
     pg.on('pageerror', lambda e: E.append(str(e)))
     pg.on('console', lambda m: E.append(m.text) if m.type == 'error' else None)
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
-    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true && window.NQ_MZ_READY === true', timeout=150000, polling=500)
+    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true && window.NQ_MZ_READY === true', timeout=600000, polling=500)
     info = pg.evaluate("(Q) => { const N = window.NQ; N.SETTINGS.quality = Q; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; N.GAME.state = 'play'; return Object.keys(N.MZ || {}); }", Q)
     tiles = []
     for t in TYPES:

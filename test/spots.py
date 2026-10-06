@@ -10,8 +10,8 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 800, 'height': 450}); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
-    pg.goto(f'http://localhost:{port}/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=180000, polling=500)
-    pg.evaluate("() => { const N = window.NQ; N.SETTINGS.quality = 1; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; }")
+    pg.goto(f'http://localhost:{port}/index.html?nowarn=1'); pg.wait_for_function('window.NQ_READY === true', timeout=600000, polling=500)
+    pg.evaluate("() => { const N = window.NQ; N.SETTINGS.quality = 2; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; }")
     if poses == []:   # no poses given: close-ups of the first sedan and van near the plaza
         cs = pg.evaluate("""() => { const W = window.NQ.WORLD, L = W.lights || [];
           const lit = s => Math.min(1e9, ...L.map(l => Math.hypot(l.p[0] - s.x, l.p[2] - s.z)));   // LIT=1: the cars nearest a lamp

@@ -1,11 +1,11 @@
 """Look-dev contact sheet: fixed camera spots across the city plus a zombie line-up, one JPEG per quality.
-usage: python3 test/look.py out_prefix [q list, e.g. 1,L]   (L = Laptop)"""
+usage: python3 test/look.py out_prefix [q list: 2 = High, 3 = Ultra, e.g. 2,3]"""
 import sys, os, io, base64
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'perf'))
 from common import serve, open_game
 from playwright.sync_api import sync_playwright
 from PIL import Image
-out = sys.argv[1] if len(sys.argv) > 1 else 'look'; QS = (sys.argv[2] if len(sys.argv) > 2 else '1').split(',')
+out = sys.argv[1] if len(sys.argv) > 1 else 'look'; QS = (sys.argv[2] if len(sys.argv) > 2 else '2').split(',')
 W, H = 960, 540
 # x, z, yaw, pitch, y-eye-extra, label
 SPOTS = [(0, 26, 0.0, -0.02, 'plaza'), (-14, -12, -0.9, 0.05, 'plaza-cars'), (0, 110, 1.57, -0.02, 'suburbs-street'), (0, 196, 0.0, -0.02, 'gardens'),
@@ -14,8 +14,8 @@ httpd, url = serve()
 with sync_playwright() as pw:
     b, pg, errs = open_game(pw, url, W, H, capture=True, loop=False)
     for qs in QS:
-        q = 1 if qs == 'L' else int(qs); lap = qs == 'L'
-        pg.evaluate(f"() => {{ const N = NQ; N.SETTINGS.quality = {q}; N.SETTINGS.laptop = {str(lap).lower()}; N.noLoop(true); N.play(); N.clear(); N.GAME.toSpawn = 0; N.GAME.intermission = true; N.GAME.interT = 1e9; N.DBG.noVM = true; N.HUDVIS.on = false; document.getElementById('hud').hidden = true;"
+        q = int(qs)
+        pg.evaluate(f"() => {{ const N = NQ; N.SETTINGS.quality = {q}; N.noLoop(true); N.play(); N.clear(); N.GAME.toSpawn = 0; N.GAME.intermission = true; N.GAME.interT = 1e9; N.DBG.noVM = true; N.HUDVIS.on = false; document.getElementById('hud').hidden = true;"
                     "Object.assign(N.WX, { state: 'rain', forced: 'rain', precip: 0.6, snow: 0, wet: 1, cover: 0, flash: 0 }); }")
         tiles = []
         for s in SPOTS:
