@@ -152,7 +152,10 @@ ind = acc(idx.astype(np.uint16) if nv < 65536 else idx, 5123 if nv < 65536 else 
 inv = np.zeros((len(ORDER), 4, 4), np.float32)
 for i, n in enumerate(ORDER): m = np.eye(4); m[:3, 3] = -GJ[n][0]; inv[i] = m.T   # column-major
 ibm_acc = acc(inv.reshape(-1, 16), 5126, 'MAT4')
-imgs = [{'bufferView': blob(S['img%d' % k]), 'mimeType': 'image/jpeg'} for k in range(3)]
+# colour + normal are what the game shader reads; the metal/rough map is optional (the bundler may drop it)
+have = [k for k in range(3) if 'img%d' % k in S]
+imgs = [{'bufferView': blob(S['img%d' % k]), 'mimeType': 'image/jpeg'} for k in have]
+tex_of = {k: i for i, k in enumerate(have)}
 nodes = [{'name': 'mz_mesh', 'mesh': 0, 'skin': 0}]
 for n in ORDER:
     p, par = GJ[n]; t = p - (GJ[par][0] if par else 0)
@@ -165,8 +168,8 @@ gltf = {
     'scene': 0, 'scenes': [{'nodes': [0, 1]}], 'nodes': nodes,
     'meshes': [{'name': 'mz_mesh', 'primitives': [{'attributes': attrs, 'indices': ind, 'material': 0}]}],
     'skins': [{'joints': [1 + i for i in range(len(ORDER))], 'inverseBindMatrices': ibm_acc, 'skeleton': 1}],
-    'materials': [{'pbrMetallicRoughness': {'baseColorTexture': {'index': 0}, 'metallicRoughnessTexture': {'index': 1}}, 'normalTexture': {'index': 2}}],
-    'textures': [{'source': k, 'sampler': 0} for k in range(3)], 'samplers': [{'magFilter': 9729, 'minFilter': 9987}],
+    'materials': [dict({'pbrMetallicRoughness': dict({'baseColorTexture': {'index': tex_of[0]}}, **({'metallicRoughnessTexture': {'index': tex_of[1]}} if 1 in tex_of else {}))}, **({'normalTexture': {'index': tex_of[2]}} if 2 in tex_of else {}))],
+    'textures': [{'source': i, 'sampler': 0} for i in range(len(have))], 'samplers': [{'magFilter': 9729, 'minFilter': 9987}],
     'images': imgs, 'accessors': accs, 'bufferViews': views, 'buffers': [{'byteLength': len(bin_)}],
     'extras': {'nq': nq},
 }

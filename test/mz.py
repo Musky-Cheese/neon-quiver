@@ -11,13 +11,13 @@ with sync_playwright() as p:
     pg.on('pageerror', lambda e: E.append(str(e)))
     pg.on('console', lambda m: E.append(m.text) if m.type == 'error' else None)
     pg.add_init_script('window.__NQ_CAPTURE = 1; window.__NQ_CAPTURE_DPR = 1;')
-    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true', timeout=150000, polling=500)
+    pg.goto('http://localhost:8765/index.html'); pg.wait_for_function('window.NQ_READY === true && window.NQ_MZ_READY === true', timeout=150000, polling=500)
     info = pg.evaluate("(Q) => { const N = window.NQ; N.SETTINGS.quality = Q; N.play(); N.clear(); N.noLoop(true); N.DBG.noVM = true; N.GAME.state = 'play'; return Object.keys(N.MZ || {}); }", Q)
     tiles = []
     for t in TYPES:
-        for (dx, dz, yaw) in ((0, 1.1, 0.0), (0.8, 0.8, 0.785), (1.1, 0, 1.5708)):
+        for (dx, dz, yaw) in ((0, float(__import__("os").environ.get("MZD", "1.1")), 0.0), (0.8, 0.8, 0.785), (1.1, 0, 1.5708)):
             url = pg.evaluate("""([t, dx, dz, yaw, T]) => { const N = window.NQ; N.clear();
-              const z = N.spawnZombie(t, 0, 30, 3); z.seed = 4.2; z.x0 = 0;
+              const [tt, sd] = t.split('#'); const z = N.spawnZombie(tt, 0, 30, 3); z.seed = sd ? +sd : 4.2; z.x0 = 0; if (tt === 'boss') { z.y = 0; z.state = 'chase'; }
               N.pose({ x: dx, z: 30 + dz, y: 0.15, yaw, pitch: 0.05, roll: 0 });
               const n = Math.round(T / 0.05); for (let i = 0; i < n; i++) { N.step(0.05); z.x = 0; z.z = 30; z.yaw = 0; }
               for (let i = 0; i < 2; i++) N.renderOnce(); return document.getElementById('gl').toDataURL('image/jpeg', 0.88); }""", [t, dx, dz, yaw, T])

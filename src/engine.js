@@ -541,7 +541,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     // uPT = per-zombie tone, uPS.x = frost (Cryo Burst) set by rig.js drawZombieRig
     vec3 tx = nqTex, q = vNqL * 7. + uSeed;
     float lum = dot(tx, vec3(0.3, 0.55, 0.15));
-    float bl = smoothstep(0.035, 0.16, tx.r - max(tx.g, tx.b) * 1.1) * (1. - smoothstep(0.3, 0.6, max(tx.g, tx.b)));   // red, dark: blood and open flesh
+    float bl = smoothstep(0.05, 0.18, tx.r - max(tx.g, tx.b) * 1.35) * (1. - smoothstep(0.12, 0.3, max(tx.g, tx.b)));   // deep, saturated red only: open wounds, not brown stains
     base = tx * tint * (0.86 + 0.28 * vn(q.xy * 0.9 + q.z * 0.4));                 // grime breaks up the scan's even tone
     float mud = (1. - smoothstep(0.05, 0.75, vNqL.y)) * (0.45 + 0.55 * vn(q.xz * 0.9 + 2.7));
     base = mix(base * (1. - 0.3 * mud), vec3(0.075, 0.06, 0.045), mud * 0.3);       // street filth up the shins
@@ -549,7 +549,7 @@ varying float vPart; varying vec3 vNqL; uniform vec3 uPT[${ZPARTS}]; uniform vec
     rough = mix(0.74, 0.18, bl); metal = 0.0; rimK = mix(0.6, 1.35, bl);
     float soak = clamp(wetK, 0., 1.);
     rough = mix(rough, rough * 0.7, soak); base *= 1. - 0.15 * soak;
-    emis = vec3(0.5, 0.07, 0.045) * bl * bl * (0.4 + 0.25 * vn(q.xy * 5. + q.z)) * (1. - skin.x);   // wounds glow faintly, like the sculpts
+    emis = vec3(0.5, 0.07, 0.045) * bl * bl * (0.22 + 0.14 * vn(q.xy * 5. + q.z)) * (1. - skin.x);   // wounds glow faintly, like the sculpts
 #endif
   } else if (mat > 5.5 && mat < 7.5) {      // sculpted characters / armour: rgb = (ao, cloth mask, blood mask)
     float ao = vNqC.r, clm = vNqC.g, bl = vNqC.b;

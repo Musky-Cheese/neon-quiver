@@ -74,12 +74,14 @@ function zGeometry(key) {
 /* ---------- Meshy zombies: textured, auto-rigged models folded onto this skeleton (tools/meshy_zombie.py) ----------
    One model per breed (models/mz_<type>.glb). Same 13 bones, same clips: position tracks are re-based onto the new
    rest pose so longer or shorter legs still plant the feet. Breeds without a model keep the sculpted parts. */
-const MZ = {};
-async function loadMeshyZombies() {
+const MZ = {}, MZ_BY = {};   // model name -> template; breed -> its model names (walker, walker_dock, ...)
+async function loadMeshyZombies(pick) {   // pick(name) -> bool: load a subset (boot waits for the walkers, the rest stream in)
   if (!ZRIG.ready || typeof MZ_TYPES === 'undefined' || !MZ_TYPES.length || (window.__NQ_RIG_URL || '').endsWith('.json')) return;
+  if (window.__NQ_NOMZ || /[?&]nomz=1/.test(location.search)) return;   // fall back to the sculpted bodies (comparisons, debugging)
   const logical = (n) => n.replace(/_\d+$/, '').replace(/\./g, '');
   const oldRest = {}; ZRIG.rootTemplate.traverse(o => { if (o.isBone) oldRest[logical(o.name)] = o.position.clone(); });
-  await Promise.all(MZ_TYPES.map(async (t) => {
+  const list = MZ_TYPES.filter(t => !MZ[t] && (!pick || pick(t)));
+  await Promise.all(list.map(async (t) => {
     try {
       const g = await new GLTFLoader().loadAsync('models/mz_' + t + '.glb?v=' + MZ_VER);
       let sm = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isSkinnedMesh && !sm) sm = o; });
@@ -108,11 +110,13 @@ async function loadMeshyZombies() {
       const m = sm.material, nq = (g.parser.json.extras || {}).nq || {};
       for (const tx of [m.map, m.normalMap]) if (tx) { tx.anisotropy = 4; tx.needsUpdate = true; }
       MZ[t] = { geo, rootTemplate: root, boneNames: skel.bones.map(b => b.name), inverses: skel.boneInverses.map(x => x.clone()), bindMatrix: sm.bindMatrix.clone(),
-        logicalOf: Object.fromEntries(skel.bones.map(b => [b.name, logical(b.name)])), map: m.map, normalMap: m.normalMap, nq, clips, hipD: (newRest.pelvis ? newRest.pelvis.y : 0.95) - 0.95 };
+        name: t, logicalOf: Object.fromEntries(skel.bones.map(b => [b.name, logical(b.name)])), map: m.map, normalMap: m.normalMap, nq, clips, hipD: (newRest.pelvis ? newRest.pelvis.y : 0.95) - 0.95 };
     } catch (e) { console.warn('meshy zombie unavailable:', t, e); }
   }));
+  for (const t of list) if (MZ[t]) { const b = t.split('_')[0]; (MZ_BY[b] || (MZ_BY[b] = [])).push(t); }
 }
-function mzFor(z) { return MZ[z.type] || null; }
+// each body keeps its model for life: chosen from its seed, so a crowd mixes every outfit the breed has
+function mzFor(z) { const l = MZ_BY[z.type]; if (!l) return null; return MZ[l[Math.floor(((z.seed * 9.173) % 1 + 1) % 1 * l.length) % l.length]]; }
 
 function zDepthMat(own) {
   const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -127,7 +131,7 @@ function zDepthMat(own) {
 
 function makeRig(z) {
   const mz = mzFor(z);
-  const key = mz ? 'mz|' + z.type : zVariant(z);
+  const key = mz ? 'mz|' + mz.name : zVariant(z);
   const pool = ZRIG.pool[key] || (ZRIG.pool[key] = []);
   let r = pool.pop();
   if (!r) {
@@ -365,7 +369,9 @@ function drawZombieRig(z, time) {
   }
   if (!z.headless) { if (z.jawGone) part(neck, 0, 0.07, 0.05, 0.1, 0.03, 0.07, [0.3, 0.02, 0.02], null, 0); }
   else part(neck, 0, 0.0, 0.02, 0.1, 0.04, 0.1, [0.3, 0.03, 0.03], null, 0);
-  if (T === 'boss') {
+  if (T === 'boss' && r.mz) {
+    const C = r.mz.nq.core; part(spine, C[0], C[1], C[2] + 0.02, 0.13, 0.13, 0.07, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
+  } else if (T === 'boss') {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
