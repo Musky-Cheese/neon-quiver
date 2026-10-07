@@ -377,7 +377,11 @@ function buildDistricts(C) {
     propSakura(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, false, null, dg < 8 ? 2 : dg < 22 ? 1 : 0, false);
   }
   // hedge line between the last houses and the grove, with a gap for the path
-  for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) SG.blob(pT(PM.a, x, 0.5, 163.5, R() * 6), 1.5, 0.9, 1.1, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) {   // clipped Meshy hedge sections (the two rolls the old blobs took), flowering bushes tucked along both faces
+    R(); R();
+    propHedge(x, 163.5, (pHash(x, 163.5, 2) - 0.5) * 0.05, 2.62, 1.28 + pHash(x, 163.5, 4) * 0.16, 6);
+    for (const [fz, k] of [[161.85, 10], [165.15, 20]]) if (pHash(x, fz, k) < (Math.abs(x) < 16 ? 0.75 : 0.4)) propBush(x + (pHash(x, fz, k + 1) - 0.5) * 1.6, fz + (pHash(x, fz, k + 2) - 0.5) * 0.3, 0.8, k + 3, 0.55);
+  }
   solid(-62, -5.5, 0, 1.4, 162.6, 164.4); solid(5.5, 62, 0, 1.4, 162.6, 164.4);
   WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 166, z1: 240 }, { x0: 32, x1: 150, z0: 166, z1: 240 }, { x0: -150, x1: 150, z0: 227, z1: 240 });
   propTorii(G, 0, 77 + OZ);
@@ -395,7 +399,18 @@ function buildDistricts(C) {
     propSakura(G, R, x, z, s, false);
     solid(x - 0.45, x + 0.45, 0, 2.6, z - 0.45, z + 0.45);
   }
-  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
+  // stone lanterns: tall kasuga-doro along the path, their lit faces to it; low yukimi-doro by the pond, facing the water
+  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8]]) propToro(G, x, z + OZ, true, 'kasuga', x > 0 ? -Math.PI / 2 : Math.PI / 2);
+  for (const [x, z] of [[-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ, true, 'yukimi', Math.atan2(-11 - x, 102 - z));
+  // garden bushes: round the pond outside its path, at the lantern feet and either side of the torii
+  const keepClear = [[-11, 113.2], [3.6, 99], [-26.3, 101], [-11, 91.5], [-25, 108.5], [-26, 86], [0.3, 102], [-3.2, 102]];   // benches, lanterns, the cache, the stepping stones' end
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * TAU + 0.2, bx = -11 + Math.cos(a) * 14.6, bz = 102 + Math.sin(a) * 11;
+    if (keepClear.some(([cx, cz]) => Math.hypot(bx - cx, bz - cz) < 2.4) || Math.abs(bx) < 2.6) continue;
+    if (pHash(bx, bz, 80) < 0.8) propBush(bx, bz + OZ, 0.95, 81, 0.5);
+  }
+  for (const [x, z] of [[3.6, 81.2], [-3.6, 78.6], [3.7, 93.4], [-3.6, 95.5], [3.8, 108.6], [-3.8, 115.4]]) propBush(x, z + OZ, 0.75, 90, 0.85);
+  for (const [x, z] of [[6.8, 76.2], [-6.8, 76.2], [8.6, 77.6], [-8.6, 77.6]]) propBush(x, z + OZ, 1.05, 95, 0.5);
   propShrine(G, 20, 115 + OZ, solid);                                   // the old shrine now sits off to the side
   // the end of the path: a walled manor
   propManor(G, 0, 219, solid);
@@ -553,7 +568,7 @@ function buildDistricts(C) {
     addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), -58.25, 7.4, -100, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
     setG('props');
     // wreckage and squatters' camps
-    propHoverCar(C.getG(), R, TR[0], -70.5, 0.5, [0.22, 0.05, 0.07], 1); solid(TR[0] - 1.6, TR[0] + 1.6, 0, 1.3, -73.2, -67.8);   // fell in from the street
+    C.ghost((dummy) => propHoverCar(dummy, R, TR[0], -70.5, 0.5, [0.22, 0.05, 0.07], 1));   // no cars on a metro line: the wreck that sat on the tracks is rolled as a ghost so the layout after it holds
     for (const [x, z] of [[-110, -61], [-87, -82]]) burnBarrel(x, z);
     crates(-89, -114); crates(-126, -60.5); barrier(-88, -100, 1); barrier(-96, -62, 0); dumpster(-131, -60.4, 0);
     for (const [x, z] of [[-86, -104], [-121, -61], [-113, -66]]) WORLD.steam.push([x, 0.1, z]);

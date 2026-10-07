@@ -327,16 +327,38 @@ function propTreeSpot(x, z, s = 1, solidTree = false) {
   WORLD.treeSpots.push({ x, z, h, ry: CR() * TAU, tint: 0.72 + CR() * 0.36 });
   if (solidTree) WORLD.circles.push({ x, z, r: 0.065 * h, h: 4 });
 }
-// stone lantern (toro): turned pedestal, glowing fire box, pyramid roof
-function propToro(g, x, z, lit = true) {
-  const st = [0.24, 0.24, 0.23];
-  g.lathe(pT(PM.a, x, 0, z), [[0.36, 0], [0.36, 0.12], [0.14, 0.2], [0.11, 0.78], [0.3, 0.84], [0.3, 0.94]], st, 0, 16, 10, true, false);
-  g.rbox(pT(PM.a, x, 1.12, z), 0.44, 0.36, 0.44, 0.03, st, 0, 16, 1);
-  for (const [dx, dz] of [[0, 0.225], [0, -0.225], [0.225, 0], [-0.225, 0]]) g.rbox(pT(PM.a, x + dx, 1.12, z + dz, dx ? Math.PI / 2 : 0), 0.24, 0.22, 0.012, 0.004, [1, 0.72, 0.38], lit ? 2.6 : 0, 0, 1);
-  g.lathe(pT(PM.a, x, 0, z, Math.PI / 4), [[0.5, 1.3], [0.5, 1.33], [0.12, 1.55], [0, 1.6]], st, 0, 16, 4, false, false);
-  g.sphere(M4.trs(PM.a, x, 1.66, z, 0, 0, 0, 0.12, 0.14, 0.12), st, 0, 16, 8, 6);
-  WORLD.circles.push({ x, z, r: 0.36, h: 1.6 });
-  if (lit) { WORLD.lights.push({ p: [x, 1.2, z], r: 7, c: [1.5, 0.95, 0.5], shop: true }); WORLD.halos.push({ p: [x, 1.12, z], s: 1.4, c: [0.5, 0.32, 0.15] }); }
+/* ---------- Meshy props: bushes, hedges and stone lanterns ----------
+   Textured Meshy models (models/prop_<kind>.glb from tools/meshy_prop.py) that r3.js loadMeshyProps draws from
+   WORLD.propSpots, one batch per model, culled one by one. h is the height in metres, len (hedges) the length along the
+   row (local x), tint a shade lighter or darker. Their variety comes from pHash, never from the city's dice, so the rest of
+   the random layout is unchanged. */
+const pHash = (x, z, k = 0) => {
+  let h = (Math.floor(x * 73.1) * 73856093) ^ (Math.floor(z * 37.7) * 19349663) ^ Math.imul(k + 1, 83492791);
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995); h ^= h >>> 15; return (h >>> 0) / 4294967296;
+};
+function propSpot(kind, x, z, ry, h, len = 0, tint = 1) { WORLD.propSpots.push({ kind, x, z, ry, h, len, tint }); }
+// one garden bush: a clipped boxwood dome, a loose leafy shrub, a pink satsuki azalea or a blue mophead hydrangea
+const BUSH_KINDS = [['boxwood', 0.3, 0.85, 1.15], ['shrub', 0.22, 1.0, 1.35], ['azalea', 0.26, 0.6, 0.85], ['hydrangea', 0.22, 0.85, 1.1]];   // kind, share, min/max height
+function propBush(x, z, s = 1, k = 0, flowers = 0.5) {
+  const u = pHash(x, z, k), v = pHash(x, z, k + 7), w = pHash(x, z, k + 13);
+  // flowers: the chance it is one of the flowering kinds
+  const fl = u < flowers, set = fl ? BUSH_KINDS.slice(2) : BUSH_KINDS.slice(0, 2);
+  const [kind, , h0, h1] = set[Math.floor(v * set.length) % set.length];
+  propSpot(kind, x, z, w * TAU, (h0 + (h1 - h0) * pHash(x, z, k + 21)) * s, 0, 0.82 + pHash(x, z, k + 29) * 0.3);
+}
+// a clipped hedge, its length along yaw ry, with the odd flowering bush tucked in front of it
+function propHedge(x, z, ry, len, h, k = 0) {
+  propSpot('hedge', x, z, ry + (pHash(x, z, k) < 0.5 ? Math.PI : 0), h, len, 0.85 + pHash(x, z, k + 3) * 0.25);
+}
+// stone lantern (toro): a weathered Meshy ishi-doro whose paper fire box glows. kasuga: the tall path lantern;
+// yukimi: the low, wide-roofed snow-viewing lantern by the water. ry turns its lit face.
+const TORO = { kasuga: { h: 2.05, lamp: 0.68, r: 0.36 }, yukimi: { h: 1.15, lamp: 0.55, r: 0.6 } };
+function propToro(g, x, z, lit = true, kind = 'kasuga', ry = 0) {
+  const T = TORO[kind];
+  propSpot(kind, x, z, ry, T.h * (0.97 + pHash(x, z, 5) * 0.06), 0, 1);
+  WORLD.circles.push({ x, z, r: T.r, h: T.h * 0.9 });
+  const ly = T.h * T.lamp;
+  if (lit) { WORLD.lights.push({ p: [x, ly, z], r: 7.5, c: [1.55, 0.95, 0.48], shop: true }); WORLD.halos.push({ p: [x, ly, z], s: 1.2, c: [0.5, 0.31, 0.14] }); }
 }
 // torii gate across the avenue: two red pillars, black-capped curved top beam, tie beam, name plaque
 function propTorii(g, x, z, span = 8.4) {
@@ -434,7 +456,12 @@ function propHouse(g, R, x, z, face, solid) {
   const fzl = d / 2 + 3.4;
   for (let fx = -5.2; fx <= 5.2; fx += 0.32) if (Math.abs(fx) > 0.9) box(fx, 0.45, fzl, 0.08, 0.9, 0.04, burnt ? [0.05, 0.05, 0.05] : [0.5, 0.49, 0.46], 0, 13);
   for (const fy of [0.3, 0.7]) for (const s of [-1, 1]) box(s * 3.05, fy, fzl, 4.3, 0.06, 0.05, [0.45, 0.44, 0.41], 0, 13);
-  if (R() < 0.7) g.blob(M4.mul(PM.c, P, pT(PM.b, -gs * 3.2, 0.5, d / 2 + 1.6, R() * 6)), 1.6, 0.8, 0.7, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  if (R() < 0.7) {   // a hedge, or a few garden bushes, along the front of the house (the two rolls the old blob took)
+    R(); R();
+    const hp = pPt(P, -gs * 3.2, 0, d / 2 + 1.6), pick = pHash(hp[0], hp[2], 41);
+    if (pick < 0.4) propHedge(hp[0], hp[2], ry, 3.0, 0.95 + pHash(hp[0], hp[2], 43) * 0.3, 47);
+    else { const n = pick < 0.75 ? 3 : 2; for (let i = 0; i < n; i++) { const bp = pPt(P, -gs * 3.2 + (i - (n - 1) / 2) * (3.2 / n) + (pHash(hp[0], hp[2], 50 + i) - 0.5) * 0.4, 0, d / 2 + 1.6 + (pHash(hp[0], hp[2], 60 + i) - 0.5) * 0.5); propBush(bp[0], bp[2], 1, 70 + i, 0.4); } }
+  }
   const wp = pPt(P, gs * (w / 2 + 1.9), 0, d / 2 + 1.5);
   if (R() < 0.35) propHoverCar(g, R, wp[0], wp[2], ry + (R() - 0.5) * 0.4, SIDING[Math.floor(R() * SIDING.length)], Math.floor(R() * 3));
   if (burnt) { const bp = pPt(P, -gs * 2.5, 0, d / 2 + 2); propBurnBarrel(g, bp[0], bp[2]); }

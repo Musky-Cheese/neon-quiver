@@ -109,7 +109,18 @@ if (typeof GPUTexture !== 'undefined') {
 let NQ_BACKEND = 'webgpu';
 try {
   const trackTimestamp = new URLSearchParams(location.search).has('prof');   // ?prof=1: per-pass GPU timing (r3.js profiler)
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp, forceWebGL: !!(window.NQ_BOOT && window.NQ_BOOT.forceWebGL) });
+  const forceWebGL = !!(window.NQ_BOOT && window.NQ_BOOT.forceWebGL);
+  // A textured Meshy model (colour + normal map) beside the city's own maps (occlusion, rooms, mirror, the Ultra texture
+  // strips, the env map) and six lamp shadows plus the moon's samples 17 textures, one over WebGPU's default 16, and that
+  // pipeline fails to build. Most adapters allow far more: ask for up to 32 where the hardware has them.
+  let requiredLimits;
+  try {
+    if (!forceWebGL && navigator.gpu) {
+      const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }), L = a && a.limits;
+      if (L) { requiredLimits = {}; for (const k of ['maxSampledTexturesPerShaderStage', 'maxSamplersPerShaderStage']) if (L[k] > 16) requiredLimits[k] = Math.min(L[k], 32); }
+    }
+  } catch (e) { requiredLimits = undefined; }
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp, forceWebGL, requiredLimits });
   renderer.onDeviceLost = (info) => gpuDeviceLost(info);   // game.js: pause and explain, offer a reload
   await renderer.init();
   NQ_BACKEND = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';

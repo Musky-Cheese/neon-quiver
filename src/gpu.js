@@ -455,6 +455,11 @@ function nqSurface(material, builder) {
     base.mulAssign(mix(1, vn(W.xz.mul(1.7).add(W.y.mul(1.3))).mul(0.5).add(0.75), leaf));   // so a canopy isn't one flat green
     const wetBark = wet1.mul(leaf.oneMinus());
     base.mulAssign(wetBark.mul(-0.25).add(1)); rough.assign(mix(mix(0.82, 0.55, wetBark), 0.92, leaf)); rimK.assign(mix(0.3, 0.55, leaf));
+  }).ElseIf(M(26.5, 27.5), () => {    // Meshy stone lantern (nqm.x: its paper fire box): weathered granite, darker in the rain, the paper lit from inside
+    const glow = mx, fl = sin(T.mul(7.3).add(W.x.mul(3.1))).mul(0.035).add(sin(T.mul(12.7).add(W.z.mul(2.3))).mul(0.025)).add(0.94);
+    base.mulAssign(wet1.mul(-0.3).add(1).mul(glow.mul(-0.4).add(1)));
+    emis.assign(vec3(2.6, 1.55, 0.72).mul(glow).mul(fl).mul(NQN.uNeon));
+    rough.assign(mix(mix(0.9, 0.48, wet1), 0.75, glow)); rimK.assign(0.2);
   }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
     const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));
@@ -713,11 +718,12 @@ function glassMaterialGPU() {
 /* ---------------- post: world (MSAA) -> GTAO (Ultra) -> bow -> bloom -> grade, one RenderPipeline ----------------
    The bow is its own pass over a transparent clear; its alpha lays it over the world (the sky writes alpha 1 there). */
 const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
-  uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0) };
-const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null };
+  uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0),
+  uStreak: uniform(1), uStreakThr: uniform(1.0), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
+const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
-  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); }
+  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
   const samples = 4;
   const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
   world.name = 'world'; vmP.name = 'bow';
@@ -745,6 +751,13 @@ function buildPostGPU(q) {
   const blT = bl.getTextureNode();
   const S = (u) => comb.sample(u).rgb.add(blT.sample(u).rgb);
   const U = GRADE_U;
+  // Anamorphic streaks: the hottest pixels (neon tubes, lamps, headlights) smeared sideways into the long thin flares a
+  // cinema lens draws. Thresholded at full resolution, then three widening horizontal blurs at half resolution; the first
+  // samples between four pixels, an exact 2x2 average, so a one-pixel light never shimmers as the camera moves.
+  const sSrc = Fn(() => { const c = comb.sample(screenUV).rgb, l = max(max(c.r, c.g), c.b); return vec4(c.mul(smoothstep(U.uStreakThr, U.uStreakThr.mul(4), l)), 1); })();
+  const st1 = gaussianBlur(sSrc, vec2(1, 0), 10, { resolutionScale: 0.5 }), st2 = gaussianBlur(st1.getTextureNode(), vec2(4, 0), 10), st3 = gaussianBlur(st2.getTextureNode(), vec2(16, 0), 10);
+  for (const g of [st1, st2, st3]) for (const rt of [g._horizontalRT, g._verticalRT]) rt.texture.type = THREE.HalfFloatType;   // HDR: the hot cores must not clip at 1
+  const stT = st3.getTextureNode(), st2T = st2.getTextureNode(), st1T = st1.getTextureNode();
   const grade = Fn(() => {
     const u = screenUV, cc = u.sub(0.5), r2 = dot(cc, cc);
     const ab = U.uDmg.mul(0.006).add(0.0015).add(U.uAberr).mul(r2).mul(4);
@@ -760,7 +773,17 @@ function buildPostGPU(q) {
       for (let i = 1; i <= 6; i++) { const t = i / 6, o = cc.mul(t * 0.014).mul(k), w = 1 - t * 0.5; acc.addAssign(S(u.sub(o)).mul(w).add(S(u.add(o.mul(0.5))).mul(w * 0.5))); wsum.addAssign(w * 1.5); }
       c.assign(mix(c, acc.div(wsum), clampT(k.mul(2), 0, 0.85)));
     });
+    {   // the lens: streaks (a long faint tail over a short bright core, cooled the way anamorphic coatings tint them) and film
+      // halation, the red-orange fringe light scatters into round bright things off the film base
+      const sk = st1T.sample(u).rgb.mul(1.5).add(st2T.sample(u).rgb.mul(3)).add(stT.sample(u).rgb.mul(6)), sl = dot(sk, vec3(0.3, 0.59, 0.11));
+      c.addAssign(mix(sk, vec3(sl).mul(vec3(0.55, 0.8, 1.3)), 0.45).mul(U.uStreak));
+      c.addAssign(blT.sample(u).rgb.mul(vec3(1.0, 0.38, 0.16)).mul(U.uHal));
+    }
     c.mulAssign(U.uExpo);
+    {   // highlights burn toward white the way film and the eye see a hot neon tube: the colour stays in the glow round it
+      const mc = max(max(c.r, c.g), c.b);
+      c.assign(mix(c, vec3(mc).mul(0.92).add(c.mul(0.08)), smoothstep(1.4, 9, mc).mul(U.uWhite)));
+    }
     const lum = dot(c, vec3(0.3, 0.59, 0.11));
     c.assign(mix(c, vec3(lum).mul(vec3(1.1, 0.9, 0.9)), U.uLow.mul(0.55)));
     c.assign(aces(c));
@@ -772,12 +795,15 @@ function buildPostGPU(q) {
     const edge = smoothstep(0.25, 0.75, sqrt(r2).mul(1.4));
     c.assign(mix(c, vec3(0.75, 0.02, 0.08), edge.mul(clampT(U.uDmg, 0, 1)).mul(0.75)));
     c.assign(mix(c, vec3(0.5, 0, 0.05), edge.mul(U.uLow).mul(sin(U.uTime.mul(6)).mul(0.2).add(0.25))));
-    c.addAssign(h21(u.mul(U.uRes).add(fract(U.uTime).mul(100))).sub(0.5).mul(0.014));
+    {   // film grain: triangular noise, strongest in the mid-tones the way silver grain shows, faint in deep shadow and highlights
+      const gp = u.mul(U.uRes).add(fract(U.uTime).mul(100)), gl = dot(c, vec3(0.3, 0.59, 0.11));
+      c.addAssign(h21(gp).add(h21(gp.add(vec2(17.31, 5.73)))).sub(1).mul(gl.mul(gl.oneMinus()).mul(2.4).add(0.35).mul(0.013)));
+    }
     return vec4(c, 1);
   });
   const pipe = new THREE.RenderPipeline(renderer, grade());
   pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma
-  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, key: q });
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q });
 }
 
 /* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------

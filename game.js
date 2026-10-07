@@ -4,10 +4,13 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
+import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 const RIG_VER = "b5137a2697";   // content hash: a new model always busts the browser cache
 const SAKURA_VER = "3dce9e4243"; // Meshy hero-tree cache key
 const CARS_VER = "9c99c61797";   // Meshy car models cache key
 const TREE_VER = "0eb1f64b0a";   // Meshy tree model cache key
+const PROPS_VER = "171831ae7b";  // Meshy bushes and lanterns cache key
+const PROP_MODELS = ["azalea", "boxwood", "hedge", "hydrangea", "kasuga", "shrub", "yukimi"];
 const MZ_VER = "02ca513285";     // Meshy zombie models cache key
 const MZ_TYPES = ["alpha", "boss", "brute", "climber", "runner", "screamer", "spitter", "walker", "walker_dock", "walker_vendor"];
 const TEX_VER = "11209ad2cc";   // same for the Ultra texture strips
@@ -126,7 +129,18 @@ if (typeof GPUTexture !== 'undefined') {
 let NQ_BACKEND = 'webgpu';
 try {
   const trackTimestamp = new URLSearchParams(location.search).has('prof');   // ?prof=1: per-pass GPU timing (r3.js profiler)
-  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp, forceWebGL: !!(window.NQ_BOOT && window.NQ_BOOT.forceWebGL) });
+  const forceWebGL = !!(window.NQ_BOOT && window.NQ_BOOT.forceWebGL);
+  // A textured Meshy model (colour + normal map) beside the city's own maps (occlusion, rooms, mirror, the Ultra texture
+  // strips, the env map) and six lamp shadows plus the moon's samples 17 textures, one over WebGPU's default 16, and that
+  // pipeline fails to build. Most adapters allow far more: ask for up to 32 where the hardware has them.
+  let requiredLimits;
+  try {
+    if (!forceWebGL && navigator.gpu) {
+      const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }), L = a && a.limits;
+      if (L) { requiredLimits = {}; for (const k of ['maxSampledTexturesPerShaderStage', 'maxSamplersPerShaderStage']) if (L[k] > 16) requiredLimits[k] = Math.min(L[k], 32); }
+    }
+  } catch (e) { requiredLimits = undefined; }
+  renderer = new THREE.WebGPURenderer({ canvas, antialias: false, alpha: false, depth: true, stencil: false, powerPreference: 'high-performance', trackTimestamp, forceWebGL, requiredLimits });
   renderer.onDeviceLost = (info) => gpuDeviceLost(info);   // game.js: pause and explain, offer a reload
   await renderer.init();
   NQ_BACKEND = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
@@ -884,6 +898,11 @@ function nqSurface(material, builder) {
     base.mulAssign(mix(1, vn(W.xz.mul(1.7).add(W.y.mul(1.3))).mul(0.5).add(0.75), leaf));   // so a canopy isn't one flat green
     const wetBark = wet1.mul(leaf.oneMinus());
     base.mulAssign(wetBark.mul(-0.25).add(1)); rough.assign(mix(mix(0.82, 0.55, wetBark), 0.92, leaf)); rimK.assign(mix(0.3, 0.55, leaf));
+  }).ElseIf(M(26.5, 27.5), () => {    // Meshy stone lantern (nqm.x: its paper fire box): weathered granite, darker in the rain, the paper lit from inside
+    const glow = mx, fl = sin(T.mul(7.3).add(W.x.mul(3.1))).mul(0.035).add(sin(T.mul(12.7).add(W.z.mul(2.3))).mul(0.025)).add(0.94);
+    base.mulAssign(wet1.mul(-0.3).add(1).mul(glow.mul(-0.4).add(1)));
+    emis.assign(vec3(2.6, 1.55, 0.72).mul(glow).mul(fl).mul(NQN.uNeon));
+    rough.assign(mix(mix(0.9, 0.48, wet1), 0.75, glow)); rimK.assign(0.2);
   }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
     const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));
@@ -1142,11 +1161,12 @@ function glassMaterialGPU() {
 /* ---------------- post: world (MSAA) -> GTAO (Ultra) -> bow -> bloom -> grade, one RenderPipeline ----------------
    The bow is its own pass over a transparent clear; its alpha lays it over the world (the sky writes alpha 1 there). */
 const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
-  uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0) };
-const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null };
+  uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0),
+  uStreak: uniform(1), uStreakThr: uniform(1.0), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
+const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
-  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); }
+  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
   const samples = 4;
   const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
   world.name = 'world'; vmP.name = 'bow';
@@ -1174,6 +1194,13 @@ function buildPostGPU(q) {
   const blT = bl.getTextureNode();
   const S = (u) => comb.sample(u).rgb.add(blT.sample(u).rgb);
   const U = GRADE_U;
+  // Anamorphic streaks: the hottest pixels (neon tubes, lamps, headlights) smeared sideways into the long thin flares a
+  // cinema lens draws. Thresholded at full resolution, then three widening horizontal blurs at half resolution; the first
+  // samples between four pixels, an exact 2x2 average, so a one-pixel light never shimmers as the camera moves.
+  const sSrc = Fn(() => { const c = comb.sample(screenUV).rgb, l = max(max(c.r, c.g), c.b); return vec4(c.mul(smoothstep(U.uStreakThr, U.uStreakThr.mul(4), l)), 1); })();
+  const st1 = gaussianBlur(sSrc, vec2(1, 0), 10, { resolutionScale: 0.5 }), st2 = gaussianBlur(st1.getTextureNode(), vec2(4, 0), 10), st3 = gaussianBlur(st2.getTextureNode(), vec2(16, 0), 10);
+  for (const g of [st1, st2, st3]) for (const rt of [g._horizontalRT, g._verticalRT]) rt.texture.type = THREE.HalfFloatType;   // HDR: the hot cores must not clip at 1
+  const stT = st3.getTextureNode(), st2T = st2.getTextureNode(), st1T = st1.getTextureNode();
   const grade = Fn(() => {
     const u = screenUV, cc = u.sub(0.5), r2 = dot(cc, cc);
     const ab = U.uDmg.mul(0.006).add(0.0015).add(U.uAberr).mul(r2).mul(4);
@@ -1189,7 +1216,17 @@ function buildPostGPU(q) {
       for (let i = 1; i <= 6; i++) { const t = i / 6, o = cc.mul(t * 0.014).mul(k), w = 1 - t * 0.5; acc.addAssign(S(u.sub(o)).mul(w).add(S(u.add(o.mul(0.5))).mul(w * 0.5))); wsum.addAssign(w * 1.5); }
       c.assign(mix(c, acc.div(wsum), clampT(k.mul(2), 0, 0.85)));
     });
+    {   // the lens: streaks (a long faint tail over a short bright core, cooled the way anamorphic coatings tint them) and film
+      // halation, the red-orange fringe light scatters into round bright things off the film base
+      const sk = st1T.sample(u).rgb.mul(1.5).add(st2T.sample(u).rgb.mul(3)).add(stT.sample(u).rgb.mul(6)), sl = dot(sk, vec3(0.3, 0.59, 0.11));
+      c.addAssign(mix(sk, vec3(sl).mul(vec3(0.55, 0.8, 1.3)), 0.45).mul(U.uStreak));
+      c.addAssign(blT.sample(u).rgb.mul(vec3(1.0, 0.38, 0.16)).mul(U.uHal));
+    }
     c.mulAssign(U.uExpo);
+    {   // highlights burn toward white the way film and the eye see a hot neon tube: the colour stays in the glow round it
+      const mc = max(max(c.r, c.g), c.b);
+      c.assign(mix(c, vec3(mc).mul(0.92).add(c.mul(0.08)), smoothstep(1.4, 9, mc).mul(U.uWhite)));
+    }
     const lum = dot(c, vec3(0.3, 0.59, 0.11));
     c.assign(mix(c, vec3(lum).mul(vec3(1.1, 0.9, 0.9)), U.uLow.mul(0.55)));
     c.assign(aces(c));
@@ -1201,12 +1238,15 @@ function buildPostGPU(q) {
     const edge = smoothstep(0.25, 0.75, sqrt(r2).mul(1.4));
     c.assign(mix(c, vec3(0.75, 0.02, 0.08), edge.mul(clampT(U.uDmg, 0, 1)).mul(0.75)));
     c.assign(mix(c, vec3(0.5, 0, 0.05), edge.mul(U.uLow).mul(sin(U.uTime.mul(6)).mul(0.2).add(0.25))));
-    c.addAssign(h21(u.mul(U.uRes).add(fract(U.uTime).mul(100))).sub(0.5).mul(0.014));
+    {   // film grain: triangular noise, strongest in the mid-tones the way silver grain shows, faint in deep shadow and highlights
+      const gp = u.mul(U.uRes).add(fract(U.uTime).mul(100)), gl = dot(c, vec3(0.3, 0.59, 0.11));
+      c.addAssign(h21(gp).add(h21(gp.add(vec2(17.31, 5.73)))).sub(1).mul(gl.mul(gl.oneMinus()).mul(2.4).add(0.35).mul(0.013)));
+    }
     return vec4(c, 1);
   });
   const pipe = new THREE.RenderPipeline(renderer, grade());
   pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma
-  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, key: q });
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q });
 }
 
 /* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------
@@ -1565,16 +1605,38 @@ function propTreeSpot(x, z, s = 1, solidTree = false) {
   WORLD.treeSpots.push({ x, z, h, ry: CR() * TAU, tint: 0.72 + CR() * 0.36 });
   if (solidTree) WORLD.circles.push({ x, z, r: 0.065 * h, h: 4 });
 }
-// stone lantern (toro): turned pedestal, glowing fire box, pyramid roof
-function propToro(g, x, z, lit = true) {
-  const st = [0.24, 0.24, 0.23];
-  g.lathe(pT(PM.a, x, 0, z), [[0.36, 0], [0.36, 0.12], [0.14, 0.2], [0.11, 0.78], [0.3, 0.84], [0.3, 0.94]], st, 0, 16, 10, true, false);
-  g.rbox(pT(PM.a, x, 1.12, z), 0.44, 0.36, 0.44, 0.03, st, 0, 16, 1);
-  for (const [dx, dz] of [[0, 0.225], [0, -0.225], [0.225, 0], [-0.225, 0]]) g.rbox(pT(PM.a, x + dx, 1.12, z + dz, dx ? Math.PI / 2 : 0), 0.24, 0.22, 0.012, 0.004, [1, 0.72, 0.38], lit ? 2.6 : 0, 0, 1);
-  g.lathe(pT(PM.a, x, 0, z, Math.PI / 4), [[0.5, 1.3], [0.5, 1.33], [0.12, 1.55], [0, 1.6]], st, 0, 16, 4, false, false);
-  g.sphere(M4.trs(PM.a, x, 1.66, z, 0, 0, 0, 0.12, 0.14, 0.12), st, 0, 16, 8, 6);
-  WORLD.circles.push({ x, z, r: 0.36, h: 1.6 });
-  if (lit) { WORLD.lights.push({ p: [x, 1.2, z], r: 7, c: [1.5, 0.95, 0.5], shop: true }); WORLD.halos.push({ p: [x, 1.12, z], s: 1.4, c: [0.5, 0.32, 0.15] }); }
+/* ---------- Meshy props: bushes, hedges and stone lanterns ----------
+   Textured Meshy models (models/prop_<kind>.glb from tools/meshy_prop.py) that r3.js loadMeshyProps draws from
+   WORLD.propSpots, one batch per model, culled one by one. h is the height in metres, len (hedges) the length along the
+   row (local x), tint a shade lighter or darker. Their variety comes from pHash, never from the city's dice, so the rest of
+   the random layout is unchanged. */
+const pHash = (x, z, k = 0) => {
+  let h = (Math.floor(x * 73.1) * 73856093) ^ (Math.floor(z * 37.7) * 19349663) ^ Math.imul(k + 1, 83492791);
+  h = Math.imul(h ^ (h >>> 13), 0x5bd1e995); h ^= h >>> 15; return (h >>> 0) / 4294967296;
+};
+function propSpot(kind, x, z, ry, h, len = 0, tint = 1) { WORLD.propSpots.push({ kind, x, z, ry, h, len, tint }); }
+// one garden bush: a clipped boxwood dome, a loose leafy shrub, a pink satsuki azalea or a blue mophead hydrangea
+const BUSH_KINDS = [['boxwood', 0.3, 0.85, 1.15], ['shrub', 0.22, 1.0, 1.35], ['azalea', 0.26, 0.6, 0.85], ['hydrangea', 0.22, 0.85, 1.1]];   // kind, share, min/max height
+function propBush(x, z, s = 1, k = 0, flowers = 0.5) {
+  const u = pHash(x, z, k), v = pHash(x, z, k + 7), w = pHash(x, z, k + 13);
+  // flowers: the chance it is one of the flowering kinds
+  const fl = u < flowers, set = fl ? BUSH_KINDS.slice(2) : BUSH_KINDS.slice(0, 2);
+  const [kind, , h0, h1] = set[Math.floor(v * set.length) % set.length];
+  propSpot(kind, x, z, w * TAU, (h0 + (h1 - h0) * pHash(x, z, k + 21)) * s, 0, 0.82 + pHash(x, z, k + 29) * 0.3);
+}
+// a clipped hedge, its length along yaw ry, with the odd flowering bush tucked in front of it
+function propHedge(x, z, ry, len, h, k = 0) {
+  propSpot('hedge', x, z, ry + (pHash(x, z, k) < 0.5 ? Math.PI : 0), h, len, 0.85 + pHash(x, z, k + 3) * 0.25);
+}
+// stone lantern (toro): a weathered Meshy ishi-doro whose paper fire box glows. kasuga: the tall path lantern;
+// yukimi: the low, wide-roofed snow-viewing lantern by the water. ry turns its lit face.
+const TORO = { kasuga: { h: 2.05, lamp: 0.68, r: 0.36 }, yukimi: { h: 1.15, lamp: 0.55, r: 0.6 } };
+function propToro(g, x, z, lit = true, kind = 'kasuga', ry = 0) {
+  const T = TORO[kind];
+  propSpot(kind, x, z, ry, T.h * (0.97 + pHash(x, z, 5) * 0.06), 0, 1);
+  WORLD.circles.push({ x, z, r: T.r, h: T.h * 0.9 });
+  const ly = T.h * T.lamp;
+  if (lit) { WORLD.lights.push({ p: [x, ly, z], r: 7.5, c: [1.55, 0.95, 0.48], shop: true }); WORLD.halos.push({ p: [x, ly, z], s: 1.2, c: [0.5, 0.31, 0.14] }); }
 }
 // torii gate across the avenue: two red pillars, black-capped curved top beam, tie beam, name plaque
 function propTorii(g, x, z, span = 8.4) {
@@ -1672,7 +1734,12 @@ function propHouse(g, R, x, z, face, solid) {
   const fzl = d / 2 + 3.4;
   for (let fx = -5.2; fx <= 5.2; fx += 0.32) if (Math.abs(fx) > 0.9) box(fx, 0.45, fzl, 0.08, 0.9, 0.04, burnt ? [0.05, 0.05, 0.05] : [0.5, 0.49, 0.46], 0, 13);
   for (const fy of [0.3, 0.7]) for (const s of [-1, 1]) box(s * 3.05, fy, fzl, 4.3, 0.06, 0.05, [0.45, 0.44, 0.41], 0, 13);
-  if (R() < 0.7) g.blob(M4.mul(PM.c, P, pT(PM.b, -gs * 3.2, 0.5, d / 2 + 1.6, R() * 6)), 1.6, 0.8, 0.7, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  if (R() < 0.7) {   // a hedge, or a few garden bushes, along the front of the house (the two rolls the old blob took)
+    R(); R();
+    const hp = pPt(P, -gs * 3.2, 0, d / 2 + 1.6), pick = pHash(hp[0], hp[2], 41);
+    if (pick < 0.4) propHedge(hp[0], hp[2], ry, 3.0, 0.95 + pHash(hp[0], hp[2], 43) * 0.3, 47);
+    else { const n = pick < 0.75 ? 3 : 2; for (let i = 0; i < n; i++) { const bp = pPt(P, -gs * 3.2 + (i - (n - 1) / 2) * (3.2 / n) + (pHash(hp[0], hp[2], 50 + i) - 0.5) * 0.4, 0, d / 2 + 1.6 + (pHash(hp[0], hp[2], 60 + i) - 0.5) * 0.5); propBush(bp[0], bp[2], 1, 70 + i, 0.4); } }
+  }
   const wp = pPt(P, gs * (w / 2 + 1.9), 0, d / 2 + 1.5);
   if (R() < 0.35) propHoverCar(g, R, wp[0], wp[2], ry + (R() - 0.5) * 0.4, SIDING[Math.floor(R() * SIDING.length)], Math.floor(R() * 3));
   if (burnt) { const bp = pPt(P, -gs * 2.5, 0, d / 2 + 2); propBurnBarrel(g, bp[0], bp[2]); }
@@ -3033,6 +3100,7 @@ const WORLD = {
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   carSpots: [], // wrecked cars {x, z, ry, kind: 'sedan'|'van', paint, roll} drawn from the Meshy models (r3.js loadMeshyCars)
+  propSpots: [], // Meshy props {kind, x, z, ry, h, len, tint}: bushes, hedges, stone lanterns (r3.js loadMeshyProps)
   treeSpots: [], // plain trees {x, z, h, ry, tint}: one textured Meshy model, batched (r3.js loadMeshyTrees)
   blossoms: [], // flat list, 12 floats per flower card: x, y, z, nx, ny, nz, size, r, g, b, glow, variant (r3.js buildBlossoms)
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
@@ -3383,7 +3451,7 @@ function buildCity() {
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
     const pg = g, keep = {}; g = new Geo();
-    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
+    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'propSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
     try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
@@ -3810,7 +3878,11 @@ function buildDistricts(C) {
     propSakura(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, false, null, dg < 8 ? 2 : dg < 22 ? 1 : 0, false);
   }
   // hedge line between the last houses and the grove, with a gap for the path
-  for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) SG.blob(pT(PM.a, x, 0.5, 163.5, R() * 6), 1.5, 0.9, 1.1, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
+  for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) {   // clipped Meshy hedge sections (the two rolls the old blobs took), flowering bushes tucked along both faces
+    R(); R();
+    propHedge(x, 163.5, (pHash(x, 163.5, 2) - 0.5) * 0.05, 2.62, 1.28 + pHash(x, 163.5, 4) * 0.16, 6);
+    for (const [fz, k] of [[161.85, 10], [165.15, 20]]) if (pHash(x, fz, k) < (Math.abs(x) < 16 ? 0.75 : 0.4)) propBush(x + (pHash(x, fz, k + 1) - 0.5) * 1.6, fz + (pHash(x, fz, k + 2) - 0.5) * 0.3, 0.8, k + 3, 0.55);
+  }
   solid(-62, -5.5, 0, 1.4, 162.6, 164.4); solid(5.5, 62, 0, 1.4, 162.6, 164.4);
   WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 166, z1: 240 }, { x0: 32, x1: 150, z0: 166, z1: 240 }, { x0: -150, x1: 150, z0: 227, z1: 240 });
   propTorii(G, 0, 77 + OZ);
@@ -3828,7 +3900,18 @@ function buildDistricts(C) {
     propSakura(G, R, x, z, s, false);
     solid(x - 0.45, x + 0.45, 0, 2.6, z - 0.45, z + 0.45);
   }
-  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8], [-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ);
+  // stone lanterns: tall kasuga-doro along the path, their lit faces to it; low yukimi-doro by the pond, facing the water
+  for (const [x, z] of [[2.3, 80], [-2.3, 80], [2.3, 92], [-2.3, 94], [2.4, 110], [-2.4, 114], [3.4, 120.8], [-3.4, 120.8]]) propToro(G, x, z + OZ, true, 'kasuga', x > 0 ? -Math.PI / 2 : Math.PI / 2);
+  for (const [x, z] of [[-11, 91.5], [-25, 108.5]]) propToro(G, x, z + OZ, true, 'yukimi', Math.atan2(-11 - x, 102 - z));
+  // garden bushes: round the pond outside its path, at the lantern feet and either side of the torii
+  const keepClear = [[-11, 113.2], [3.6, 99], [-26.3, 101], [-11, 91.5], [-25, 108.5], [-26, 86], [0.3, 102], [-3.2, 102]];   // benches, lanterns, the cache, the stepping stones' end
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * TAU + 0.2, bx = -11 + Math.cos(a) * 14.6, bz = 102 + Math.sin(a) * 11;
+    if (keepClear.some(([cx, cz]) => Math.hypot(bx - cx, bz - cz) < 2.4) || Math.abs(bx) < 2.6) continue;
+    if (pHash(bx, bz, 80) < 0.8) propBush(bx, bz + OZ, 0.95, 81, 0.5);
+  }
+  for (const [x, z] of [[3.6, 81.2], [-3.6, 78.6], [3.7, 93.4], [-3.6, 95.5], [3.8, 108.6], [-3.8, 115.4]]) propBush(x, z + OZ, 0.75, 90, 0.85);
+  for (const [x, z] of [[6.8, 76.2], [-6.8, 76.2], [8.6, 77.6], [-8.6, 77.6]]) propBush(x, z + OZ, 1.05, 95, 0.5);
   propShrine(G, 20, 115 + OZ, solid);                                   // the old shrine now sits off to the side
   // the end of the path: a walled manor
   propManor(G, 0, 219, solid);
@@ -3986,7 +4069,7 @@ function buildDistricts(C) {
     addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), -58.25, 7.4, -100, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
     setG('props');
     // wreckage and squatters' camps
-    propHoverCar(C.getG(), R, TR[0], -70.5, 0.5, [0.22, 0.05, 0.07], 1); solid(TR[0] - 1.6, TR[0] + 1.6, 0, 1.3, -73.2, -67.8);   // fell in from the street
+    C.ghost((dummy) => propHoverCar(dummy, R, TR[0], -70.5, 0.5, [0.22, 0.05, 0.07], 1));   // no cars on a metro line: the wreck that sat on the tracks is rolled as a ghost so the layout after it holds
     for (const [x, z] of [[-110, -61], [-87, -82]]) burnBarrel(x, z);
     crates(-89, -114); crates(-126, -60.5); barrier(-88, -100, 1); barrier(-96, -62, 0); dumpster(-131, -60.4, 0);
     for (const [x, z] of [[-86, -104], [-121, -61], [-113, -66]]) WORLD.steam.push([x, 0.1, z]);
@@ -7218,6 +7301,60 @@ async function loadMeshyTrees() {
   } catch (e) { console.warn('tree load failed', e); }
 }
 
+/* ---------------- Meshy props: bushes, hedges, stone lanterns ----------------
+   WORLD.propSpots (props.js propSpot: kind, x, z, yaw, height h, hedge length len, tint), one textured Meshy model per kind
+   (models/prop_<kind>.glb from tools/meshy_prop.py: colour and normal maps, COLOR_0.r the mask) and one BatchedMesh per
+   model, culled spot by spot. Bushes shade like the trees' leaves (mat 26, NQ_TREE: the mask marks the foliage over the
+   stems), each a shade lighter or darker; lanterns are mat 27, the mask lighting their paper fire boxes. */
+const PROP_MAT = { kasuga: 27, yukimi: 27 };
+async function loadMeshyProps() {
+  const spots = WORLD.propSpots || [], have = typeof PROP_MODELS !== 'undefined' ? PROP_MODELS : [];
+  const kinds = [...new Set(spots.map(s => s.kind))].filter(k => have.includes(k)); if (!kinds.length) return;
+  const loader = new GLTFLoader(), V = typeof PROPS_VER === 'string' ? PROPS_VER : '0';
+  await Promise.all(kinds.map(async (kind) => {
+    try {
+      const gltf = await loader.loadAsync('models/prop_' + kind + '.glb?v=' + V);
+      let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
+      if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
+      gltf.scene.updateMatrixWorld(true);
+      const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
+      if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
+      if (!geo.attributes.normal) geo.computeVertexNormals();
+      const pos = geo.attributes.position, n = pos.count, ca = geo.attributes.color, mid = PROP_MAT[kind] || 26;
+      const nqm = new Float32Array(n * 2), col = new Float32Array(n * 3).fill(1);
+      for (let i = 0; i < n; i++) { nqm[i * 2] = ca ? ca.getX(i) : (mid === 26 ? 1 : 0); nqm[i * 2 + 1] = mid; }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+      for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv', 'color', 'nqm'].includes(k)) geo.deleteAttribute(k);
+      geo.computeBoundingBox(); let bb = geo.boundingBox;
+      if (mid === 26 && bb.max.z - bb.min.z > (bb.max.x - bb.min.x) * 1.15) { geo.rotateY(Math.PI / 2); geo.computeBoundingBox(); bb = geo.boundingBox; }   // a hedge's length runs along local x
+      // stand it on its base at the origin, 1 unit tall: the spot's height is the scale
+      const H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
+      for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.05) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
+      cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
+      if (mid === 26) { cx = (bb.min.x + bb.max.x) / 2; cz = (bb.min.z + bb.max.z) / 2; }   // a bush's stems can sit off centre
+      geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
+      const xLen = Math.max(1e-3, geo.boundingBox.max.x - geo.boundingBox.min.x);
+      const sm = srcMesh.material || {}, tex = sm.map || null, mat = nqMaterial('static');
+      if (tex) { mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; }
+      if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
+      if (mid === 26) mat.defines.NQ_TREE = 1;
+      mat.needsUpdate = true;
+      const list = spots.filter(s => s.kind === kind);
+      const batch = new THREE.BatchedMesh(list.length, n, geo.index.count, mat), gid = batch.addGeometry(geo);
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+      for (const s of list) {
+        const id = batch.addInstance(gid);
+        m.compose(new THREE.Vector3(s.x, -0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+        batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
+      }
+      batch.computeBoundingSphere();
+      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+      scene.add(batch); WORLD_MESHES.push(batch);
+    } catch (e) { console.warn('prop load failed', kind, e); }
+  }));
+  updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
@@ -8807,6 +8944,7 @@ async function boot() {
     loadHeroSakuras(),
     loadMeshyCars(),
     loadMeshyTrees(),
+    loadMeshyProps(),
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
   loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
@@ -8841,7 +8979,7 @@ window.NQ = {
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  GPOST, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
+  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

@@ -691,6 +691,60 @@ async function loadMeshyTrees() {
   } catch (e) { console.warn('tree load failed', e); }
 }
 
+/* ---------------- Meshy props: bushes, hedges, stone lanterns ----------------
+   WORLD.propSpots (props.js propSpot: kind, x, z, yaw, height h, hedge length len, tint), one textured Meshy model per kind
+   (models/prop_<kind>.glb from tools/meshy_prop.py: colour and normal maps, COLOR_0.r the mask) and one BatchedMesh per
+   model, culled spot by spot. Bushes shade like the trees' leaves (mat 26, NQ_TREE: the mask marks the foliage over the
+   stems), each a shade lighter or darker; lanterns are mat 27, the mask lighting their paper fire boxes. */
+const PROP_MAT = { kasuga: 27, yukimi: 27 };
+async function loadMeshyProps() {
+  const spots = WORLD.propSpots || [], have = typeof PROP_MODELS !== 'undefined' ? PROP_MODELS : [];
+  const kinds = [...new Set(spots.map(s => s.kind))].filter(k => have.includes(k)); if (!kinds.length) return;
+  const loader = new GLTFLoader(), V = typeof PROPS_VER === 'string' ? PROPS_VER : '0';
+  await Promise.all(kinds.map(async (kind) => {
+    try {
+      const gltf = await loader.loadAsync('models/prop_' + kind + '.glb?v=' + V);
+      let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
+      if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
+      gltf.scene.updateMatrixWorld(true);
+      const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
+      if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
+      if (!geo.attributes.normal) geo.computeVertexNormals();
+      const pos = geo.attributes.position, n = pos.count, ca = geo.attributes.color, mid = PROP_MAT[kind] || 26;
+      const nqm = new Float32Array(n * 2), col = new Float32Array(n * 3).fill(1);
+      for (let i = 0; i < n; i++) { nqm[i * 2] = ca ? ca.getX(i) : (mid === 26 ? 1 : 0); nqm[i * 2 + 1] = mid; }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+      for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv', 'color', 'nqm'].includes(k)) geo.deleteAttribute(k);
+      geo.computeBoundingBox(); let bb = geo.boundingBox;
+      if (mid === 26 && bb.max.z - bb.min.z > (bb.max.x - bb.min.x) * 1.15) { geo.rotateY(Math.PI / 2); geo.computeBoundingBox(); bb = geo.boundingBox; }   // a hedge's length runs along local x
+      // stand it on its base at the origin, 1 unit tall: the spot's height is the scale
+      const H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
+      for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.05) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
+      cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
+      if (mid === 26) { cx = (bb.min.x + bb.max.x) / 2; cz = (bb.min.z + bb.max.z) / 2; }   // a bush's stems can sit off centre
+      geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
+      const xLen = Math.max(1e-3, geo.boundingBox.max.x - geo.boundingBox.min.x);
+      const sm = srcMesh.material || {}, tex = sm.map || null, mat = nqMaterial('static');
+      if (tex) { mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; }
+      if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
+      if (mid === 26) mat.defines.NQ_TREE = 1;
+      mat.needsUpdate = true;
+      const list = spots.filter(s => s.kind === kind);
+      const batch = new THREE.BatchedMesh(list.length, n, geo.index.count, mat), gid = batch.addGeometry(geo);
+      const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+      for (const s of list) {
+        const id = batch.addInstance(gid);
+        m.compose(new THREE.Vector3(s.x, -0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+        batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
+      }
+      batch.computeBoundingSphere();
+      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+      scene.add(batch); WORLD_MESHES.push(batch);
+    } catch (e) { console.warn('prop load failed', kind, e); }
+  }));
+  updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
