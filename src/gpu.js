@@ -750,8 +750,14 @@ function buildPostGPU(q) {
   }
   const vm = vmP.getTextureNode('output');
   col = mix(col, vm.rgb, clampT(vm.a, 0, 1));
-  // drop any NaN / Inf pixel: bloom would smear a single one across the whole frame
-  const comb = convertToTexture(Fn(() => { const c = col.toVar(); return vec4(select(c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4)), c, vec3(0)), 1); })());
+  // drop any NaN / Inf pixel: bloom would smear a single one across the whole frame. Then cap the hottest pixels, hue kept:
+  // a sun-sharp lamp glint on wet glass or asphalt reaches the thousands, and the streaks and bloom turned that one pixel
+  // into a flare brighter than any neon sign. Everything above the cap is pure white on screen anyway.
+  const comb = convertToTexture(Fn(() => {
+    const c = col.toVar(), ok = c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4));
+    const v = select(ok, c, vec3(0)), m = max(max(v.r, v.g), v.b);
+    return vec4(v.mul(min(float(1), float(24).div(max(m, 1e-4)))), 1);
+  })());
   comb.name = 'composite';
   const bl = bloom(comb, 0.6, 0.55, 1.0);
   const blT = bl.getTextureNode();
