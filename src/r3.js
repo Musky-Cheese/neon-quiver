@@ -647,6 +647,50 @@ async function loadMeshyCars() {
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
 }
 
+/* ---------------- Meshy trees ----------------
+   The plain (non-blossom) trees: the suburbs' yards, the dark woods along its edges and round the refinery fence
+   (WORLD.treeSpots, placed by props.js propTreeSpot: x, z, height, yaw, tint). One textured Meshy model
+   (models/tree.glb from tools/meshy_tree.py: colour and normal maps, COLOR_0.r marking the leaves) in one BatchedMesh,
+   culled tree by tree, each a shade lighter or darker. */
+async function loadMeshyTrees() {
+  const spots = WORLD.treeSpots || []; if (!spots.length) return;
+  try {
+    const gltf = await new GLTFLoader().loadAsync('models/tree.glb?v=' + (typeof TREE_VER === 'string' ? TREE_VER : '0'));
+    let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
+    if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
+    gltf.scene.updateMatrixWorld(true);
+    const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
+    if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
+    if (!geo.attributes.normal) geo.computeVertexNormals();
+    const pos = geo.attributes.position, n = pos.count, ca = geo.attributes.color;
+    // the converter paints the leaf mask into the vertex colour's red: it becomes nqm.x (wind, leaf shading) and the colour goes back to white, so the texture shows as scanned
+    const nqm = new Float32Array(n * 2), col = new Float32Array(n * 3).fill(1);
+    for (let i = 0; i < n; i++) { nqm[i * 2] = ca ? ca.getX(i) : 1; nqm[i * 2 + 1] = 26; }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+    for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv', 'color', 'nqm'].includes(k)) geo.deleteAttribute(k);
+    // stand the model on its trunk base at the origin, 1 unit tall: the per-tree height is the scale
+    geo.computeBoundingBox(); const bb = geo.boundingBox, H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
+    for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.05) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
+    cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
+    geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const sm = srcMesh.material || {}, tex = sm.map || null, mat = nqMaterial('static');
+    if (tex) { mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; }
+    if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
+    mat.defines.NQ_TREE = 1; mat.needsUpdate = true;
+    const batch = new THREE.BatchedMesh(spots.length, n, geo.index.count, mat), gid = batch.addGeometry(geo);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+    for (const s of spots) {
+      const id = batch.addInstance(gid);
+      m.compose(new THREE.Vector3(s.x, -0.04, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+      batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
+    }
+    batch.computeBoundingSphere();
+    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+    scene.add(batch); WORLD_MESHES.push(batch);
+    updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+  } catch (e) { console.warn('tree load failed', e); }
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
@@ -964,6 +1008,7 @@ function warmShaders() {
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
   const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
+  const batches = WORLD_MESHES.filter(m => m.isBatchedMesh); for (const b of batches) { b.frustumCulled = false; b.perObjectFrustumCulled = false; }   // the trees stand far from the title camera: draw them once so their program exists before the suburbs come into view
   const prev = renderer.getRenderTarget();
   try {
     // the renderer builds a pipeline per pass (mirror, world, bow, shadows, AO prepass) the first time it draws a material:
@@ -971,7 +1016,7 @@ function warmShaders() {
     emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
     R3.warming = true; warmShadows(); render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { R3.warming = false; GAME.showBowInTitle = showBow; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  finally { R3.warming = false; GAME.showBowInTitle = showBow; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } for (const b of batches) { b.frustumCulled = true; b.perObjectFrustumCulled = true; } }
   warmMeshyZombies();   // every breed and outfit that has landed so far
   R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }

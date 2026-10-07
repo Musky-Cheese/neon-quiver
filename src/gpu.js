@@ -103,7 +103,7 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
     })());
     else if (!inst) this.positionNode = Fn(() => {   // foliage (and the blossom cards): a slow lean downwind plus a quick leaf flutter
       const p = positionLocal.toVar(), nqm = attribute('nqm', 'vec2');
-      const on = this.defines.NQ_CARDS ? float(1) : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));
+      const D0 = this.defines, on = D0.NQ_CARDS ? float(1) : D0.NQ_TREE ? nqm.x : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));   // NQ_TREE: nqm.x is the leaf mask
       const t = NQN.uTime, hk = smoothstep(1.2, 4.5, p.y).mul(on);
       const lean = NQN.uWind.mul(sin(t.mul(0.8).add(p.x.mul(0.11)).add(p.z.mul(0.09))).mul(0.45).add(0.55));
       return p.add(vec3(lean.mul(0.16).mul(hk), 0, 0)).add(vec3(sin(t.mul(6.3).add(p.y.mul(4.1)).add(p.x.mul(2.7))), sin(t.mul(5.1).add(p.z.mul(3.3))).mul(0.5), cos(t.mul(5.7).add(p.x.mul(3.9))))
@@ -139,7 +139,7 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
       return tot;
     })();
   }
-  customProgramCacheKey() { const d = this.defines; return 'nqg-' + this.nqKind + (d.NQ_ZTEX ? '-tex' : '') + (d.NQ_CARDS ? '-cards' : '') + (d.NQ_MAPGLOW ? '-glow' + d.NQ_MAPGLOW : ''); }
+  customProgramCacheKey() { const d = this.defines; return 'nqg-' + this.nqKind + (d.NQ_ZTEX ? '-tex' : '') + (d.NQ_CARDS ? '-cards' : '') + (d.NQ_TREE ? '-tree' : '') + (d.NQ_MAPGLOW ? '-glow' + d.NQ_MAPGLOW : ''); }
   setupLightingModel() { return new NQLighting(); }
   setupDiffuseColor(builder) { nqSurface(this, builder); }
   setupOutput(builder, out) { return super.setupOutput(builder, nqFog(this, out)); }
@@ -161,9 +161,9 @@ function nqSurface(material, builder) {
     tint.assign(zRef('uPT', 'vec3').element(pi)); skin.assign(zRef('uPS', 'vec3').element(pi)); iemit.assign(zRef('uPE', 'vec3').element(pi)); flash.assign(zRef('uFlash', 'float'));
   } else {
     const nqm = attribute('nqm', 'vec2'); mx.assign(nqm.x); mat.assign(nqm.y);
-    // per-car paint only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh, the wrecks)
-    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
-    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
+    // car paint and tree tone only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh: the wrecks, the trees)
+    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(26.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
+    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(26.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
   }
   if (inst) { const t = attribute('iTint', 'vec4'); tint.assign(t.rgb); flash.assign(t.a); iemit.assign(attribute('iEmit', 'vec3')); skin.assign(attribute('iSkin', 'vec3')); }
   const dynK = vm ? NQN.uDynVM : NQN.uDyn;
@@ -450,6 +450,11 @@ function nqSurface(material, builder) {
     base.mulAssign(n1.mul(0.14).add(0.9).sub(n2.mul(0.05)).sub(n3.mul(0.03)).mul(smoothstep(0.45, 0, W.y).mul(0.3).mul(stepT(0.5, abs(N0.y)).oneMinus()).oneMinus()));
     rough.assign(n2.mul(-0.08).add(0.85)); rimK.assign(0.15); bumpH.assign(n2.mul(0.0006).add(n3.mul(0.0003)));
     nqTL.assign(6); nqTS.assign(0.7);
+  }).ElseIf(M(25.5, 26.5), () => {    // textured Meshy tree (nqm.x: 1 on the leaves, 0 on the bark): the scan's own colour, matte, clumps a shade apart
+    const leaf = mx; emis.assign(vec3(0));
+    base.mulAssign(mix(1, vn(W.xz.mul(1.7).add(W.y.mul(1.3))).mul(0.5).add(0.75), leaf));   // so a canopy isn't one flat green
+    const wetBark = wet1.mul(leaf.oneMinus());
+    base.mulAssign(wetBark.mul(-0.25).add(1)); rough.assign(mix(mix(0.82, 0.55, wetBark), 0.92, leaf)); rimK.assign(mix(0.3, 0.55, leaf));
   }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
     const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));

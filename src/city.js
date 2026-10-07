@@ -10,6 +10,7 @@ const WORLD = {
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   carSpots: [], // wrecked cars {x, z, ry, kind: 'sedan'|'van', paint, roll} drawn from the Meshy models (r3.js loadMeshyCars)
+  treeSpots: [], // plain trees {x, z, h, ry, tint}: one textured Meshy model, batched (r3.js loadMeshyTrees)
   blossoms: [], // flat list, 12 floats per flower card: x, y, z, nx, ny, nz, size, r, g, b, glow, variant (r3.js buildBlossoms)
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
@@ -359,7 +360,7 @@ function buildCity() {
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
     const pg = g, keep = {}; g = new Geo();
-    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
+    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
     try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });

@@ -346,12 +346,11 @@ function buildDistricts(C) {
   for (const [hz, face] of [[106.5, '+z'], [125.5, '-z'], [132.5, '+z'], [151.5, '-z']])
     for (const hx of [-51, -40, -29, -18, 18, 29, 40, 51]) propHouse(SG, R, hx + (R() - 0.5) * 1.2, hz, face, solid);
   for (const [x, z] of [[-10, 104], [10, 128], [-10, 148], [10, 104]]) lamp(x, z);
-  for (let i = 0; i < 14; i++) { const x = (R() < 0.5 ? -1 : 1) * (9.5 + R() * 50), z = 118 + (R() < 0.5 ? 0 : 26) + (R() - 0.5) * 4; if (Math.abs(x) > 12) propSakuraFar(SG, R, x, z + (R() < 0.5 ? -9 : 9), 0.8 + R() * 0.3, 1, R() < 0.3 ? null : [0.07, 0.12, 0.05]); }
+  for (let i = 0; i < 14; i++) { const x = (R() < 0.5 ? -1 : 1) * (9.5 + R() * 50), z = 118 + (R() < 0.5 ? 0 : 26) + (R() - 0.5) * 4; if (Math.abs(x) > 12) { const tz = z + (R() < 0.5 ? -9 : 9), sc = 0.8 + R() * 0.3; if (R() < 0.3) propSakura(SG, R, x, tz, sc, false, null, 1, true); else propTreeSpot(x, tz, sc, true); } }   // yard trees: most plain, some cherry
   // the edges: dark woods you can't enter
   for (let fz = 78; fz < 168; fz += 8) for (const sgn of [-1, 1]) for (let k = 0; k < 4; k++) {
     const x = sgn * (66 + k * 8 + (R() - 0.5) * 4), z = fz + (R() - 0.5) * 5, s = 1 + R() * 0.4;
-    if (sgn > 0 && z > 105 && z < 127) C.ghost((dummy) => propSakuraFar(dummy, R, x, z, s, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]));   // cleared for the refinery road
-    else propSakuraFar(C.getForest(), R, x, z, s, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]);
+    if (!(sgn > 0 && z > 105 && z < 127)) propTreeSpot(x, z, s);   // cleared for the refinery road
   }
   propHighway(SG, R, 80, solid);                                                     // the freeway: city behind, suburbs ahead
   propGasStation(SG, 16, 95, solid);
@@ -374,7 +373,8 @@ function buildDistricts(C) {
     if (Math.abs(x) < 33 && z < 137.5 + OZ) continue;                 // the grove itself
     if (z < 166 && Math.abs(x) < 62) continue;                        // leave the way in from the suburbs open
     const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5 - OZ)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;
-    propSakuraFar(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, edge < 7 ? 2 : edge < 20 ? 1 : 0);
+    const dg = Math.hypot(Math.max(0, Math.abs(x) - 33), Math.max(0, z - 137.5 - OZ));   // distance from the lawn: full sprays beside it, thinner further in
+    propSakura(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, false, null, dg < 8 ? 2 : dg < 22 ? 1 : 0, false);
   }
   // hedge line between the last houses and the grove, with a gap for the path
   for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) SG.blob(pT(PM.a, x, 0.5, 163.5, R() * 6), 1.5, 0.9, 1.1, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
@@ -388,8 +388,8 @@ function buildDistricts(C) {
   propPath(G, R, loop, 1.3);
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
-  // A few big hand-built sakuras instead of a dense grove: [x, z, scale, yaw]. (The untextured Meshy tree read as
-  // flat pink blobs up close; r3.js loadHeroSakuras only draws WORLD.heroTrees, left empty until a textured model is in.)
+  // A few big hand-built sakuras instead of a dense grove: [x, z, scale]. (r3.js loadHeroSakuras can still stand Meshy trees
+  // on WORLD.heroTrees; it is left empty, the untextured model read as flat pink blobs up close.)
   for (const [x, z, s] of [[-13, 80.5 + OZ, 1.3], [13.5, 82 + OZ, 1.2], [-27, 93 + OZ, 1.4], [18.5, 105 + OZ, 1.5],
     [-21, 127 + OZ, 1.4], [21, 129 + OZ, 1.45], [-9.5, 202, 1.25], [11, 199.5, 1.3]]) {
     propSakura(G, R, x, z, s, false);
@@ -595,7 +595,7 @@ function buildDistricts(C) {
     // woods round the outside of the fence, closing the gap to the suburbs' treeline
     for (let i = 0; i < 70; i++) {
       const x = 76 + R() * 30, z = 58 + R() * 92; if (z > 106 && z < 126) continue; if (x < 96 && z > 74) continue;
-      propSakuraFar(C.getForest(), R, x, z, 1 + R() * 0.4, x > 100 ? 1 : 0, [0.05, 0.08, 0.04]);
+      propTreeSpot(x, z, 1 + R() * 0.4);
     }
     setG('props');
     // the checkpoint where the road meets the fence

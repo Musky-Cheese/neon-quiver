@@ -7,6 +7,7 @@ import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 const RIG_VER = "b5137a2697";   // content hash: a new model always busts the browser cache
 const SAKURA_VER = "3dce9e4243"; // Meshy hero-tree cache key
 const CARS_VER = "9c99c61797";   // Meshy car models cache key
+const TREE_VER = "0eb1f64b0a";   // Meshy tree model cache key
 const MZ_VER = "02ca513285";     // Meshy zombie models cache key
 const MZ_TYPES = ["alpha", "boss", "brute", "climber", "runner", "screamer", "spitter", "walker", "walker_dock", "walker_vendor"];
 const TEX_VER = "11209ad2cc";   // same for the Ultra texture strips
@@ -531,7 +532,7 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
     })());
     else if (!inst) this.positionNode = Fn(() => {   // foliage (and the blossom cards): a slow lean downwind plus a quick leaf flutter
       const p = positionLocal.toVar(), nqm = attribute('nqm', 'vec2');
-      const on = this.defines.NQ_CARDS ? float(1) : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));
+      const D0 = this.defines, on = D0.NQ_CARDS ? float(1) : D0.NQ_TREE ? nqm.x : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));   // NQ_TREE: nqm.x is the leaf mask
       const t = NQN.uTime, hk = smoothstep(1.2, 4.5, p.y).mul(on);
       const lean = NQN.uWind.mul(sin(t.mul(0.8).add(p.x.mul(0.11)).add(p.z.mul(0.09))).mul(0.45).add(0.55));
       return p.add(vec3(lean.mul(0.16).mul(hk), 0, 0)).add(vec3(sin(t.mul(6.3).add(p.y.mul(4.1)).add(p.x.mul(2.7))), sin(t.mul(5.1).add(p.z.mul(3.3))).mul(0.5), cos(t.mul(5.7).add(p.x.mul(3.9))))
@@ -567,7 +568,7 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
       return tot;
     })();
   }
-  customProgramCacheKey() { const d = this.defines; return 'nqg-' + this.nqKind + (d.NQ_ZTEX ? '-tex' : '') + (d.NQ_CARDS ? '-cards' : '') + (d.NQ_MAPGLOW ? '-glow' + d.NQ_MAPGLOW : ''); }
+  customProgramCacheKey() { const d = this.defines; return 'nqg-' + this.nqKind + (d.NQ_ZTEX ? '-tex' : '') + (d.NQ_CARDS ? '-cards' : '') + (d.NQ_TREE ? '-tree' : '') + (d.NQ_MAPGLOW ? '-glow' + d.NQ_MAPGLOW : ''); }
   setupLightingModel() { return new NQLighting(); }
   setupDiffuseColor(builder) { nqSurface(this, builder); }
   setupOutput(builder, out) { return super.setupOutput(builder, nqFog(this, out)); }
@@ -589,9 +590,9 @@ function nqSurface(material, builder) {
     tint.assign(zRef('uPT', 'vec3').element(pi)); skin.assign(zRef('uPS', 'vec3').element(pi)); iemit.assign(zRef('uPE', 'vec3').element(pi)); flash.assign(zRef('uFlash', 'float'));
   } else {
     const nqm = attribute('nqm', 'vec2'); mx.assign(nqm.x); mat.assign(nqm.y);
-    // per-car paint only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh, the wrecks)
-    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
-    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
+    // car paint and tree tone only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh: the wrecks, the trees)
+    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(26.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
+    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(26.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
   }
   if (inst) { const t = attribute('iTint', 'vec4'); tint.assign(t.rgb); flash.assign(t.a); iemit.assign(attribute('iEmit', 'vec3')); skin.assign(attribute('iSkin', 'vec3')); }
   const dynK = vm ? NQN.uDynVM : NQN.uDyn;
@@ -878,6 +879,11 @@ function nqSurface(material, builder) {
     base.mulAssign(n1.mul(0.14).add(0.9).sub(n2.mul(0.05)).sub(n3.mul(0.03)).mul(smoothstep(0.45, 0, W.y).mul(0.3).mul(stepT(0.5, abs(N0.y)).oneMinus()).oneMinus()));
     rough.assign(n2.mul(-0.08).add(0.85)); rimK.assign(0.15); bumpH.assign(n2.mul(0.0006).add(n3.mul(0.0003)));
     nqTL.assign(6); nqTS.assign(0.7);
+  }).ElseIf(M(25.5, 26.5), () => {    // textured Meshy tree (nqm.x: 1 on the leaves, 0 on the bark): the scan's own colour, matte, clumps a shade apart
+    const leaf = mx; emis.assign(vec3(0));
+    base.mulAssign(mix(1, vn(W.xz.mul(1.7).add(W.y.mul(1.3))).mul(0.5).add(0.75), leaf));   // so a canopy isn't one flat green
+    const wetBark = wet1.mul(leaf.oneMinus());
+    base.mulAssign(wetBark.mul(-0.25).add(1)); rough.assign(mix(mix(0.82, 0.55, wetBark), 0.92, leaf)); rimK.assign(mix(0.3, 0.55, leaf));
   }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
     const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));
@@ -1473,27 +1479,36 @@ function propFoodCart(g, R, x, z, awningCol, solid) {
    Sakura Gardens pieces
    ============================================================ */
 // cherry blossom: short gnarled trunk, limbs spreading low and wide, a broad umbrella of pink clusters.
-// planter: sit it in a concrete planter (plaza) or straight in the lawn (garden). Returns canopy centre.
-function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
-  const r = (a, b) => a + (b - a) * R();
+// planter: sit it in a concrete planter (plaza) or straight in the lawn (garden).
+// detail: 3 is the full tree (the garden's big sakuras and the plaza planters); 2, 1 and 0 grow the same limbs and
+// the same loose sprays of flowers with fewer clusters, cards and tube sides, for the forest round the grove (2 by
+// the lawn, 0 at the back) and the suburbs' yards (1). solidTree: trunk collision (not for a treeline you can't reach).
+const SAKURA_LOD = [   // clusters per tip, cards per cluster, cluster/card size make-up, dark-core blob segments/rings, twig every n clusters, roots, tube sides by depth
+  { cl: 4, cards: 5, clK: 1.35, cardK: 1.5, bs: 4, br: 3, twig: 0, roots: 0, sides: [4, 3, 3], mound: false },
+  { cl: 6, cards: 6, clK: 1.2, cardK: 1.3, bs: 5, br: 3, twig: 0, roots: 3, sides: [5, 4, 3], mound: true },
+  { cl: 9, cards: 7, clK: 1.1, cardK: 1.15, bs: 5, br: 4, twig: 7, roots: 5, sides: [6, 5, 4], mound: true },
+  { cl: 14, cards: 9, clK: 1, cardK: 1, bs: 6, br: 4, twig: 5, roots: 5, sides: [8, 6, 4], mound: true },
+];
+function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null, detail = 3, solidTree = true) {
+  const r = (a, b) => a + (b - a) * R(), L = SAKURA_LOD[detail] || SAKURA_LOD[3];
   const base = planter ? 0.8 : 0.02;
   if (planter) {
     g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
     g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.06, 0.03, 0.035], 0, 16, 24);
     if (ringCol) g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), ringCol, 2.2, 0, 1.415, 0.018, 40, 4);
-  } else {
+  } else if (L.mound) {
     g.blob(pT(PM.a, x, 0.0, z, r(0, TAU)), 1.1 * s, 0.14, 1.1 * s, 0.3, r(0, 99), [0.05, 0.08, 0.03], 0, 17, 12, 5);   // moss mound
   }
   const bark = [0.075, 0.05, 0.05], tips = [];
   const blossom = [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)];
-  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, base + 0.35 * s, z], [x + Math.cos(a) * 0.4 * s, base + 0.06, z + Math.sin(a) * 0.4 * s], [x + Math.cos(a) * 0.8 * s, base - 0.02, z + Math.sin(a) * 0.8 * s]], [0.16 * s, 0.08 * s, 0.03 * s], bark, 0, 12, 5); }
+  for (let i = 0; i < L.roots; i++) { const a = i / L.roots * TAU + r(0, 0.6); g.tube([[x, base + 0.35 * s, z], [x + Math.cos(a) * 0.4 * s, base + 0.06, z + Math.sin(a) * 0.4 * s], [x + Math.cos(a) * 0.8 * s, base - 0.02, z + Math.sin(a) * 0.8 * s]], [0.16 * s, 0.08 * s, 0.03 * s], bark, 0, 12, 5); }
   function grow(p, d, len, rad, depth) {
     const pts = [p], rr = [rad]; let q = p, dir = d.slice();
     for (let k = 1; k <= 4; k++) {   // kinked, slightly drooping limbs
-      dir = [dir[0] + r(-0.3, 0.3), dir[1] + (depth >= 2 ? 0.05 : -0.06) + r(-0.12, 0.12), dir[2] + r(-0.3, 0.3)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
+      dir = [dir[0] + r(-0.3, 0.3), dir[1] + (depth >= 2 ? 0.05 : -0.06) + r(-0.12, 0.12), dir[2] + r(-0.3, 0.3)]; const dl = Math.hypot(...dir); dir = dir.map(v => v / dl);
       q = [q[0] + dir[0] * len / 4, q[1] + dir[1] * len / 4, q[2] + dir[2] * len / 4]; pts.push(q); rr.push(rad * (1 - k * 0.1));
     }
-    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 8 : depth === 1 ? 6 : 4, depth === 0);
+    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? L.sides[0] : depth === 1 ? L.sides[1] : L.sides[2], depth === 0);
     if (depth === 0) { tips.push(q); return; }
     const n = depth === 2 ? 4 : 2 + (R() < 0.5 ? 1 : 0), a0 = r(0, TAU);
     for (let i = 0; i < n; i++) {
@@ -1512,29 +1527,43 @@ function propSakura(g, R, x, z, s = 1, planter = false, ringCol = null) {
   let top = -1e9, bot = 1e9; for (const t of tips) { top = Math.max(top, t[1]); bot = Math.min(bot, t[1]); }
   for (const t of tips) {
     let ox = t[0] - x, oy = 0.35, oz = t[2] - z; const oL = Math.hypot(ox, oy, oz) || 1; ox /= oL; oy /= oL; oz /= oL;   // outward from the trunk, a little upward
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < L.cl; i++) {
       const u = R(), reach = (0.15 + 0.85 * u) * 1.05 * s, a = r(0, TAU), rr = r(0.15, 0.55) * s * (0.5 + 0.6 * u);
       const px = t[0] + ox * reach + Math.cos(a) * rr, pz = t[2] + oz * reach + Math.sin(a) * rr;
       const py = t[1] + oy * reach + r(-0.18, 0.32) * s - u * u * 0.45 * s;                     // the far ends droop under their own weight
       const inner = Math.min(1, Math.hypot(px - cx, pz - cz) / (1.9 * s)), hk = (py - bot) / Math.max(0.5, top - bot + 0.8);
       const sh = 0.62 + 0.28 * inner + 0.2 * hk, tint = R();
       const c = tint < 0.14 ? [1.0 * sh, 0.8 * sh, 0.88 * sh] : tint > 0.9 ? [0.84 * sh, 0.34 * sh, 0.5 * sh] : [blossom[0] * sh, blossom[1] * sh, blossom[2] * sh];
-      const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u);
+      const sz = r(0.2, 0.36) * s * (1.05 - 0.35 * u) * L.clK;
       // a small dark core keeps the canopy from reading hollow; the flowers themselves are alpha cards round it
-      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * 0.48, sz * 0.36, sz * 0.48, 0.5, r(0, 99), [c[0] * 0.2, c[1] * 0.14, c[2] * 0.17], 0.08, 14, 6, 4, 1);
-      for (let k = 0; k < 9; k++) {
+      g.blob(pT(PM.a, px, py, pz, r(0, TAU)), sz * 0.48, sz * 0.36, sz * 0.48, 0.5, r(0, 99), [c[0] * 0.2, c[1] * 0.14, c[2] * 0.17], 0.08, 14, L.bs, L.br, 1);
+      for (let k = 0; k < L.cards; k++) {
         const ux = r(-1, 1), uy = r(-0.7, 0.9), uz = r(-1, 1);
         let nx = (px - cx) * 0.5 + ux, ny = 0.7 + uy, nz = (pz - cz) * 0.5 + uz; const nl = Math.hypot(nx, ny, nz) || 1;
         WORLD.blossoms.push(px + ux * sz * 0.95, py + uy * sz * 0.7, pz + uz * sz * 0.95, nx / nl, ny / nl, nz / nl,
-          sz * r(0.95, 1.45), c[0], c[1], c[2], 0.75 + 0.75 * inner, (R() * 4) | 0);
+          sz * r(0.95, 1.45) * L.cardK, c[0], c[1], c[2], 0.75 + 0.75 * inner, (R() * 4) | 0);
       }
-      if (i % 5 === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
+      if (L.twig && i % L.twig === 0) g.tube([t, [(t[0] + px) / 2, (t[1] + py) / 2 + 0.06, (t[2] + pz) / 2], [px, py, pz]], [0.02 * s, 0.013 * s, 0.008 * s], bark, 0, 12, 3);   // twigs through the gaps
     }
   }
-  WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
-  WORLD.petals.push([cx, cy, cz, 2.6 * s]);
-  WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
-  if (planter) WORLD.circles.push({ x, z, r: 1.45, h: 0.86 });
+  if (detail >= 2) {   // the soft pink haze and the drifting petals: the trees you can stand under
+    WORLD.halos.push({ p: [cx, cy + 0.4, cz], s: 4.2 * s, c: [0.22, 0.07, 0.12] });
+    WORLD.petals.push([cx, cy, cz, 2.6 * s]);
+  }
+  if (solidTree) {
+    WORLD.circles.push({ x, z, r: 0.34 * s, h: 5 });
+    if (planter) WORLD.circles.push({ x, z, r: 1.45, h: 0.86 });
+  }
+}
+// a plain (non-blossom) tree: the textured Meshy model stands here (r3.js loadMeshyTrees draws WORLD.treeSpots in one
+// batch). s is the old procedural tree's scale (about 4.4 m tall at 1). The spot rolls its own dice from its position,
+// so the city's shared random sequence is untouched. solidTree: a trunk you can't walk through (the yards, not the woods).
+function propTreeSpot(x, z, s = 1, solidTree = false) {
+  let seed = ((Math.floor(x * 131.7) * 73856093) ^ (Math.floor(z * 97.3) * 19349663)) >>> 0 || 1;
+  const CR = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const h = 4.4 * s * (0.9 + CR() * 0.25);
+  WORLD.treeSpots.push({ x, z, h, ry: CR() * TAU, tint: 0.72 + CR() * 0.36 });
+  if (solidTree) WORLD.circles.push({ x, z, r: 0.065 * h, h: 4 });
 }
 // stone lantern (toro): turned pedestal, glowing fire box, pyramid roof
 function propToro(g, x, z, lit = true) {
@@ -1611,48 +1640,6 @@ function propPath(g, R, pts, w, y = 0.018) {
 }
 function inPond(x, z) { return waterAt(x, z) > 0; }   // any water you wade through (see hazards.js)
 function inKoiPond(x, z) { for (const p of WORLD.ponds) { const dx = (x - p.x) / p.rx, dz = (z - p.z) / p.rz; if (dx * dx + dz * dz < 1) return true; } return false; }
-// background cherry tree for the forest round the grove: same silhouette, far fewer triangles, no collision
-// a spray of flower cards over an ellipsoid canopy shell (r3.js buildBlossoms draws them), facing outward
-function blossomShell(R, cx, cy, cz, rx, ry, rz, n, size, c, glow) {
-  for (let k = 0; k < n; k++) {
-    const u = R() * 2 - 1, a = R() * TAU, w = Math.sqrt(1 - u * u), sh = 0.86 + R() * 0.28;   // up = paler, as before
-    let nx = w * Math.cos(a), ny = u * 0.8 + 0.25, nz = w * Math.sin(a); const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl; nz /= nl;
-    const d = 0.82 + R() * 0.24, t = R();
-    const col = t < 0.12 ? [1.0, 0.82, 0.9] : t > 0.9 ? [0.84, 0.34, 0.5] : c;
-    WORLD.blossoms.push(cx + w * Math.cos(a) * rx * d, cy + u * ry * d, cz + w * Math.sin(a) * rz * d, nx, ny, nz,
-      size * (0.8 + R() * 0.5), col[0] * sh * (0.85 + 0.15 * (u + 1)), col[1] * sh, col[2] * sh, glow, (R() * 4) | 0);
-  }
-}
-function propSakuraFar(g, R, x, z, s = 1, detail = 1, leaf = null) {   // leaf: plain foliage colour (non-blossom trees)
-  const r = (a, b) => a + (b - a) * R(), bark = [0.075, 0.05, 0.05];
-  const blossom = leaf ? [leaf[0] * (0.8 + R() * 0.4), leaf[1] * (0.8 + R() * 0.4), leaf[2]] : [0.95, 0.5 + r(-0.06, 0.06), 0.68 + r(-0.06, 0.06)], glow = leaf ? 0 : 1.6;
-  // blossom trees: the blobs become small dark cores and the visible canopy is flower cards over their surface
-  const core = leaf ? blossom : [blossom[0] * 0.2, blossom[1] * 0.14, blossom[2] * 0.17], cg = leaf ? 0 : 0.08, ck = leaf ? 1 : 0.86;
-  const nCards = detail >= 2 ? 26 : detail === 1 ? 18 : 12, cs = detail >= 2 ? 0.55 : detail === 1 ? 0.7 : 0.85;
-  // the cards roll their own dice (seeded from the spot) so the city's shared random sequence is untouched
-  let seed = ((Math.floor(x * 131.7) * 73856093) ^ (Math.floor(z * 97.3) * 19349663)) >>> 0 || 1;
-  const CR = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const canopy = (cx, cy, cz, rx, ry, rz, frac) => { if (!leaf) blossomShell(CR, cx, cy, cz, rx, ry, rz, Math.round(nCards * frac), cs * s, blossom, 1.1); };
-  const h = r(1.4, 1.9) * s, sides = detail >= 2 ? 6 : 4;
-  g.tube([[x, 0, z], [x + r(-0.2, 0.2), h * 0.6, z + r(-0.2, 0.2)], [x + r(-0.3, 0.3), h, z + r(-0.3, 0.3)]], [0.24 * s, 0.2 * s, 0.16 * s], bark, 0, 12, sides, false);
-  const n = detail >= 2 ? 5 : detail === 1 ? 3 : 2, a0 = r(0, TAU), seg = detail >= 2 ? 10 : detail === 1 ? 7 : 6, rings = detail >= 2 ? 7 : detail === 1 ? 5 : 4;
-  for (let i = 0; i < n; i++) {
-    const a = a0 + i / n * TAU + r(-0.3, 0.3), d = r(1.2, 2.0) * s, tx = x + Math.cos(a) * d, tz = z + Math.sin(a) * d, ty = h + r(0.6, 1.3) * s;
-    g.tube([[x, h * 0.9, z], [tx, ty, tz]], [0.12 * s, 0.05 * s], bark, 0, 12, 4, false);
-    const rot = r(0, TAU), bx = r(1.1, 1.5) * s, by = r(0.75, 1.0) * s, bz = r(1.1, 1.5) * s;   // same dice order as before
-    g.blob(pT(PM.a, tx, ty + 0.3 * s, tz, rot), bx * ck, by * ck, bz * ck, 0.35, r(0, 99), core, cg, 14, seg, rings, 1);
-    canopy(tx, ty + 0.3 * s, tz, bx, by, bz, 1);
-    if (detail >= 1) for (let k = 0; k < 2; k++) {
-      const b = r(0, TAU), e = r(0.9, 1.4) * s, ex = tx + Math.cos(b) * e, ey = ty + r(-0.2, 0.5) * s, ez = tz + Math.sin(b) * e;
-      const rot2 = r(0, TAU), sx = r(0.45, 0.7) * s, sy = r(0.35, 0.55) * s, sz = r(0.45, 0.7) * s;
-      g.blob(pT(PM.a, ex, ey, ez, rot2), sx * ck, sy * ck, sz * ck, 0.45, r(0, 99), core, cg, 14, 7, 5, 1);
-      canopy(ex, ey, ez, sx, sy, sz, 0.35);
-    }
-  }
-  g.blob(pT(PM.a, x, h + 1.4 * s, z, r(0, TAU)), 1.5 * s * ck, 0.9 * s * ck, 1.5 * s * ck, 0.3, r(0, 99), core, cg, 14, seg, rings, 1);
-  canopy(x, h + 1.4 * s, z, 1.5 * s, 0.9 * s, 1.5 * s, 1.2);
-  if (detail >= 2 && !leaf && R() < 0.5) WORLD.petals.push([x, h + 1.2 * s, z, 2.2 * s]);
-}
 
 /* ---------- suburban house on its lot. face: '+z' / '-z' (the street side). Some are boarded up, some burnt out ---------- */
 const SIDING = [[0.3, 0.28, 0.24], [0.22, 0.26, 0.28], [0.3, 0.24, 0.2], [0.26, 0.26, 0.24], [0.2, 0.24, 0.2], [0.32, 0.3, 0.27]];
@@ -3046,6 +3033,7 @@ const WORLD = {
   cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   carSpots: [], // wrecked cars {x, z, ry, kind: 'sedan'|'van', paint, roll} drawn from the Meshy models (r3.js loadMeshyCars)
+  treeSpots: [], // plain trees {x, z, h, ry, tint}: one textured Meshy model, batched (r3.js loadMeshyTrees)
   blossoms: [], // flat list, 12 floats per flower card: x, y, z, nx, ny, nz, size, r, g, b, glow, variant (r3.js buildBlossoms)
   ponds: [],    // {x, z, rx, rz} shallow water you wade through
   navBlocks: [],   // {x0,x1,z0,z1} ground zombies never path through
@@ -3395,7 +3383,7 @@ function buildCity() {
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
     const pg = g, keep = {}; g = new Geo();
-    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
+    for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
     try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
@@ -3791,12 +3779,11 @@ function buildDistricts(C) {
   for (const [hz, face] of [[106.5, '+z'], [125.5, '-z'], [132.5, '+z'], [151.5, '-z']])
     for (const hx of [-51, -40, -29, -18, 18, 29, 40, 51]) propHouse(SG, R, hx + (R() - 0.5) * 1.2, hz, face, solid);
   for (const [x, z] of [[-10, 104], [10, 128], [-10, 148], [10, 104]]) lamp(x, z);
-  for (let i = 0; i < 14; i++) { const x = (R() < 0.5 ? -1 : 1) * (9.5 + R() * 50), z = 118 + (R() < 0.5 ? 0 : 26) + (R() - 0.5) * 4; if (Math.abs(x) > 12) propSakuraFar(SG, R, x, z + (R() < 0.5 ? -9 : 9), 0.8 + R() * 0.3, 1, R() < 0.3 ? null : [0.07, 0.12, 0.05]); }
+  for (let i = 0; i < 14; i++) { const x = (R() < 0.5 ? -1 : 1) * (9.5 + R() * 50), z = 118 + (R() < 0.5 ? 0 : 26) + (R() - 0.5) * 4; if (Math.abs(x) > 12) { const tz = z + (R() < 0.5 ? -9 : 9), sc = 0.8 + R() * 0.3; if (R() < 0.3) propSakura(SG, R, x, tz, sc, false, null, 1, true); else propTreeSpot(x, tz, sc, true); } }   // yard trees: most plain, some cherry
   // the edges: dark woods you can't enter
   for (let fz = 78; fz < 168; fz += 8) for (const sgn of [-1, 1]) for (let k = 0; k < 4; k++) {
     const x = sgn * (66 + k * 8 + (R() - 0.5) * 4), z = fz + (R() - 0.5) * 5, s = 1 + R() * 0.4;
-    if (sgn > 0 && z > 105 && z < 127) C.ghost((dummy) => propSakuraFar(dummy, R, x, z, s, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]));   // cleared for the refinery road
-    else propSakuraFar(C.getForest(), R, x, z, s, k === 0 ? 1 : 0, [0.05, 0.08, 0.04]);
+    if (!(sgn > 0 && z > 105 && z < 127)) propTreeSpot(x, z, s);   // cleared for the refinery road
   }
   propHighway(SG, R, 80, solid);                                                     // the freeway: city behind, suburbs ahead
   propGasStation(SG, 16, 95, solid);
@@ -3819,7 +3806,8 @@ function buildDistricts(C) {
     if (Math.abs(x) < 33 && z < 137.5 + OZ) continue;                 // the grove itself
     if (z < 166 && Math.abs(x) < 62) continue;                        // leave the way in from the suburbs open
     const edge = Math.max(0, Math.min(Math.abs(x) - 33, z - 137.5 - OZ)); if (edge > 48 || (edge > 22 && R() < 0.35)) continue;
-    propSakuraFar(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, edge < 7 ? 2 : edge < 20 ? 1 : 0);
+    const dg = Math.hypot(Math.max(0, Math.abs(x) - 33), Math.max(0, z - 137.5 - OZ));   // distance from the lawn: full sprays beside it, thinner further in
+    propSakura(C.getForest(), R, x, z, 0.9 + R() * 0.5 + edge * 0.012, false, null, dg < 8 ? 2 : dg < 22 ? 1 : 0, false);
   }
   // hedge line between the last houses and the grove, with a gap for the path
   for (let x = -60; x <= 60; x += 2.4) if (Math.abs(x) > 6) SG.blob(pT(PM.a, x, 0.5, 163.5, R() * 6), 1.5, 0.9, 1.1, 0.3, R() * 99, [0.05, 0.09, 0.04], 0, 14, 8, 5);
@@ -3833,8 +3821,8 @@ function buildDistricts(C) {
   propPath(G, R, loop, 1.3);
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
-  // A few big hand-built sakuras instead of a dense grove: [x, z, scale, yaw]. (The untextured Meshy tree read as
-  // flat pink blobs up close; r3.js loadHeroSakuras only draws WORLD.heroTrees, left empty until a textured model is in.)
+  // A few big hand-built sakuras instead of a dense grove: [x, z, scale]. (r3.js loadHeroSakuras can still stand Meshy trees
+  // on WORLD.heroTrees; it is left empty, the untextured model read as flat pink blobs up close.)
   for (const [x, z, s] of [[-13, 80.5 + OZ, 1.3], [13.5, 82 + OZ, 1.2], [-27, 93 + OZ, 1.4], [18.5, 105 + OZ, 1.5],
     [-21, 127 + OZ, 1.4], [21, 129 + OZ, 1.45], [-9.5, 202, 1.25], [11, 199.5, 1.3]]) {
     propSakura(G, R, x, z, s, false);
@@ -4040,7 +4028,7 @@ function buildDistricts(C) {
     // woods round the outside of the fence, closing the gap to the suburbs' treeline
     for (let i = 0; i < 70; i++) {
       const x = 76 + R() * 30, z = 58 + R() * 92; if (z > 106 && z < 126) continue; if (x < 96 && z > 74) continue;
-      propSakuraFar(C.getForest(), R, x, z, 1 + R() * 0.4, x > 100 ? 1 : 0, [0.05, 0.08, 0.04]);
+      propTreeSpot(x, z, 1 + R() * 0.4);
     }
     setG('props');
     // the checkpoint where the road meets the fence
@@ -7186,6 +7174,50 @@ async function loadMeshyCars() {
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
 }
 
+/* ---------------- Meshy trees ----------------
+   The plain (non-blossom) trees: the suburbs' yards, the dark woods along its edges and round the refinery fence
+   (WORLD.treeSpots, placed by props.js propTreeSpot: x, z, height, yaw, tint). One textured Meshy model
+   (models/tree.glb from tools/meshy_tree.py: colour and normal maps, COLOR_0.r marking the leaves) in one BatchedMesh,
+   culled tree by tree, each a shade lighter or darker. */
+async function loadMeshyTrees() {
+  const spots = WORLD.treeSpots || []; if (!spots.length) return;
+  try {
+    const gltf = await new GLTFLoader().loadAsync('models/tree.glb?v=' + (typeof TREE_VER === 'string' ? TREE_VER : '0'));
+    let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
+    if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
+    gltf.scene.updateMatrixWorld(true);
+    const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
+    if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
+    if (!geo.attributes.normal) geo.computeVertexNormals();
+    const pos = geo.attributes.position, n = pos.count, ca = geo.attributes.color;
+    // the converter paints the leaf mask into the vertex colour's red: it becomes nqm.x (wind, leaf shading) and the colour goes back to white, so the texture shows as scanned
+    const nqm = new Float32Array(n * 2), col = new Float32Array(n * 3).fill(1);
+    for (let i = 0; i < n; i++) { nqm[i * 2] = ca ? ca.getX(i) : 1; nqm[i * 2 + 1] = 26; }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
+    for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv', 'color', 'nqm'].includes(k)) geo.deleteAttribute(k);
+    // stand the model on its trunk base at the origin, 1 unit tall: the per-tree height is the scale
+    geo.computeBoundingBox(); const bb = geo.boundingBox, H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
+    for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.05) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
+    cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
+    geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
+    const sm = srcMesh.material || {}, tex = sm.map || null, mat = nqMaterial('static');
+    if (tex) { mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; }
+    if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
+    mat.defines.NQ_TREE = 1; mat.needsUpdate = true;
+    const batch = new THREE.BatchedMesh(spots.length, n, geo.index.count, mat), gid = batch.addGeometry(geo);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+    for (const s of spots) {
+      const id = batch.addInstance(gid);
+      m.compose(new THREE.Vector3(s.x, -0.04, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+      batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
+    }
+    batch.computeBoundingSphere();
+    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+    scene.add(batch); WORLD_MESHES.push(batch);
+    updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
+  } catch (e) { console.warn('tree load failed', e); }
+}
+
 function updateWorldStreaming(cam, force = false) {
   const x = cam[0], z = cam[2];
   if (!force && (x - WORLD_STREAM.x) ** 2 + (z - WORLD_STREAM.z) ** 2 < 12 * 12) return;
@@ -7503,6 +7535,7 @@ function warmShaders() {
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
   const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
+  const batches = WORLD_MESHES.filter(m => m.isBatchedMesh); for (const b of batches) { b.frustumCulled = false; b.perObjectFrustumCulled = false; }   // the trees stand far from the title camera: draw them once so their program exists before the suburbs come into view
   const prev = renderer.getRenderTarget();
   try {
     // the renderer builds a pipeline per pass (mirror, world, bow, shadows, AO prepass) the first time it draws a material:
@@ -7510,7 +7543,7 @@ function warmShaders() {
     emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
     R3.warming = true; warmShadows(); render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { R3.warming = false; GAME.showBowInTitle = showBow; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  finally { R3.warming = false; GAME.showBowInTitle = showBow; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } for (const b of batches) { b.frustumCulled = true; b.perObjectFrustumCulled = true; } }
   warmMeshyZombies();   // every breed and outfit that has landed so far
   R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }
@@ -8773,6 +8806,7 @@ async function boot() {
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
     loadHeroSakuras(),
     loadMeshyCars(),
+    loadMeshyTrees(),
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
   loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt

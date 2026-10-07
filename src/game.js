@@ -959,6 +959,7 @@ async function boot() {
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
     loadHeroSakuras(),
     loadMeshyCars(),
+    loadMeshyTrees(),
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
   loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
