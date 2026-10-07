@@ -3813,8 +3813,7 @@ function buildDistricts(C) {
   propPath(G, R, loop, 1.3);
   propPond(G, R, -11, 102 + OZ, 9, 6.5);
   for (let i = 0; i < 13; i++) propSteppingStone(G, R, -3.2 - i * 1.3, 102 + OZ + (i % 2 ? 0.35 : -0.35));
-  // A few big hand-built sakuras instead of a dense grove: [x, z, scale]. (r3.js loadHeroSakuras can still stand Meshy trees
-  // on WORLD.heroTrees; it is left empty, the untextured model read as flat pink blobs up close.)
+  // A few big hand-built sakuras instead of a dense grove: [x, z, scale].
   for (const [x, z, s] of [[-13, 80.5 + OZ, 1.3], [13.5, 82 + OZ, 1.2], [-27, 93 + OZ, 1.4], [18.5, 105 + OZ, 1.5],
     [-21, 127 + OZ, 1.4], [21, 129 + OZ, 1.45], [-9.5, 202, 1.25], [11, 199.5, 1.3]]) {
     propSakura(G, R, x, z, s, false);
