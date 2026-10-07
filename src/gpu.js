@@ -133,7 +133,9 @@ class NQMaterial extends THREE.MeshStandardNodeMaterial {
         const str = clampT(NQP.wetRefl, 0, 1).oneMinus().mul(0.012).add(0.002);   // wet asphalt stretches lights into streaks
         const rc = TEXN.refl.sample(suv).rgb.mul(0.34).add(TEXN.refl.sample(suv.sub(vec2(0, str))).rgb.mul(0.26))
           .add(TEXN.refl.sample(suv.sub(vec2(0, str.mul(2.2)))).rgb.mul(0.22)).add(TEXN.refl.sample(suv.add(vec2(0, str))).rgb.mul(0.18));
-        tot.addAssign(rc.mul(NQP.wetRefl).mul(mix(0.35, 1.1, fres)));
+        // kept faint, and the mirrored lights capped below the lens streak threshold: the street should hint at what stands
+        // on it, not lay a second row of lamps across the floor
+        tot.addAssign(min(rc, vec3(0.8)).mul(NQP.wetRefl).mul(mix(0.12, 0.45, fres)));
       });
       return tot;
     })();
@@ -486,6 +488,9 @@ function nqSurface(material, builder) {
       rough.assign(clampT(mix(rough, rough.mul(tr.ro.y).div(max(mean.a, 0.05)), nqTS.mul(0.7)), 0.03, 1));
       texN.assign(tr.n); texK.assign(nqTS.mul(sc.y));
     });
+    // floors never go glossier than this: at mirror roughness every lamp and shop light printed a pin-sharp hot spot on the
+    // wet ground that the lens then streaked, so the street read as a second row of lights; a soft sheen is all they leave now
+    rough.assign(max(rough, smoothstep(0.5, 0.8, N0.y).mul(0.36)));
     // snow settles on anything facing the sky (not water, glass, holograms, or indoors), in drifts, thinner under cover
     If(NQN.uSnowCov.greaterThan(0.01).and(M(17.5, 18.5).not()).and(M(22.5, 23.5).not()).and(M(9.5, 10.5).not()).and(M(4.5, 5.5).not()), () => {
       const up = smoothstep(0.55, 0.9, N0.y), sc = NQN.uSnowCov;
