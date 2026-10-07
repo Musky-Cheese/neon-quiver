@@ -204,7 +204,10 @@ function buildCity() {
     const pw = P(0, 1.8, 0.05); if (!opt.shop) B(pw[0], 1.8, pw[2], tx ? span * 0.8 : 0.1, 2.6, tz ? span * 0.8 : 0.1, [sc[0] * 0.3 + 0.1, sc[1] * 0.3 + 0.1, sc[2] * 0.3 + 0.1], 0.9);
     const pa = P(0, 3.6, 0.9); B(pa[0], 3.6, pa[2], tx ? span * 0.85 : 1.8, 0.2, tz ? span * 0.85 : 1.8, [0.05, 0.05, 0.07]);
     const pe = P(0, 3.5, 1.8); B(pe[0], 3.5, pe[2], tx ? span * 0.85 : 0.1, 0.12, tz ? span * 0.85 : 0.1, sc, 2.5);
-    WORLD.lights.push({ p: P(0, 2.5, 3), r: 12, c: [sc[0] * 1.6, sc[1] * 1.6, sc[2] * 1.6], shop: true });
+    // a downlight in the awning's underside, and the light it throws: the light used to hang a metre past the awning with
+    // nothing drawn there, so on the wet street its reflection was a bright spot floating in front of the shop
+    const pl = P(0, 3.42, 1.2); B(pl[0], 3.42, pl[2], tx ? 0.7 : 0.3, 0.1, tz ? 0.7 : 0.3, sc, 2.4);
+    WORLD.lights.push({ p: P(0, 3.25, 1.2), r: 12, c: [sc[0] * 1.6, sc[1] * 1.6, sc[2] * 1.6], shop: true });
     // horizontal sign above storefront
     const [txt, st] = opt.shop ? [SHOP_DEFS[opt.shop].sign, SHOP_DEFS[opt.shop].st] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
