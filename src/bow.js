@@ -3,19 +3,19 @@
    ============================================================ */
 // Index order is load-bearing (hazards, audio and the rig refer to types by number), so new arrows are appended.
 // Standard is always in the quiver; the six armory specials go in the 3 loadout slots (game.js: ARMORY / LOADOUT).
-// Incendiary (1) and Tether (5) are retired from the armory: still defined so old code paths stay valid, never handed out.
+// Slots 1 and 5 held the retired Incendiary and Tether arrows; they stay empty so saved loadouts and the numbered types keep their meaning.
 const ARROWS = [
   { key: 'std', name: 'Standard', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1 },
-  { key: 'fire', name: 'Incendiary', color: hex('#ffb52e'), glow: [4, 1.8, 0.4], dmg: 0.9, speed: 0.95 },
+  null,
   { key: 'boom', name: 'Blast Arrow', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },       // detonates on impact (radius by level)
   { key: 'rail', name: 'Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },            // flat and fast, passes through 2/3/5 bodies
   { key: 'frost', name: 'Cryo Arrow', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows (then freezes) what it hits
-  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },
+  null,
   { key: 'scatter', name: 'Splitter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.55, speed: 0.9 },       // breaks into 3/4/5 bolts mid-flight
   { key: 'shock', name: 'Shock Arrow', color: hex('#8fa8ff'), glow: [1.4, 1.9, 4.6], dmg: 0.8, speed: 1.05 },      // arcs to 2/3/5 neighbours
   { key: 'tracer', name: 'Tracer', color: hex('#7cff6b'), glow: [1.2, 4.2, 1], dmg: 0.6, speed: 1.15 },            // marks the infected through walls
 ];
-const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, TETHER: 5, SCATTER: 6, SHOCK: 7, TRACER: 8 };
+const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, SCATTER: 6, SHOCK: 7, TRACER: 8 };
 const BOW = {
   draw: 0, state: 'ready', t: 0, relFrom: 0, type: 0, nextType: -1, carryOld: false, hold: 0,
   swayT: 0, lagX: 0, lagY: 0, walkPhase: 0, walkAmt: 0, sprintAmt: 0, kick: 0, tipWorld: [0, 0, 0], handWorld: [0, 0, 0],
@@ -101,7 +101,6 @@ function drawArrowModel(nock, dir, type, up, alpha = 1, emitBoost = 1) {
   const hb = [tip[0] - dir[0] * 0.05, tip[1] - dir[1] * 0.05, tip[2] - dir[2] * 0.05];
   const pul = 0.75 + 0.25 * Math.sin(BOW.swayT * 9);
   if (type === 0) { vmSeg(hb, tip, 0.02, 0.02, [0.7, 0.75, 0.8], [0.4, 0.5, 0.6], MESH.cone); }
-  else if (type === 1) { vmSeg(hb, tip, 0.024, 0.024, A.color, [A.glow[0] * pul, A.glow[1] * pul, A.glow[2] * pul], MESH.cone); const c0 = [hb[0] - dir[0] * 0.04, hb[1] - dir[1] * 0.04, hb[2] - dir[2] * 0.04]; vmSeg(c0, hb, 0.02, 0.02, [0.3, 0.12, 0.05], [0.8, 0.3, 0.05]); }
   else if (type === 2) { const c0 = [hb[0] - dir[0] * 0.06, hb[1] - dir[1] * 0.06, hb[2] - dir[2] * 0.06]; vmSeg(c0, hb, 0.03, 0.03, [0.2, 0.05, 0.2], null, MESH.cyl); vmSeg([c0[0] + dir[0] * 0.025, c0[1] + dir[1] * 0.025, c0[2] + dir[2] * 0.025], [c0[0] + dir[0] * 0.04, c0[1] + dir[1] * 0.04, c0[2] + dir[2] * 0.04], 0.034, 0.034, A.color, [A.glow[0] * pul * 1.4, A.glow[1] * pul * 1.4, A.glow[2] * pul * 1.4], MESH.cyl); vmSeg(hb, tip, 0.022, 0.022, [0.5, 0.5, 0.55], null, MESH.cone); }
   else { const h2 = [tip[0] - dir[0] * 0.1, tip[1] - dir[1] * 0.1, tip[2] - dir[2] * 0.1]; vmSeg(h2, tip, 0.016, 0.016, A.color, [A.glow[0] * pul, A.glow[1] * pul, A.glow[2] * pul], MESH.cone); vmSeg([h2[0] - dir[0] * 0.02, h2[1] - dir[1] * 0.02, h2[2] - dir[2] * 0.02], h2, 0.026, 0.026, [0.1, 0.12, 0.14], [0.2, 1.2, 1.6], MESH.cyl); }
   return tip;

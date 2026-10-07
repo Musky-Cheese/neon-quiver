@@ -125,11 +125,9 @@ const AUD = {
     this.tone('sine', 90, 45, 0.18, 0.35);
     this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
     this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
-    if (type === 1) this.burst('bandpass', 400, 200, 1, 0.5, 0.12);
     if (type === 2) this.tone('square', 900, 300, 0.25, 0.05);
     if (type === 3) { this.tone('sawtooth', 2400, 600, 0.2, 0.06); this.tone('sine', 1200, 3000, 0.15, 0.05); }
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
-    if (type === 5) { this.tone('square', 300, 1400, 0.12, 0.05); }
     if (type === 6) { this.burst('lowpass', 1400, 300, 1, 0.3, 0.3); this.tone('square', 120, 50, 0.15, 0.1); }
     if (type === 7) { this.tone('sawtooth', 1600, 3200, 0.12, 0.04); this.burst('highpass', 5000, 7000, 3, 0.12, 0.08); }
     if (type === 8) { this.tone('sine', 2200, 2600, 0.1, 0.05); }
@@ -279,7 +277,6 @@ const AUD = {
   },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.ui, t); },
   frost(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('highpass', 5000, 2500, 3, 0.6, 0.25, o); this.tone('sine', 2600, 900, 0.5, 0.05, o); },
-  tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
   spit(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 700, 1800, 2, 0.22, 0.22, o); this.tone('sawtooth', 240, 90, 0.2, 0.12, o); },
   scream(pan) { if (!this.ctx) return; const o = this.out(pan); this.groan(pan, 0.4, 1.3); this.burst('highpass', 2200, 4200, 3, 0.5, 0.22, o); },
   pounce(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 1400, 300, 1, 0.18, 0.3, o); this.tone('sine', 90, 45, 0.14, 0.2, o); },
@@ -345,7 +342,7 @@ const AUD = {
 // [name, pitch spread, volume spread]; all layers of one play shift together.
 for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
   ['explode', 0.06, 0.1], ['fireIgnite', 0.08, 0.15], ['hurt', 0.06, 0.12], ['slam', 0.05, 0.1], ['spit', 0.08, 0.15], ['pounce', 0.08, 0.15], ['zap', 0.06, 0.15],
-  ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['tether', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
+  ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
   const f = AUD[k];
   AUD[k] = function (...a) { this._pv = rand(1 - p, 1 + p); this._vv = rand(1 - v, 1 + v * 0.4); try { return f.apply(this, a); } finally { this._pv = this._vv = 1; } };
 }

@@ -1,7 +1,7 @@
 /* ============================================================
    District hazards. The Metro's flood water slows everyone who
    wades through it, and a Cryo Burst freezes a patch over. The
-   Refinery's fuel tanks go up when Incendiary, Plasma or any other
+   Refinery's fuel tanks go up when a Blast Arrow or any other
    blast gets them; they set their neighbours off, and come back
    a few waves later. Plus the ambient life of both districts:
    water pouring from broken pipes, the flare stack, steam plumes.
@@ -33,13 +33,6 @@ function tankIgnite(t, fuse, cookAt) {
   if (t.fuse > 0 && t.fuse <= fuse) return;
   if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.at(t.x, t.z), 1 - d / 80); }
   t.fuse = fuse; if (cookAt) t.cook = cookAt;
-}
-// an arrow struck the world at x, y, z: an Incendiary head in a tank wall starts it cooking
-function hazArrowHit(x, y, z, type) {
-  if (type !== 1) return;
-  const t = tankAt(x, y, z, 0.35); if (!t) return;
-  const dx = x - t.x, dz = z - t.z, L = Math.hypot(dx, dz) || 1;
-  tankIgnite(t, TANK_COOK, { x: t.x + dx / L * t.r, y: clamp(y, 0.8, t.h - 0.3), z: t.z + dz / L * t.r, nx: dx / L, nz: dz / L });
 }
 // any explosion (Plasma, the hive nest, another tank) sets off the tanks it reaches
 function hazBlast(x, z, R, y = 0) {
@@ -129,7 +122,7 @@ function updateHazards(dt) {
   const d = PLAYER.district;
   if (GAME.state === 'playing' && d && !HAZ.hinted[d.id]) {
     if (d.id === 'metro' && PLAYER.wading) { HAZ.hinted.metro = true; GAME.toast('FLOOD WATER SLOWS EVERYONE · CRYO FREEZES IT OVER', '#9fe7ff'); }
-    if (d.id === 'refinery') { HAZ.hinted.refinery = true; GAME.toast('FUEL TANKS BLOW TO INCENDIARY OR PLASMA · KEEP YOUR DISTANCE', '#ffb52e'); }
+    if (d.id === 'refinery') { HAZ.hinted.refinery = true; GAME.toast('FUEL TANKS BLOW TO BLAST ARROWS · KEEP YOUR DISTANCE', '#ffb52e'); }
   }
   const id = GAME.state === 'title' ? '' : districtAt(px, pz).id;
   AUD.hazAmb(id === 'metro' ? 1 : 0, id === 'refinery' ? 1 : 0, dt);

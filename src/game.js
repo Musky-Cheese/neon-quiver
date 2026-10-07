@@ -123,7 +123,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
-  if (t < 0 || t >= ARROWS.length || !arrowAvailable(t)) return;
+  if (!ARROWS[t] || !arrowAvailable(t)) return;
   if (PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
   const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (cur === t) return;
   GAME.lastType = cur; bowSwap(t);
@@ -299,9 +299,7 @@ function updateProjectiles(dt) {
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
       AUD.hit(hitPart !== 'body', PLAYER.at(hx, hz, hy));
       if (killed) { GAME.hitMarker(true, true); }
-      if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
       if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
-      if (a.type === AT.TETHER) { tetherFrom(z, hx, hy, hz); }
       if (a.type === AT.SHOCK) { shockAt(hx, hy, hz, z, dmg); PROJ.splice(i, 1); continue; }
       if (a.type === AT.TRACER) { tracerAt(hx, hz, z); PROJ.splice(i, 1); continue; }
       if (a.type === AT.BLAST) { blastAt(hx, hy, hz); PROJ.splice(i, 1); continue; }
@@ -310,14 +308,12 @@ function updateProjectiles(dt) {
     } else {
       a.x = hx - a.dir[0] * 0.05; a.y = hy - a.dir[1] * 0.05; a.z = hz - a.dir[2] * 0.05;
       a.stuck = true; a.stuckT = 0;
-      hazArrowHit(hx, hy, hz, a.type);
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
       if (a.type === AT.BLAST) { blastAt(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
       if (a.type === AT.FROST) { cryoAt(hx, hy + 0.2, hz, null); PROJ.splice(i, 1); continue; }
       if (a.type === AT.SHOCK) shockAt(hx, hy + 0.2, hz, null, arrowDamage(a, A));
       if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
-      if (a.type === 1) { FIRES.push({ x: hx, z: hz, t: 4.5 }); AUD.fireIgnite(); }
       AUD.thunk();
       let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
       if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
@@ -818,7 +814,6 @@ function step(dt) {
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
   // fire arrow nocked: flames at tip
-  if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 1 && Math.random() < dt * 40) { const p = BOW.tipWorld; emit(p[0] + rand(-0.02, 0.02), p[1], p[2] + rand(-0.02, 0.02), rand(-0.1, 0.1), rand(0.3, 0.8), rand(-0.1, 0.1), 0.3, [2.4, 1.0, 0.15], 0.05, -0.5, 1, 0.05); }
   if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 2 && Math.random() < dt * 20) { const p = BOW.tipWorld; emit(p[0], p[1], p[2], rand(-0.2, 0.2), rand(-0.2, 0.2), rand(-0.2, 0.2), 0.2, [2, 0.3, 2], 0.03, 0, 3); }
 }
 

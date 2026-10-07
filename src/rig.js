@@ -369,12 +369,6 @@ function drawZombieRig(z, time) {
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
   }
-  // ---------- tether: stakes into the ground and glowing lines to the zombies it chained ----------
-  if (z.pin > 0 && !z.dead) {
-    const TC = ARROWS[5].color, TG = ARROWS[5].glow, k = Math.min(1, z.pin);
-    for (const s of [-1, 1]) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1] * 0.7, z.core[2], z.x + s * 0.9, 0.02, z.z + 0.6 * s, 0.02, 0.02), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
-    if (z.tetherTo) for (const o of z.tetherTo) if (!o.dead) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1], z.core[2], o.core[0], o.core[1], o.core[2], 0.025, 0.025), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
-  }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {
     if (sa.part === 'head' && z.headless) continue;

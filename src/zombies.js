@@ -62,7 +62,7 @@ function spawnZombie(type, x, z, wave) {
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
-    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
+    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // spitter/screamer/climber state
     spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
@@ -241,7 +241,7 @@ function updateZombies(dt, time) {
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
-    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt);
     // stand on low things they walk over (the Metro's island platform, steps, kerbs) instead of wading through them
     if (z.state !== 'drop' && z.climbState === 'ground') { const fy = z.floor = groundAt(z.x, z.z, (z.dead ? z.floor || 0 : z.y) + 0.15, 0.2 * z.scale);
       if (!z.dead) z.y = fy > z.y ? Math.min(fy, z.y + dt * 3) : Math.max(fy, z.y - dt * 5); }
@@ -282,13 +282,12 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
+    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
     let mx = Math.sin(z.yaw) * spd, mz = Math.cos(z.yaw) * spd;
     if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
-    if (z.pin > 0) { z.vx = 0; z.vz = 0; }
     z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
     for (const o of zombieCandidates(z.x - 2.2, z.x + 2.2, z.z - 2.2, z.z + 2.2)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
     pushOutCircle(z, 0.32 * z.scale);
@@ -392,15 +391,6 @@ function tracerMark(x, z, target, dur, radius) {
   AUD.tag(PLAYER.at(x, z));
   return n;
 }
-// Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
-function tetherFrom(z, hx, hy, hz) {
-  z.pin = Math.max(z.pin, z.type === 'boss' ? 1.2 : 4.5);
-  const near = zombieCandidates(z.x - 6, z.x + 6, z.z - 6, z.z + 6).filter(o => o !== z && !o.dead && o.type !== 'boss' && o.state !== 'drop' && Math.hypot(o.x - z.x, o.z - z.z) < 6)
-    .sort((a, b) => Math.hypot(a.x - z.x, a.z - z.z) - Math.hypot(b.x - z.x, b.z - z.z)).slice(0, 2);
-  for (const o of near) { o.pin = Math.max(o.pin, 3.5); damageZombie(o, 12 * PLAYER.dmgMult, 'body', null, null, 5); }
-  z.tetherTo = near;
-  flashLight(hx, hy, hz, [2, 4, 0.6], 9, 0.3); AUD.tether();
-}
 // elites: a tougher, faster, harder-hitting version of any regular type, marked by white-hot eyes
 function makeElite(z) {
   z.elite = true; z.hp *= 1.7; z.maxHp = z.hp; z.dmgK *= 1.3; z.speed *= 1.12; z.scale *= 1.07;
@@ -475,7 +465,7 @@ function updateSpitter(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
   pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
   z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
@@ -503,7 +493,7 @@ function updateScreamer(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -540,7 +530,7 @@ function updateClimber(z, dt, P) {
     const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;

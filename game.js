@@ -2633,11 +2633,9 @@ const AUD = {
     this.tone('sine', 90, 45, 0.18, 0.35);
     this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
     this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
-    if (type === 1) this.burst('bandpass', 400, 200, 1, 0.5, 0.12);
     if (type === 2) this.tone('square', 900, 300, 0.25, 0.05);
     if (type === 3) { this.tone('sawtooth', 2400, 600, 0.2, 0.06); this.tone('sine', 1200, 3000, 0.15, 0.05); }
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
-    if (type === 5) { this.tone('square', 300, 1400, 0.12, 0.05); }
     if (type === 6) { this.burst('lowpass', 1400, 300, 1, 0.3, 0.3); this.tone('square', 120, 50, 0.15, 0.1); }
     if (type === 7) { this.tone('sawtooth', 1600, 3200, 0.12, 0.04); this.burst('highpass', 5000, 7000, 3, 0.12, 0.08); }
     if (type === 8) { this.tone('sine', 2200, 2600, 0.1, 0.05); }
@@ -2787,7 +2785,6 @@ const AUD = {
   },
   tick() { if (!this.ctx) return; const t = this.now(); this.tone('square', 880, 880, 0.06, 0.04, this.ui, t); },
   frost(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('highpass', 5000, 2500, 3, 0.6, 0.25, o); this.tone('sine', 2600, 900, 0.5, 0.05, o); },
-  tether() { if (!this.ctx) return; this.tone('sawtooth', 1600, 400, 0.3, 0.05); this.burst('bandpass', 2200, 800, 4, 0.25, 0.1); },
   spit(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 700, 1800, 2, 0.22, 0.22, o); this.tone('sawtooth', 240, 90, 0.2, 0.12, o); },
   scream(pan) { if (!this.ctx) return; const o = this.out(pan); this.groan(pan, 0.4, 1.3); this.burst('highpass', 2200, 4200, 3, 0.5, 0.22, o); },
   pounce(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 1400, 300, 1, 0.18, 0.3, o); this.tone('sine', 90, 45, 0.14, 0.2, o); },
@@ -2853,7 +2850,7 @@ const AUD = {
 // [name, pitch spread, volume spread]; all layers of one play shift together.
 for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
   ['explode', 0.06, 0.1], ['fireIgnite', 0.08, 0.15], ['hurt', 0.06, 0.12], ['slam', 0.05, 0.1], ['spit', 0.08, 0.15], ['pounce', 0.08, 0.15], ['zap', 0.06, 0.15],
-  ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['tether', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
+  ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
   const f = AUD[k];
   AUD[k] = function (...a) { this._pv = rand(1 - p, 1 + p); this._vv = rand(1 - v, 1 + v * 0.4); try { return f.apply(this, a); } finally { this._pv = this._vv = 1; } };
 }
@@ -4489,19 +4486,19 @@ function drawObjective(hx, W, H) {
    ============================================================ */
 // Index order is load-bearing (hazards, audio and the rig refer to types by number), so new arrows are appended.
 // Standard is always in the quiver; the six armory specials go in the 3 loadout slots (game.js: ARMORY / LOADOUT).
-// Incendiary (1) and Tether (5) are retired from the armory: still defined so old code paths stay valid, never handed out.
+// Slots 1 and 5 held the retired Incendiary and Tether arrows; they stay empty so saved loadouts and the numbered types keep their meaning.
 const ARROWS = [
   { key: 'std', name: 'Standard', color: hex('#dff3ff'), glow: [1.6, 2.2, 2.6], dmg: 1, speed: 1 },
-  { key: 'fire', name: 'Incendiary', color: hex('#ffb52e'), glow: [4, 1.8, 0.4], dmg: 0.9, speed: 0.95 },
+  null,
   { key: 'boom', name: 'Blast Arrow', color: hex('#ff3df0'), glow: [3.5, 0.6, 3.2], dmg: 0.6, speed: 0.85 },       // detonates on impact (radius by level)
   { key: 'rail', name: 'Piercer', color: hex('#37f3ff'), glow: [0.5, 3.2, 4], dmg: 1.25, speed: 1.45 },            // flat and fast, passes through 2/3/5 bodies
   { key: 'frost', name: 'Cryo Arrow', color: hex('#9fe8ff'), glow: [1.2, 2.6, 4.2], dmg: 0.5, speed: 1 },          // slows (then freezes) what it hits
-  { key: 'tether', name: 'Tether', color: hex('#b8ff3a'), glow: [2.2, 4, 0.6], dmg: 1.1, speed: 1.1 },
+  null,
   { key: 'scatter', name: 'Splitter', color: hex('#ffd9a0'), glow: [3.4, 2.2, 1.2], dmg: 0.55, speed: 0.9 },       // breaks into 3/4/5 bolts mid-flight
   { key: 'shock', name: 'Shock Arrow', color: hex('#8fa8ff'), glow: [1.4, 1.9, 4.6], dmg: 0.8, speed: 1.05 },      // arcs to 2/3/5 neighbours
   { key: 'tracer', name: 'Tracer', color: hex('#7cff6b'), glow: [1.2, 4.2, 1], dmg: 0.6, speed: 1.15 },            // marks the infected through walls
 ];
-const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, TETHER: 5, SCATTER: 6, SHOCK: 7, TRACER: 8 };
+const AT = { STD: 0, BLAST: 2, PIERCE: 3, FROST: 4, SCATTER: 6, SHOCK: 7, TRACER: 8 };
 const BOW = {
   draw: 0, state: 'ready', t: 0, relFrom: 0, type: 0, nextType: -1, carryOld: false, hold: 0,
   swayT: 0, lagX: 0, lagY: 0, walkPhase: 0, walkAmt: 0, sprintAmt: 0, kick: 0, tipWorld: [0, 0, 0], handWorld: [0, 0, 0],
@@ -4587,7 +4584,6 @@ function drawArrowModel(nock, dir, type, up, alpha = 1, emitBoost = 1) {
   const hb = [tip[0] - dir[0] * 0.05, tip[1] - dir[1] * 0.05, tip[2] - dir[2] * 0.05];
   const pul = 0.75 + 0.25 * Math.sin(BOW.swayT * 9);
   if (type === 0) { vmSeg(hb, tip, 0.02, 0.02, [0.7, 0.75, 0.8], [0.4, 0.5, 0.6], MESH.cone); }
-  else if (type === 1) { vmSeg(hb, tip, 0.024, 0.024, A.color, [A.glow[0] * pul, A.glow[1] * pul, A.glow[2] * pul], MESH.cone); const c0 = [hb[0] - dir[0] * 0.04, hb[1] - dir[1] * 0.04, hb[2] - dir[2] * 0.04]; vmSeg(c0, hb, 0.02, 0.02, [0.3, 0.12, 0.05], [0.8, 0.3, 0.05]); }
   else if (type === 2) { const c0 = [hb[0] - dir[0] * 0.06, hb[1] - dir[1] * 0.06, hb[2] - dir[2] * 0.06]; vmSeg(c0, hb, 0.03, 0.03, [0.2, 0.05, 0.2], null, MESH.cyl); vmSeg([c0[0] + dir[0] * 0.025, c0[1] + dir[1] * 0.025, c0[2] + dir[2] * 0.025], [c0[0] + dir[0] * 0.04, c0[1] + dir[1] * 0.04, c0[2] + dir[2] * 0.04], 0.034, 0.034, A.color, [A.glow[0] * pul * 1.4, A.glow[1] * pul * 1.4, A.glow[2] * pul * 1.4], MESH.cyl); vmSeg(hb, tip, 0.022, 0.022, [0.5, 0.5, 0.55], null, MESH.cone); }
   else { const h2 = [tip[0] - dir[0] * 0.1, tip[1] - dir[1] * 0.1, tip[2] - dir[2] * 0.1]; vmSeg(h2, tip, 0.016, 0.016, A.color, [A.glow[0] * pul, A.glow[1] * pul, A.glow[2] * pul], MESH.cone); vmSeg([h2[0] - dir[0] * 0.02, h2[1] - dir[1] * 0.02, h2[2] - dir[2] * 0.02], h2, 0.026, 0.026, [0.1, 0.12, 0.14], [0.2, 1.2, 1.6], MESH.cyl); }
   return tip;
@@ -4909,7 +4905,7 @@ function spawnZombie(type, x, z, wave) {
     skin: pick(SKINS), ...(() => { const o = pick(OUTFITS[type]); return { cloth: o[0], pants: o[1] }; })(), hair: pick(HAIRS), seed: Math.random() * 100, side: Math.random() < 0.5 ? -1 : 1,
     bare: false, sleeve: Math.random() < 0.55, headVar: pick(['a', 'a', 'b', 'b', 'c', 'd']), top: 'shirt', gait: 'walk', idleClip: Math.random() < 0.5 ? 'idle' : 'idle_b',
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
-    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, pin: 0, tetherTo: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
+    chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
     // spitter/screamer/climber state
     spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
@@ -5088,7 +5084,7 @@ function updateZombies(dt, time) {
     z.flash = Math.max(0, z.flash - dt); z.flinch = Math.max(0, z.flinch - dt * 3); z.hpBarT = Math.max(0, z.hpBarT - dt); z.stumble = Math.max(0, z.stumble - dt);
     z.buffT = Math.max(0, (z.buffT || 0) - dt);
     updateReact(z, dt);
-    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt); z.pin = Math.max(0, z.pin - dt); if (z.pin <= 0) z.tetherTo = null;
+    z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt);
     // stand on low things they walk over (the Metro's island platform, steps, kerbs) instead of wading through them
     if (z.state !== 'drop' && z.climbState === 'ground') { const fy = z.floor = groundAt(z.x, z.z, (z.dead ? z.floor || 0 : z.y) + 0.15, 0.2 * z.scale);
       if (!z.dead) z.y = fy > z.y ? Math.min(fy, z.y + dt * 3) : Math.max(fy, z.y - dt * 5); }
@@ -5129,13 +5125,12 @@ function updateZombies(dt, time) {
     z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
-    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.pin > 0 ? 0 : 1) * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
+    let spd = z.speed * slow * zSlowK(z) * z.wade * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd;
     let mx = Math.sin(z.yaw) * spd, mz = Math.cos(z.yaw) * spd;
     if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
-    if (z.pin > 0) { z.vx = 0; z.vz = 0; }
     z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
     for (const o of zombieCandidates(z.x - 2.2, z.x + 2.2, z.z - 2.2, z.z + 2.2)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
     pushOutCircle(z, 0.32 * z.scale);
@@ -5239,15 +5234,6 @@ function tracerMark(x, z, target, dur, radius) {
   AUD.tag(PLAYER.at(x, z));
   return n;
 }
-// Tether: the struck zombie is staked where it stands, and the line jumps to the two nearest others
-function tetherFrom(z, hx, hy, hz) {
-  z.pin = Math.max(z.pin, z.type === 'boss' ? 1.2 : 4.5);
-  const near = zombieCandidates(z.x - 6, z.x + 6, z.z - 6, z.z + 6).filter(o => o !== z && !o.dead && o.type !== 'boss' && o.state !== 'drop' && Math.hypot(o.x - z.x, o.z - z.z) < 6)
-    .sort((a, b) => Math.hypot(a.x - z.x, a.z - z.z) - Math.hypot(b.x - z.x, b.z - z.z)).slice(0, 2);
-  for (const o of near) { o.pin = Math.max(o.pin, 3.5); damageZombie(o, 12 * PLAYER.dmgMult, 'body', null, null, 5); }
-  z.tetherTo = near;
-  flashLight(hx, hy, hz, [2, 4, 0.6], 9, 0.3); AUD.tether();
-}
 // elites: a tougher, faster, harder-hitting version of any regular type, marked by white-hot eyes
 function makeElite(z) {
   z.elite = true; z.hp *= 1.7; z.maxHp = z.hp; z.dmgK *= 1.3; z.speed *= 1.12; z.scale *= 1.07;
@@ -5322,7 +5308,7 @@ function updateSpitter(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
+  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
   pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
   z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
@@ -5350,7 +5336,7 @@ function updateScreamer(z, dt, P) {
   const want = Math.atan2(tx - z.x, tz - z.z);
   let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
   z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6);
+  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
   z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -5387,7 +5373,7 @@ function updateClimber(z, dt, P) {
     const want = Math.atan2(tx - z.x, tz - z.z);
     let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
     z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (z.pin > 0 ? 0 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
     if (dist < reach * 0.8) spd = 0;
     z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
@@ -5924,7 +5910,7 @@ function drawMutatorHUD(hx, W, H) {
 /* ============================================================
    District hazards. The Metro's flood water slows everyone who
    wades through it, and a Cryo Burst freezes a patch over. The
-   Refinery's fuel tanks go up when Incendiary, Plasma or any other
+   Refinery's fuel tanks go up when a Blast Arrow or any other
    blast gets them; they set their neighbours off, and come back
    a few waves later. Plus the ambient life of both districts:
    water pouring from broken pipes, the flare stack, steam plumes.
@@ -5956,13 +5942,6 @@ function tankIgnite(t, fuse, cookAt) {
   if (t.fuse > 0 && t.fuse <= fuse) return;
   if (cookAt && !(t.fuse > 0)) { const d = Math.hypot(t.x - PLAYER.x, t.z - PLAYER.z); if (d < 70) AUD.tankHiss(PLAYER.at(t.x, t.z), 1 - d / 80); }
   t.fuse = fuse; if (cookAt) t.cook = cookAt;
-}
-// an arrow struck the world at x, y, z: an Incendiary head in a tank wall starts it cooking
-function hazArrowHit(x, y, z, type) {
-  if (type !== 1) return;
-  const t = tankAt(x, y, z, 0.35); if (!t) return;
-  const dx = x - t.x, dz = z - t.z, L = Math.hypot(dx, dz) || 1;
-  tankIgnite(t, TANK_COOK, { x: t.x + dx / L * t.r, y: clamp(y, 0.8, t.h - 0.3), z: t.z + dz / L * t.r, nx: dx / L, nz: dz / L });
 }
 // any explosion (Plasma, the hive nest, another tank) sets off the tanks it reaches
 function hazBlast(x, z, R, y = 0) {
@@ -6052,7 +6031,7 @@ function updateHazards(dt) {
   const d = PLAYER.district;
   if (GAME.state === 'playing' && d && !HAZ.hinted[d.id]) {
     if (d.id === 'metro' && PLAYER.wading) { HAZ.hinted.metro = true; GAME.toast('FLOOD WATER SLOWS EVERYONE · CRYO FREEZES IT OVER', '#9fe7ff'); }
-    if (d.id === 'refinery') { HAZ.hinted.refinery = true; GAME.toast('FUEL TANKS BLOW TO INCENDIARY OR PLASMA · KEEP YOUR DISTANCE', '#ffb52e'); }
+    if (d.id === 'refinery') { HAZ.hinted.refinery = true; GAME.toast('FUEL TANKS BLOW TO BLAST ARROWS · KEEP YOUR DISTANCE', '#ffb52e'); }
   }
   const id = GAME.state === 'title' ? '' : districtAt(px, pz).id;
   AUD.hazAmb(id === 'metro' ? 1 : 0, id === 'refinery' ? 1 : 0, dt);
@@ -6500,12 +6479,6 @@ function drawZombieRig(z, time) {
     part(spine, 0, 0.32, 0.14, 0.2, 0.2, 0.1, [1, 0.3, 0.9], [4 * pul, 0.8, 3.6 * pul], fl, MESH.sphere);
     if (!z.headless) for (let k = 0; k < 3; k++) part(neck, (k - 1) * 0.07, 0.29, -0.02, 0.05, 0.14, 0.05, [0.9, 0.2, 0.8], [2 * pul, 0.3, 1.8 * pul], 0, MESH.cone, -0.2, 0, (k - 1) * 0.4);
     part(B.elbowR.matrixWorld.elements, 0, -0.47, 0.06, 0.1, 0.12, 0.1, [1, 0.3, 0.9], [2.4, 0.4, 2.2], 0, MESH.cone, Math.PI);
-  }
-  // ---------- tether: stakes into the ground and glowing lines to the zombies it chained ----------
-  if (z.pin > 0 && !z.dead) {
-    const TC = ARROWS[5].color, TG = ARROWS[5].glow, k = Math.min(1, z.pin);
-    for (const s of [-1, 1]) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1] * 0.7, z.core[2], z.x + s * 0.9, 0.02, z.z + 0.6 * s, 0.02, 0.02), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
-    if (z.tetherTo) for (const o of z.tetherTo) if (!o.dead) drawItem(MESH.box, M4.align(poolM(), z.core[0], z.core[1], z.core[2], o.core[0], o.core[1], o.core[2], 0.025, 0.025), TC, [TG[0] * k, TG[1] * k, TG[2] * k]);
   }
   // ---------- stuck arrows ----------
   for (const sa of z.stuck) {
@@ -7960,7 +7933,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!INPUT.locked && GAME.state === 'playing') GAME.pause();   // Esc (or alt-tab) always pauses
 });
 function selectArrow(t) {
-  if (t < 0 || t >= ARROWS.length || !arrowAvailable(t)) return;
+  if (!ARROWS[t] || !arrowAvailable(t)) return;
   if (PLAYER.ammo[t] <= 0) { AUD.deny(); flashQuiver(t); return; }
   const cur = BOW.nextType >= 0 ? BOW.nextType : BOW.type; if (cur === t) return;
   GAME.lastType = cur; bowSwap(t);
@@ -8136,9 +8109,7 @@ function updateProjectiles(dt) {
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
       AUD.hit(hitPart !== 'body', PLAYER.at(hx, hz, hy));
       if (killed) { GAME.hitMarker(true, true); }
-      if (a.type === 1 && wasAlive) { z.burn = 4.5; AUD.fireIgnite(); }
       if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
-      if (a.type === AT.TETHER) { tetherFrom(z, hx, hy, hz); }
       if (a.type === AT.SHOCK) { shockAt(hx, hy, hz, z, dmg); PROJ.splice(i, 1); continue; }
       if (a.type === AT.TRACER) { tracerAt(hx, hz, z); PROJ.splice(i, 1); continue; }
       if (a.type === AT.BLAST) { blastAt(hx, hy, hz); PROJ.splice(i, 1); continue; }
@@ -8147,14 +8118,12 @@ function updateProjectiles(dt) {
     } else {
       a.x = hx - a.dir[0] * 0.05; a.y = hy - a.dir[1] * 0.05; a.z = hz - a.dir[2] * 0.05;
       a.stuck = true; a.stuckT = 0;
-      hazArrowHit(hx, hy, hz, a.type);
       burst(hx, hy, hz, 10, [1.5, 1.4, 1.2], 4, 0.3, 0.04, 8, 2);
       if (a.type === AT.BLAST) { blastAt(hx, hy + 0.2, hz); PROJ.splice(i, 1); continue; }
       if (a.type === AT.FROST) { cryoAt(hx, hy + 0.2, hz, null); PROJ.splice(i, 1); continue; }
       if (a.type === AT.SHOCK) shockAt(hx, hy + 0.2, hz, null, arrowDamage(a, A));
       if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
-      if (a.type === 1) { FIRES.push({ x: hx, z: hz, t: 4.5 }); AUD.fireIgnite(); }
       AUD.thunk();
       let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
       if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
@@ -8655,7 +8624,6 @@ function step(dt) {
   GAME.update(dt);
   SHAKE.amt = Math.max(0, SHAKE.amt - dt * 2.2);
   // fire arrow nocked: flames at tip
-  if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 1 && Math.random() < dt * 40) { const p = BOW.tipWorld; emit(p[0] + rand(-0.02, 0.02), p[1], p[2] + rand(-0.02, 0.02), rand(-0.1, 0.1), rand(0.3, 0.8), rand(-0.1, 0.1), 0.3, [2.4, 1.0, 0.15], 0.05, -0.5, 1, 0.05); }
   if ((GAME.state === 'playing') && BOW.hasVisibleArrow && BOW.type === 2 && Math.random() < dt * 20) { const p = BOW.tipWorld; emit(p[0], p[1], p[2], rand(-0.2, 0.2), rand(-0.2, 0.2), rand(-0.2, 0.2), 0.2, [2, 0.3, 2], 0.03, 0, 3); }
 }
 
