@@ -1148,7 +1148,7 @@ function glassMaterialGPU() {
    The bow is its own pass over a transparent clear; its alpha lays it over the world (the sky writes alpha 1 there). */
 const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
   uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0),
-  uStreak: uniform(1), uStreakThr: uniform(1.0), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
+  uStreak: uniform(0.45), uStreakThr: uniform(1.8), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
 const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
@@ -1204,7 +1204,8 @@ function buildPostGPU(q) {
     });
     {   // the lens: streaks (a long faint tail over a short bright core, cooled the way anamorphic coatings tint them) and film
       // halation, the red-orange fringe light scatters into round bright things off the film base
-      const sk = st1T.sample(u).rgb.mul(1.5).add(st2T.sample(u).rgb.mul(3)).add(stT.sample(u).rgb.mul(6)), sl = dot(sk, vec3(0.3, 0.59, 0.11));
+      // a short bright core and a tail that fades out well before the frame edge: every lamp head used to draw a line across the whole screen
+      const sk = st1T.sample(u).rgb.mul(1.5).add(st2T.sample(u).rgb.mul(2)).add(stT.sample(u).rgb.mul(2)), sl = dot(sk, vec3(0.3, 0.59, 0.11));
       c.addAssign(mix(sk, vec3(sl).mul(vec3(0.55, 0.8, 1.3)), 0.45).mul(U.uStreak));
       c.addAssign(blT.sample(u).rgb.mul(vec3(1.0, 0.38, 0.16)).mul(U.uHal));
     }
