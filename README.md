@@ -128,6 +128,4 @@ Balance numbers you will probably want to tune live near the top of their files:
 - Code, art and audio were generated procedurally for this project.
 - The UI font is a subset of **TeX Gyre Heros Condensed** by GUST e-foundry, renamed "Quiver Cn" for embedding, and used under the GUST Font License.
 - The Armory uses Latin subsets of **Chakra Petch** (Cadson Demak) and **IBM Plex Mono** (IBM), both under the SIL Open Font License (`fonts/OFL-*.txt`).
-
-## Credits
 - Ultra surface textures: [Poly Haven](https://polyhaven.com) (CC0): asphalt_02, concrete_wall_008, red_brick_03, rusty_metal_02, corrugated_iron_02, concrete_pavers, plastered_wall_02, concrete_floor_worn_001. Re-fetch with `tools/fetch_textures.py`, pack with `tools/pack_textures.py`.
