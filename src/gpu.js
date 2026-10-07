@@ -202,7 +202,6 @@ function nqSurface(material, builder) {
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
       const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
       const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
-      const flick = stepT(0.997, h21(id.add(floor(T.mul(4)))));
       const wc = select(seed.greaterThan(0.93), vec3(1.0, 0.25, 0.6), select(seed.greaterThan(0.84), vec3(0.25, 0.85, 1.0), vec3(1.0, 0.68, 0.38))).toVar();
       wc.assign(mix(wc, vec3(1.0, 0.66, 0.36).mul(h21(id.add(3.7)).mul(0.6).add(0.7)), NQN.uWinWarm));
       const tv = stepT(0.78, h21(id.add(8.8))).mul(floorLit.oneMinus());   // a TV still playing to an empty room
@@ -228,7 +227,8 @@ function nqSurface(material, builder) {
         sh.mulAssign(smoothstep(0, dep, dep.sub(hp.z.mul(0.6))).mul(0.45).add(0.55));   // falls off toward the back
         room.assign(sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)));
       });
-      const wk = win.mul(lit).mul(flick.oneMinus()).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
+      // lit windows hold steady (the random quarter-second blackouts read as flicker, not as a failing grid)
+      const wk = win.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
       emis.addAssign(wk.mul(wc).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
       const wall = vec3(0).toVar();
       If(mat.greaterThan(8.5), () => {   // brick tenements
