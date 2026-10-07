@@ -632,7 +632,10 @@ function nqSurface(material, builder) {
       const fw = fwidth(cell).toVar(), px = float(1).div(max(fw.x, fw.y).add(1e-5)).toVar(), det = smoothstep(5, 22, px).toVar();
       const edge = (e, v, w) => smoothstep(e.sub(w), e.add(w), v);
       const win = edge(float(0.16), f.x, fw.x).mul(edge(float(0.84), f.x, fw.x).oneMinus()).mul(edge(float(0.22), f.y, fw.y)).mul(edge(float(0.78), f.y, fw.y).oneMinus()).toVar();
-      const bseed = h21(floor(W.xz.div(37)).add(N0.xz.mul(3.1))).toVar();
+      // The building seed used to hash the raw normal. three derives the world normal from the view-space one through the
+      // camera matrix, so it carried rounding noise that changed with every turn of the head, and the hash turned that
+      // noise into a different set of lit windows each frame. Rounded, the normal's contribution is exact per facade.
+      const bseed = h21(floor(W.xz.div(37)).add(floor(N0.xz.mul(3.1).add(0.5)))).toVar();
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
       const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
       const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
@@ -1026,7 +1029,7 @@ function signMaterialGPU(arr, add) {
     If(S.y.greaterThan(0.5), () => {   // holo billboards: torn scanlines and a fast shimmer
       const row = floor(u.y.oneMinus().mul(24)), g = stepT(0.93, h21(vec2(row, floor(T.mul(6)).add(S.x))));
       u.x.addAssign(g.mul(h21(vec2(row, T)).sub(0.5)).mul(0.08)); flick.assign(sin(u.y.mul(300).add(T.mul(20))).mul(0.2).add(0.8));
-    }).Else(() => { flick.assign(stepT(0.985, h21(vec2(floor(T.mul(9)), S.x))).mul(-0.85).add(1)); });   // neon: the odd dropout
+    });   // neon tubes hold steady (the random dropouts read as flicker)
     const t = texture(arr, u).depth(int(S.z.add(0.5)));
     const c = fogMix(t.rgb.mul(col).mul(flick), length(positionWorld.sub(cameraPosition)));
     return vec4(c, t.a.mul(m.uA));
@@ -6641,11 +6644,9 @@ function buildSigns() {
 function syncSigns(time, T) {
   for (const b of SIGN_BATCHES) {
     const m = b.mesh, g = m.geometry, M = m.instanceMatrix.array, C = g.attributes.iCol.array, S = g.attributes.iSign.array; let n = 0;
-    for (const { s, layer, vis } of b.list) {   // dead city: some signs are out, a third sputter on failing power
+    for (const { s, layer, vis } of b.list) {   // dead city: some signs are out; the rest hold steady (the sputtering third read as flicker)
       if (!vis) continue;
-      const f = s.seed % 1; let k = 1;
-      if (f < 0.08) k = 0.06;
-      else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
+      const f = s.seed % 1, k = f < 0.08 ? 0.06 : 1;
       M.set(s.m, n * 16);
       C[n * 3] = s.col[0] * T.sign * k; C[n * 3 + 1] = s.col[1] * T.sign * k; C[n * 3 + 2] = s.col[2] * T.sign * k;
       S[n * 3] = s.seed; S[n * 3 + 1] = s.mode; S[n * 3 + 2] = layer; n++;

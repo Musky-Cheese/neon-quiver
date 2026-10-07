@@ -105,11 +105,9 @@ function buildSigns() {
 function syncSigns(time, T) {
   for (const b of SIGN_BATCHES) {
     const m = b.mesh, g = m.geometry, M = m.instanceMatrix.array, C = g.attributes.iCol.array, S = g.attributes.iSign.array; let n = 0;
-    for (const { s, layer, vis } of b.list) {   // dead city: some signs are out, a third sputter on failing power
+    for (const { s, layer, vis } of b.list) {   // dead city: some signs are out; the rest hold steady (the sputtering third read as flicker)
       if (!vis) continue;
-      const f = s.seed % 1; let k = 1;
-      if (f < 0.08) k = 0.06;
-      else if (f < 0.35) k = (Math.sin(time * 23 + s.seed * 7) > 0.55 || Math.sin(time * 1.3 + s.seed) > 0.9) ? 0.12 : 1;
+      const f = s.seed % 1, k = f < 0.08 ? 0.06 : 1;
       M.set(s.m, n * 16);
       C[n * 3] = s.col[0] * T.sign * k; C[n * 3 + 1] = s.col[1] * T.sign * k; C[n * 3 + 2] = s.col[2] * T.sign * k;
       S[n * 3] = s.seed; S[n * 3 + 1] = s.mode; S[n * 3 + 2] = layer; n++;
