@@ -315,18 +315,26 @@ function zLife(z, r, dt, time) {
 const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
 // scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
-const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0];
+const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0], _cSkin = [0, 0, 0], _cCloth = [0, 0, 0], _cPants = [0, 0, 0];
 function icy(out, c, ice) { if (!ice) return c; out[0] = c[0] + (0.42 - c[0]) * ice; out[1] = c[1] + (0.62 - c[1]) * ice; out[2] = c[2] + (0.8 - c[2]) * ice; return out; }
+const BOSS_SKIN = [0.44, 0.34, 0.5];
+// this frame's body colours, as zPose works them out (burning darkens everything), without posing the whole skeleton for them
+function zColours(z) {
+  const k = z.burn > 0 ? 0.4 : 1, sk = z.type === 'boss' ? BOSS_SKIN : z.skin, cl = z.cloth, pa = z.pants;
+  _cSkin[0] = sk[0] * k; _cSkin[1] = sk[1] * k; _cSkin[2] = sk[2] * k;
+  _cCloth[0] = cl[0] * k; _cCloth[1] = cl[1] * k; _cCloth[2] = cl[2] * k;
+  _cPants[0] = pa[0] * k; _cPants[1] = pa[1] * k; _cPants[2] = pa[2] * k;
+}
 function drawZombieRig(z, time) {
   if (!z.rig || z._ps === undefined) poseZombieRig(z, 0, time);
   const r = z.rig, u = r.u, T = z.type, B = r.B;
-  const P = _ZP; zPose(z, time); // colours / flash for this frame
+  zColours(z);   // colours for this frame (the pose itself was made in poseZombieRig)
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.35 : z.elite ? 0.9 : 0.34) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
   const eyeGlow = dying ? 0.0 : T === 'boss' ? 1.75 : z.elite ? 0.8 : 0.42, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * (z.chillK <= 0 ? 0.9 : 0.55) : 0;   // frosted over by a Cryo Burst
-  const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
+  const skin = icy(_skin, _cSkin, ice), cloth = icy(_cloth, _cCloth, ice), pants = icy(_pants, _cPants, ice);
   const skinK = T === 'walker' ? 1.38 : T === 'runner' ? 1.22 : 1;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin, skinK);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);

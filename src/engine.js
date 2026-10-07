@@ -115,6 +115,10 @@ try {
   NQ_BACKEND = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
   if (window.NQ_BOOT) window.NQ_BOOT.backend = NQ_BACKEND;
 } catch (e) { document.getElementById('nogl').hidden = false; throw e; }
+// Note on shader programs: three r186 compiles a separate program per InstancedMesh per pass (its instance buffers are baked
+// into the compiled state, so they can't be shared), and every compile stalls the GPU for tens of ms. The game therefore
+// creates every instanced batch it will ever draw at boot and draws each of them once in the warm-up frame (r3.js
+// warmShaders / flushList), so no program is built mid-game.
 renderer.setPixelRatio(1);
 renderer.autoClear = false;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma

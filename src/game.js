@@ -885,8 +885,7 @@ function render(time) {
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
   const cam = setCamera(time);
   const fov = GAME.state === 'title' ? 70 : PLAYER.fov;
-  // ---- collect draws
-  if (ZRIG.ready) syncRigs();
+  // ---- collect draws (rigs of zombies that left the list were released in step's syncRigs)
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();

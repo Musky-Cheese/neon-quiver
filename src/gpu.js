@@ -87,16 +87,20 @@ class NQLighting extends THREE.PhysicalLightingModel {
 }
 // per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
 const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
+let ZOMBIE_POSITION = null;
 class NQMaterial extends THREE.MeshStandardNodeMaterial {
   constructor(kind) {
     super({ roughness: 0.7, metalness: 0 });
     this.nqKind = kind; this.defines = {}; this.fog = false; this.lights = true;
     this.roughnessNode = NQP.rough; this.metalnessNode = NQP.metal;
     const zp = kind === 'zombie', inst = kind === 'inst' || kind === 'vm';
-    if (zp) this.positionNode = Fn(() => {   // a lost head, jaw or helmet: its triangles collapse to a point
+    // One position node for every infected body (rig.js makes a material per body). The shadow pass borrows each object's
+    // positionNode onto its one shared depth material and keys that material's program on the borrowed node, so a node built
+    // per material gave every zombie its own shadow program per light: compiled when it first stepped into a lamp, mid-wave.
+    if (zp) this.positionNode = ZOMBIE_POSITION || (ZOMBIE_POSITION = Fn(() => {   // a lost head, jaw or helmet: its triangles collapse to a point
       const pi = int(attribute('part', 'float').add(0.5));
       return select(zRef('uHide', 'float').element(pi).greaterThan(0.5), vec3(0), positionLocal);
-    })();
+    })());
     else if (!inst) this.positionNode = Fn(() => {   // foliage (and the blossom cards): a slow lean downwind plus a quick leaf flutter
       const p = positionLocal.toVar(), nqm = attribute('nqm', 'vec2');
       const on = this.defines.NQ_CARDS ? float(1) : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));
@@ -157,7 +161,9 @@ function nqSurface(material, builder) {
     tint.assign(zRef('uPT', 'vec3').element(pi)); skin.assign(zRef('uPS', 'vec3').element(pi)); iemit.assign(zRef('uPE', 'vec3').element(pi)); flash.assign(zRef('uFlash', 'float'));
   } else {
     const nqm = attribute('nqm', 'vec2'); mx.assign(nqm.x); mat.assign(nqm.y);
-    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });   // per-car paint only
+    // per-car paint only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh, the wrecks)
+    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
+    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
   }
   if (inst) { const t = attribute('iTint', 'vec4'); tint.assign(t.rgb); flash.assign(t.a); iemit.assign(attribute('iEmit', 'vec3')); skin.assign(attribute('iSkin', 'vec3')); }
   const dynK = vm ? NQN.uDynVM : NQN.uDyn;
@@ -511,7 +517,10 @@ const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMate
 /* ---------------- sky dome (r3.js SKY_U drives it) ---------------- */
 function skyMaterialGPU(U) {
   const R = (u, t) => reference('value', t, u);
-  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false }); m.fog = false;
+  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: true }); m.fog = false;
+  // the dome sits at the far plane (depth just under 1, where the buffer is still clear), so with the depth test on it only
+  // shades the pixels no geometry covers; the result is the same picture as drawing it first and painting the city over it
+  m.vertexNode = Fn(() => { const c = cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(positionLocal, 1)).toVar(); return vec4(c.xy, c.w.mul(0.9999998), c.w); })();
   m.fragmentNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar(), h = d.y, T = NQN.uTime, glow = R(U.uGlow, 'color'), disc = R(U.uDiscCol, 'color');
     const c = mix(NQN.uFogCol.mul(1.25), R(U.uMid, 'color'), smoothstep(0, 0.18, h)).toVar();

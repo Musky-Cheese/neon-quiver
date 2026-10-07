@@ -131,6 +131,10 @@ try {
   NQ_BACKEND = renderer.backend.isWebGPUBackend ? 'webgpu' : 'webgl2';
   if (window.NQ_BOOT) window.NQ_BOOT.backend = NQ_BACKEND;
 } catch (e) { document.getElementById('nogl').hidden = false; throw e; }
+// Note on shader programs: three r186 compiles a separate program per InstancedMesh per pass (its instance buffers are baked
+// into the compiled state, so they can't be shared), and every compile stalls the GPU for tens of ms. The game therefore
+// creates every instanced batch it will ever draw at boot and draws each of them once in the warm-up frame (r3.js
+// warmShaders / flushList), so no program is built mid-game.
 renderer.setPixelRatio(1);
 renderer.autoClear = false;
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;   // the grade pass does its own tone curve + gamma
@@ -511,16 +515,20 @@ class NQLighting extends THREE.PhysicalLightingModel {
 }
 // per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
 const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
+let ZOMBIE_POSITION = null;
 class NQMaterial extends THREE.MeshStandardNodeMaterial {
   constructor(kind) {
     super({ roughness: 0.7, metalness: 0 });
     this.nqKind = kind; this.defines = {}; this.fog = false; this.lights = true;
     this.roughnessNode = NQP.rough; this.metalnessNode = NQP.metal;
     const zp = kind === 'zombie', inst = kind === 'inst' || kind === 'vm';
-    if (zp) this.positionNode = Fn(() => {   // a lost head, jaw or helmet: its triangles collapse to a point
+    // One position node for every infected body (rig.js makes a material per body). The shadow pass borrows each object's
+    // positionNode onto its one shared depth material and keys that material's program on the borrowed node, so a node built
+    // per material gave every zombie its own shadow program per light: compiled when it first stepped into a lamp, mid-wave.
+    if (zp) this.positionNode = ZOMBIE_POSITION || (ZOMBIE_POSITION = Fn(() => {   // a lost head, jaw or helmet: its triangles collapse to a point
       const pi = int(attribute('part', 'float').add(0.5));
       return select(zRef('uHide', 'float').element(pi).greaterThan(0.5), vec3(0), positionLocal);
-    })();
+    })());
     else if (!inst) this.positionNode = Fn(() => {   // foliage (and the blossom cards): a slow lean downwind plus a quick leaf flutter
       const p = positionLocal.toVar(), nqm = attribute('nqm', 'vec2');
       const on = this.defines.NQ_CARDS ? float(1) : stepT(13.5, nqm.y).mul(stepT(nqm.y, 14.5));
@@ -581,7 +589,9 @@ function nqSurface(material, builder) {
     tint.assign(zRef('uPT', 'vec3').element(pi)); skin.assign(zRef('uPS', 'vec3').element(pi)); iemit.assign(zRef('uPE', 'vec3').element(pi)); flash.assign(zRef('uFlash', 'float'));
   } else {
     const nqm = attribute('nqm', 'vec2'); mx.assign(nqm.x); mat.assign(nqm.y);
-    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });   // per-car paint only
+    // per-car paint only: the colour three carries per instance (InstancedMesh) or per batched object (BatchedMesh, the wrecks)
+    if (builder.object.instanceColor) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec3', 'vInstanceColor')); });
+    else if (builder.object.isBatchedMesh && builder.object._colorsTexture) If(mat.greaterThan(24.5).and(mat.lessThan(25.5)), () => { C.rgb.mulAssign(varyingProperty('vec4', 'vBatchColor').rgb); });
   }
   if (inst) { const t = attribute('iTint', 'vec4'); tint.assign(t.rgb); flash.assign(t.a); iemit.assign(attribute('iEmit', 'vec3')); skin.assign(attribute('iSkin', 'vec3')); }
   const dynK = vm ? NQN.uDynVM : NQN.uDyn;
@@ -935,7 +945,10 @@ const MAT = { static: nqMaterial('static'), inst: nqMaterial('inst'), vm: nqMate
 /* ---------------- sky dome (r3.js SKY_U drives it) ---------------- */
 function skyMaterialGPU(U) {
   const R = (u, t) => reference('value', t, u);
-  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false }); m.fog = false;
+  const m = new THREE.MeshBasicNodeMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: true }); m.fog = false;
+  // the dome sits at the far plane (depth just under 1, where the buffer is still clear), so with the depth test on it only
+  // shades the pixels no geometry covers; the result is the same picture as drawing it first and painting the city over it
+  m.vertexNode = Fn(() => { const c = cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(positionLocal, 1)).toVar(); return vec4(c.xy, c.w.mul(0.9999998), c.w); })();
   m.fragmentNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar(), h = d.y, T = NQN.uTime, glow = R(U.uGlow, 'color'), disc = R(U.uDiscCol, 'color');
     const c = mix(NQN.uFogCol.mul(1.25), R(U.uMid, 'color'), smoothstep(0, 0.18, h)).toVar();
@@ -6433,18 +6446,26 @@ function zLife(z, r, dt, time) {
 const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
 // scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
-const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0];
+const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0], _cSkin = [0, 0, 0], _cCloth = [0, 0, 0], _cPants = [0, 0, 0];
 function icy(out, c, ice) { if (!ice) return c; out[0] = c[0] + (0.42 - c[0]) * ice; out[1] = c[1] + (0.62 - c[1]) * ice; out[2] = c[2] + (0.8 - c[2]) * ice; return out; }
+const BOSS_SKIN = [0.44, 0.34, 0.5];
+// this frame's body colours, as zPose works them out (burning darkens everything), without posing the whole skeleton for them
+function zColours(z) {
+  const k = z.burn > 0 ? 0.4 : 1, sk = z.type === 'boss' ? BOSS_SKIN : z.skin, cl = z.cloth, pa = z.pants;
+  _cSkin[0] = sk[0] * k; _cSkin[1] = sk[1] * k; _cSkin[2] = sk[2] * k;
+  _cCloth[0] = cl[0] * k; _cCloth[1] = cl[1] * k; _cCloth[2] = cl[2] * k;
+  _cPants[0] = pa[0] * k; _cPants[1] = pa[1] * k; _cPants[2] = pa[2] * k;
+}
 function drawZombieRig(z, time) {
   if (!z.rig || z._ps === undefined) poseZombieRig(z, 0, time);
   const r = z.rig, u = r.u, T = z.type, B = r.B;
-  const P = _ZP; zPose(z, time); // colours / flash for this frame
+  zColours(z);   // colours for this frame (the pose itself was made in poseZombieRig)
   const dying = z.state === 'dying', fl = z.flash > 0 ? 0.55 : 0;
   const e = z.eyes || z.T.eyes, vk = (T === 'boss' ? 1.35 : z.elite ? 0.9 : 0.34) * (dying ? 0.1 : 0.7 + 0.3 * Math.sin(time * 3 + z.seed));
   const vein = _vein; vein[0] = e[0] * vk; vein[1] = e[1] * vk; vein[2] = e[2] * vk;
   const eyeGlow = dying ? 0.0 : T === 'boss' ? 1.75 : z.elite ? 0.8 : 0.42, pul = 0.6 + 0.4 * Math.sin(time * 6);
   const ice = z.chill > 0 ? Math.min(1, z.chill / 1.5) * (z.chillK <= 0 ? 0.9 : 0.55) : 0;   // frosted over by a Cryo Burst
-  const skin = icy(_skin, P.skin, ice), cloth = icy(_cloth, P.cloth, ice), pants = icy(_pants, P.pants, ice);
+  const skin = icy(_skin, _cSkin, ice), cloth = icy(_cloth, _cCloth, ice), pants = icy(_pants, _cPants, ice);
   const skinK = T === 'walker' ? 1.38 : T === 'runner' ? 1.22 : 1;
   for (let i = 0; i < ZPARTS; i++) setV(u.uPS.value[i], skin, skinK);
   setV(u.uPT.value[0], cloth); setV(u.uPE.value[0], vein);
@@ -6554,6 +6575,13 @@ function flushList(list, vm) {
     if (b.n) {   // upload only the instances in use, not the whole (up to 2x) capacity
       const g = b.im.geometry, n = b.n;
       upRange(b.im.instanceMatrix, n * 16); upRange(g.attributes.iTint, n * 4); upRange(g.attributes.iEmit, n * 3); upRange(g.attributes.iSkin, n * 3);
+    } else if (R3.warming) {
+      // warm-up frame: one all-zero instance (every vertex at the origin, no pixels) so each pass builds and compiles
+      // this batch's render state now rather than the first time an arrow, pickup or flame appears in it
+      const g = b.im.geometry;
+      b.im.instanceMatrix.array.fill(0, 0, 16); g.attributes.iTint.array.fill(0, 0, 4); g.attributes.iEmit.array.fill(0, 0, 3); g.attributes.iSkin.array.fill(0, 0, 3);
+      upRange(b.im.instanceMatrix, 16); upRange(g.attributes.iTint, 4); upRange(g.attributes.iEmit, 3); upRange(g.attributes.iSkin, 3);
+      b.im.count = 1; b.im.visible = true;
     }
   }
 }
@@ -6563,7 +6591,9 @@ const SKY_U = { uZen: { value: new THREE.Color() }, uMid: { value: new THREE.Col
 const skyMesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24),
   skyMaterialGPU(SKY_U)
 );
-skyMesh.frustumCulled = false; skyMesh.renderOrder = -1000; skyMesh.matrixAutoUpdate = true;
+// drawn after every other opaque surface, at the far plane (gpu.js skyMaterialGPU): only the pixels the city leaves open run the
+// sky shader, where before the whole screen did and was then painted over
+skyMesh.frustumCulled = false; skyMesh.renderOrder = 1000; skyMesh.matrixAutoUpdate = true;
 scene.add(skyMesh);
 
 /* ---------------- signs + decals (textured quads) ---------------- */
@@ -6637,6 +6667,10 @@ function syncDecals() {
   for (let v = 0; v < DECAL_POOL.length; v++) {
     const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
     if (n) { m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true; }
+    else if (R3.warming) {   // as for the batches: one invisible decal per pool, so the first blood on the street compiles nothing
+      m.instanceMatrix.array.fill(0, 0, 16); m.geometry.attributes.iAlpha.array[0] = 0; m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true;
+      m.count = 1; m.visible = true;
+    }
   }
 }
 
@@ -6699,10 +6733,15 @@ function updateLights3(cam) {
   const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
   sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
   sun.shadow.autoUpdate = false;
-  // lamps: nearest ones get the spot pool (the first few cast shadows)
-  _lampsNear.length = 0; for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) if (l.kind === 'lamp' && d2c(l.p, cam) < 70 * 70) _lampsNear.push(l);
-  _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  // lamps: nearest ones get the spot pool (the first few cast shadows); the same tile query also yields the static lights below
   R3.tick = (R3.tick + 1) | 0;
+  _lampsNear.length = 0; _stat.length = 0;
+  for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) {
+    const d = d2c(l.p, cam);
+    if (l.kind === 'lamp') { if (d < 70 * 70) _lampsNear.push(l); }
+    else if (d < 55 * 55) { l.fd = l.fw > 0 ? d * STAT_STICK : d; l.ftick = R3.tick; _stat.push(l); }
+  }
+  _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
   const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
     sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
@@ -6720,12 +6759,7 @@ function updateLights3(cam) {
   }
   // static point lights: the nearest shops, fountain and doorways; then dynamic flashes, arrows, fires...
   const now = performance.now(), fdt = Math.min(0.1, Math.max(0, (now - _statT) / 1000)); _statT = now;
-  _stat.length = 0;
-  for (const l of nearbyWorld('lights', cam[0], cam[2], 58)) {
-    if (l.kind === 'lamp') continue;
-    const d = d2c(l.p, cam); if (d >= 55 * 55) continue;
-    l.fd = l.fw > 0 ? d * STAT_STICK : d; l.ftick = R3.tick; _stat.push(l);
-  }
+  // _stat holds this frame's in-range static lights (gathered with the lamps above, tagged with this tick)
   for (const l of _statLit) if (l.ftick !== R3.tick) { l.fd = Infinity; l.ftick = R3.tick; _stat.push(l); }   // out of range: fade out
   _stat.sort(byFD);
   _statLit.length = 0;
@@ -6853,6 +6887,30 @@ function spatialChunks(geo, size = WORLD_CHUNK_SIZE) {
     chunks.push(g);
   }
   return chunks;
+}
+// The same lossless clean-up for a geometry that stays whole (the car models): bit-identical vertices welded, zero-area
+// triangles dropped, 16-bit indices when they fit. carParts gives every triangle its own corners so material ids never blend
+// across an edge; where two corners are identical in every attribute they interpolate identically, so one vertex serves both.
+function weldGeometry(geo) {
+  const canon = weldVerts(geo), pos = geo.attributes.position, n = pos.count, src = geo.index ? geo.index.array : null, nt = src ? src.length / 3 : n / 3;
+  const P = new Uint32Array(pos.array.buffer, pos.array.byteOffset, pos.array.length);
+  const same = (a, b) => P[a * 3] === P[b * 3] && P[a * 3 + 1] === P[b * 3 + 1] && P[a * 3 + 2] === P[b * 3 + 2];
+  const local = new Int32Array(n).fill(-1), verts = new Int32Array(n), tri = new Uint32Array(nt * 3); let nv = 0, k = 0;
+  for (let t = 0; t < nt; t++) {
+    const a = canon[src ? src[t * 3] : t * 3], b = canon[src ? src[t * 3 + 1] : t * 3 + 1], c = canon[src ? src[t * 3 + 2] : t * 3 + 2];
+    if (same(a, b) || same(b, c) || same(a, c)) continue;
+    if (local[a] < 0) verts[local[a] = nv++] = a; tri[k++] = local[a];
+    if (local[b] < 0) verts[local[b] = nv++] = b; tri[k++] = local[b];
+    if (local[c] < 0) verts[local[c] = nv++] = c; tri[k++] = local[c];
+  }
+  const out = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(geo.attributes)) {
+    const s = attr.itemSize, from = attr.array, to = new from.constructor(nv * s);
+    for (let j = 0; j < nv; j++) for (let q = 0, o = verts[j] * s; q < s; q++) to[j * s + q] = from[o + q];
+    out.setAttribute(name, new THREE.BufferAttribute(to, s, attr.normalized));
+  }
+  out.setIndex(new THREE.BufferAttribute(nv < 65535 ? new Uint16Array(tri.subarray(0, k)) : tri.slice(0, k), 1));
+  return out;
 }
 // Frustum test for anything that carries a bounding box (world chunks): the sphere test first, as three.js does,
 // then the box. A tall city block's sphere is mostly empty air; its box is not. Only ever rejects a chunk none of
@@ -7085,25 +7143,33 @@ function carParts(src, kind) {
 }
 async function loadMeshyCars() {
   const spots = WORLD.carSpots || []; if (!spots.length) return;
-  const loader = new GLTFLoader(), V = typeof CARS_VER === 'string' ? CARS_VER : '0';
+  const loader = new GLTFLoader(), V = typeof CARS_VER === 'string' ? CARS_VER : '0', geos = {};
   for (const kind of ['sedan', 'van']) {
-    const list = spots.filter(s => s.kind === kind); if (!list.length) continue;
+    if (!spots.some(s => s.kind === kind)) continue;
     try {
       const gltf = await loader.loadAsync('models/car_' + kind + '.glb?v=' + V);
       let src = null; gltf.scene.traverse(o => { if (!src && o.isMesh) src = o.geometry; });
-      const geo = carParts(src, kind); geo.rotateY(-Math.PI / 2);   // modelled along +x (front at -x); the game's cars run along z
-      const mat = nqMaterial('static'), cars = new THREE.InstancedMesh(geo, mat, list.length), m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
-      list.forEach((s, i) => {
-        q.setFromEuler(e.set(s.roll || 0, s.ry, (s.roll || 0) * 0.6, 'YXZ'));
-        m.compose(new THREE.Vector3(s.x, 0, s.z), q, new THREE.Vector3(1, 1, 1)); cars.setMatrixAt(i, m);
-        cars.setColorAt(i, new THREE.Color(s.paint[0], s.paint[1], s.paint[2]));
-      });
-      cars.computeBoundingSphere(); geo.boundingSphere = cars.boundingSphere.clone();
-      cars.name = 'meshy-cars-' + kind; cars.castShadow = true; cars.receiveShadow = true;
-      cars.userData.streamRadius = 1e5; cars.instanceMatrix.needsUpdate = true; cars.instanceColor.needsUpdate = true;
-      scene.add(cars); WORLD_MESHES.push(cars);
+      const geo = weldGeometry(carParts(src, kind)); geo.rotateY(-Math.PI / 2); geo.computeBoundingSphere();   // modelled along +x (front at -x); the game's cars run along z
+      geos[kind] = geo;
     } catch (err) { console.warn('car load failed', kind, err); }
   }
+  const list = spots.filter(s => geos[s.kind]); if (!list.length) return;
+  // The 23 wrecks were one instanced draw per model whose bounding sphere spanned the whole city, so every pass (the world,
+  // the mirror, each shadow map) drew all of them, about a million triangles, wherever the camera looked. In one BatchedMesh
+  // three culls them car by car for every camera, and the lot is one program with a per-car paint colour.
+  let nv = 0, ni = 0; for (const g of Object.values(geos)) { nv += g.attributes.position.count; ni += g.index.count; }
+  const batch = new THREE.BatchedMesh(list.length, nv, ni, nqMaterial('static')), gid = {};
+  for (const [kind, g] of Object.entries(geos)) gid[kind] = batch.addGeometry(g);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
+  for (const s of list) {
+    const id = batch.addInstance(gid[s.kind]);
+    q.setFromEuler(e.set(s.roll || 0, s.ry, (s.roll || 0) * 0.6, 'YXZ'));
+    m.compose(new THREE.Vector3(s.x, 0, s.z), q, new THREE.Vector3(1, 1, 1)); batch.setMatrixAt(id, m);
+    batch.setColorAt(id, c.setRGB(s.paint[0], s.paint[1], s.paint[2]));
+  }
+  batch.computeBoundingSphere();
+  batch.name = 'meshy-cars'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+  scene.add(batch); WORLD_MESHES.push(batch);
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
 }
 
@@ -7412,9 +7478,15 @@ function warmShaders() {
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(9), 3));
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9), 3)); g.setAttribute('nqm', new THREE.BufferAttribute(new Float32Array(6), 2));
   for (const [k, w] of [['iTint', 4], ['iEmit', 3], ['iSkin', 3]]) g.setAttribute(k, new THREE.InstancedBufferAttribute(new Float32Array(w), w));
-  const stand = [new THREE.Mesh(g, MAT.static), new THREE.InstancedMesh(g, MAT.inst, 1), new THREE.InstancedMesh(g, MAT.vm, 1)];
-  stand[1].castShadow = stand[1].receiveShadow = true; stand[2].layers.set(LAYER_VM);
+  g.setIndex([0, 1, 2]);   // the real meshes are indexed, and the index is part of the program key: an unindexed stand-in warms a program nothing else uses
+  const stand = [new THREE.Mesh(g, MAT.static)]; stand[0].receiveShadow = true;
   for (const m of stand) { m.frustumCulled = false; scene.add(m); }
+  // Every instanced batch the game can ever draw exists from here on, sized for a busy wave, and flushList draws each one as a
+  // single invisible instance during the warm-up: three compiles a program per InstancedMesh per pass, so a batch born or
+  // regrown mid-game (the first flame, the first helmet knocked off, a crowded blast) used to stall the frame for every pass it
+  // then entered. The bow's batches are built the same way by drawing it once now.
+  for (const [geo, cap] of [[MESH.box, 256], [MESH.cyl, 96], [MESH.sphere, 128], [MESH.cone, 96], [MESH.metal, 64], [MESH.ring, 48], [MODEL.jaw, 16], [MODEL.brute_helmet, 16]]) if (geo) growBatch(batchFor(geo, false), cap);
+  const showBow = GAME.showBowInTitle; GAME.showBowInTitle = true;
   // a stand-in Meshy zombie, so the textured-body program is built now and not on the first spawn
   const wz = typeof MZ !== 'undefined' && Object.keys(MZ).length ? { type: 'walker', seed: 0.5, warm: true } : null;
   if (wz) { makeRig(wz); wz.rig.mesh.position.set(0, -60, 0); wz.rig.mesh.frustumCulled = false; wz.rig.mesh.updateMatrixWorld(true); }
@@ -7425,7 +7497,7 @@ function warmShaders() {
     emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], 0.1); emit(0, -60, 0, 0, 0, 0, 0.05, [0, 0, 0], -0.1); updateParticles(0.001);
     R3.warming = true; warmShadows(); render(GAME.time);
   } catch (e) { console.warn('shader warm-up', e); }
-  finally { R3.warming = false; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
+  finally { R3.warming = false; GAME.showBowInTitle = showBow; renderer.setRenderTarget(prev); for (const m of stand) scene.remove(m); g.dispose(); if (wz) { wz.rig.mesh.frustumCulled = true; releaseRig(wz); } }
   warmMeshyZombies();   // every breed and outfit that has landed so far
   R3.warm = { programs: progs() - before, ms: Math.round(performance.now() - t0) };
 }
@@ -8614,8 +8686,7 @@ function render(time) {
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
   const cam = setCamera(time);
   const fov = GAME.state === 'title' ? 70 : PLAYER.fov;
-  // ---- collect draws
-  if (ZRIG.ready) syncRigs();
+  // ---- collect draws (rigs of zombies that left the list were released in step's syncRigs)
   drawCityDynamic(time);
   for (const z of ZOMBIES) drawZombie(z, time);
   drawDebris();
