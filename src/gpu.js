@@ -272,7 +272,9 @@ function nqSurface(material, builder) {
     const stain = vn(W.xz.mul(0.7)).mul(0.25).add(vn(W.xz.mul(3.7)).mul(0.12));
     base.assign(mix(base.mul(tileV).mul(line.mul(-0.5).add(1)).mul(stain.oneMinus()), base.mul(0.35), pud));
     bumpH.assign(line.mul(-0.01).add(pud.mul(nqRipple(W.xz.mul(2.2), T)).mul(0.002).mul(NQN.uRain)));
-    rough.assign(mix(0.62, mix(0.62, 0.04, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
+    // puddles mirror the street through the reflection pass (wetRefl), so the analytic lights keep a soft lobe here: at mirror
+    // roughness every point light also printed a pin-sharp hot spot on the ground that the lens streaked, a second, floating lamp
+    rough.assign(mix(0.62, mix(0.62, 0.32, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
     wetRefl.assign(mix(0.22, 1.0, pud).mul(wet1));   // the whole wet surface mirrors a little, puddles fully
     nqTL.assign(5); nqTS.assign(pud.mul(-0.7).add(1).mul(0.75));
   }).ElseIf(M(2.5, 3.5), () => {      // asphalt
@@ -289,7 +291,7 @@ function nqSurface(material, builder) {
     base.assign(mix(base.mul(crack.mul(wild).oneMinus()), vec3(0.12, 0.105, 0.085).mul(fine.mul(0.7).add(0.55)).mul(grain.mul(0.5).add(0.7)), grav));
     pud.mulAssign(grav.mul(-0.7).add(1));
     bumpH.assign(fine.mul(0.0025).sub(crack.mul(0.006)).add(pud.mul(nqRipple(W.xz.mul(2.2), T)).mul(0.002).mul(NQN.uRain)));
-    rough.assign(mix(0.85, mix(0.8, 0.05, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
+    rough.assign(mix(0.85, mix(0.8, 0.34, wet1), pud)); envK.assign(NQN.uEnvK.mul(pud.mul(0.6).mul(wetK).add(1)));
     wetRefl.assign(mix(0.2, 1.0, pud).mul(wet1));
     nqTL.assign(0); nqTS.assign(pud.mul(-0.75).add(1).mul(0.9));
   }).ElseIf(M(3.5, 4.5), () => {      // brushed metal
