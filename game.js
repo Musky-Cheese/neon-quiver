@@ -625,7 +625,13 @@ function nqSurface(material, builder) {
   If(M(0.5, 1.5).or(M(8.5, 9.5)), () => {   // facades with windows (concrete panels or brick)
     If(abs(N0.y).lessThan(0.5), () => {
       const fc = fcW, cell = fc.div(vec2(2.4, 3.3)), id = floor(cell).toVar(), f = fract(cell).toVar();
-      const win = stepT(0.16, f.x).mul(stepT(f.x, 0.84)).mul(stepT(0.22, f.y)).mul(stepT(f.y, 0.78)).toVar();
+      // Far windows span a few pixels, so hard window edges, mullions, blinds and the room parallax resolved to a different
+      // value every time the camera moved: whole windows seemed to light up and go out as you walked. The edges are now
+      // antialiased by their pixel footprint, and the fine detail fades to its average below ~22 px per window (det);
+      // up close nothing changes.
+      const fw = fwidth(cell).toVar(), px = float(1).div(max(fw.x, fw.y).add(1e-5)).toVar(), det = smoothstep(5, 22, px).toVar();
+      const edge = (e, v, w) => smoothstep(e.sub(w), e.add(w), v);
+      const win = edge(float(0.16), f.x, fw.x).mul(edge(float(0.84), f.x, fw.x).oneMinus()).mul(edge(float(0.22), f.y, fw.y)).mul(edge(float(0.78), f.y, fw.y).oneMinus()).toVar();
       const bseed = h21(floor(W.xz.div(37)).add(N0.xz.mul(3.1))).toVar();
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
       const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
@@ -636,8 +642,9 @@ function nqSurface(material, builder) {
       wc.assign(mix(wc, vec3(0.36, 0.6, 1.0).mul(vn(vec2(T.mul(4.7).add(seed.mul(40)), seed.mul(9))).mul(0.55).add(0.45)), tv));
       wc.assign(mix(wc, vec3(0.8, 0.9, 1.0), floorLit));
       // inside the glass: a room gradient, mullions, and some blinds half drawn
-      const mull = max(smoothstep(0, 0.012, abs(f.x.sub(0.5))).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(0.62))).oneMinus());
-      const blind = select(h21(id.add(5.3)).lessThan(0.35), stepT(0.5, fract(f.y.mul(18))).mul(stepT(h21(id.add(9.1)).mul(0.8).oneMinus(), f.y.oneMinus())), float(0));
+      const mull = max(smoothstep(0, 0.012, abs(f.x.sub(0.5))).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(0.62))).oneMinus()).mul(det);
+      const drawn = stepT(h21(id.add(9.1)).mul(0.8).oneMinus(), f.y.oneMinus()), hasBlind = h21(id.add(5.3)).lessThan(0.35);   // how far the blind is pulled down
+      const blind = select(hasBlind, mix(drawn.mul(0.5), stepT(0.5, fract(f.y.mul(18))).mul(drawn), det), float(0));   // 18 slats, or their average coverage when they can't be resolved
       const room = smoothstep(0.2, 0.8, f.y).mul(0.55).add(0.45).mul(h21(id.add(1.9)).mul(0.6).add(0.4)).toVar();
       If(lit.mul(win).greaterThan(0.5), () => {   // interior mapping: trace the view ray into a box room behind the glass
         const V = normalize(W.sub(cameraPosition));
@@ -653,11 +660,16 @@ function nqSurface(material, builder) {
           sh.assign(mix(0.62, 0.08, furn));
         }).ElseIf(t.equal(ty), () => { sh.assign(select(d.y.greaterThan(0), float(1), vn(hp.xz.mul(3)).mul(0.3).add(0.7).mul(0.3))); });   // ceiling light / floor
         sh.mulAssign(smoothstep(0, dep, dep.sub(hp.z.mul(0.6))).mul(0.45).add(0.55));   // falls off toward the back
-        room.assign(sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)));
+        room.assign(mix(room, sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)), det));       // the plain gradient stands in where the room is too small to read
       });
       // lit windows hold steady (the random quarter-second blackouts read as flicker, not as a failing grid)
       const wk = win.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
-      emis.addAssign(wk.mul(wc).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
+      // Below ~3 px per window the lit cells are sub-pixel sparkle: every step moved the pixel grid onto different random
+      // cells, so distant windows twinkled on and off. There the per-cell lights blend into the facade's mean window glow
+      // (the lit share × window area × mean room brightness × mean colour), the way a mipmap would average them.
+      const far = smoothstep(1.5, 3.5, px), pLit = clampT(bseed.mul(-0.1).add(0.82).oneMinus(), 0, 1).add(stepT(4.5, W.y).mul(0.03)).mul(stepT(1.2, W.y));
+      const avg = pLit.mul(0.17).mul(vec3(0.92, 0.66, 0.45));
+      emis.addAssign(mix(avg, wk.mul(wc), far).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
       const wall = vec3(0).toVar();
       If(mat.greaterThan(8.5), () => {   // brick tenements
         const br = select(NQN.uTexOn.greaterThan(0.5), vec2(0.5, 0), nqBrick(fc));
