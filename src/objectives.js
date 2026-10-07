@@ -124,7 +124,7 @@ function updateObjectives(dt) {
       if (o.y <= 0) { o.landed = true; AUD.land(1.5); burst(o.x, 0.3, o.z, 40, [0.3, 0.28, 0.26], 5, 0.9, 0.25, 3, 2, 1); flashLight(o.x, 1.5, o.z, [3, 1.4, 0.4], 14, 0.4); }
     } else {
       const near = d < 2.4, hold = near && INPUT.keys.KeyE;
-      if (hold) { o.prog += dt; o.tick -= dt; if (o.tick <= 0) { o.tick = 0.5; AUD.tick && AUD.tick(); } } else o.prog = Math.max(0, o.prog - dt * 0.5);
+      if (hold) { o.prog += dt; o.tick -= dt; if (o.tick <= 0) { o.tick = 0.5; AUD.tick(); } } else o.prog = Math.max(0, o.prog - dt * 0.5);
       // the flare keeps smoking, and the noise of a crate being forced draws them in
       if (Math.random() < dt * 14) emit(o.x + 0.5, 1.0, o.z + 0.4, rand(-0.2, 0.2) + WX.wind * 0.6, rand(1, 1.8), rand(-0.2, 0.2), rand(2, 3.5), [1.4, 0.2, 0.08], rand(0.25, 0.45), -0.25, 0.5, 0.7, 0.55);
       o.spawnT -= dt;

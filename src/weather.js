@@ -18,7 +18,7 @@ const WX = {
   precip: 0.68, snow: 0, wind: 0.4, storm: 0,   // current (smoothed) values
   wet: 0.8, cover: 0,                            // surface state: how soaked, how snowed-over
   flash: 0, flashT: 8, gust: 0, thunder: [],
-  forced: null,                                   // testing / debugging: WX.force('snow')
+  forced: null,                                   // testing / debugging: set to a weather name to pin it
 };
 function wxPick() {
   const keys = Object.keys(WX_STATES).filter(k => k !== WX.state && !(WX.state === 'snow' && k === 'downpour'));
@@ -31,7 +31,6 @@ function wxSet(k) {
   if (GAME.state === 'playing' && prev !== k) { const msg = { downpour: 'STORM ROLLING IN', snow: 'THE RAIN IS TURNING TO SNOW', dry: 'THE RAIN EASES OFF' }[k]; if (msg) GAME.toast(msg, '#bfe4ff'); }
 }
 function wxReset() { wxSet('rain'); WX.precip = 0.68; WX.snow = 0; WX.wind = 0.4; WX.storm = 0; WX.wet = 0.8; WX.cover = 0; WX.flash = 0; WX.thunder.length = 0; }
-WX.force = (k) => { WX.forced = k; if (k) { wxSet(k); } };
 
 function updateWeather(dt) {
   WX.t += dt;

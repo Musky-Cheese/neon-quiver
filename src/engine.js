@@ -5,8 +5,9 @@
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
+const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes); the shader's air-glow loop runs over the same count
 const rand = (a, b) => a + Math.random() * (b - a);
-const randi = (a, b) => Math.floor(rand(a, b + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
@@ -17,8 +18,6 @@ function hex(h, k = 1) { const n = parseInt(h.slice(1), 16); return [((n >> 16) 
 /* ---------------- mat4 (column-major) ---------------- */
 const M4 = {
   create() { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
-  identity(m) { m.fill(0); m[0] = m[5] = m[10] = m[15] = 1; return m; },
-  copy(o, a) { o.set(a); return o; },
   mul(out, a, b) {
     const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
       a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11], a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
@@ -39,23 +38,6 @@ const M4 = {
     m[8] = (syr * cx) * sz; m[9] = (-sxr) * sz; m[10] = (cy * cx) * sz; m[11] = 0;
     m[12] = tx; m[13] = ty; m[14] = tz; m[15] = 1;
     return m;
-  },
-  invertRigid(out, m) {
-    const r00 = m[0], r01 = m[1], r02 = m[2], r10 = m[4], r11 = m[5], r12 = m[6], r20 = m[8], r21 = m[9], r22 = m[10];
-    const tx = m[12], ty = m[13], tz = m[14];
-    out[0] = r00; out[1] = r10; out[2] = r20; out[3] = 0;
-    out[4] = r01; out[5] = r11; out[6] = r21; out[7] = 0;
-    out[8] = r02; out[9] = r12; out[10] = r22; out[11] = 0;
-    out[12] = -(r00 * tx + r01 * ty + r02 * tz);
-    out[13] = -(r10 * tx + r11 * ty + r12 * tz);
-    out[14] = -(r20 * tx + r21 * ty + r22 * tz);
-    out[15] = 1;
-    return out;
-  },
-  perspective(out, fovy, aspect, near, far) {
-    const f = 1 / Math.tan(fovy / 2); out.fill(0);
-    out[0] = f / aspect; out[5] = f; out[10] = (far + near) / (near - far); out[11] = -1; out[14] = 2 * far * near / (near - far);
-    return out;
   },
   invert(out, a) {
     const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
@@ -93,7 +75,7 @@ const M4 = {
   pt(m, x, y, z, out) { out[0] = m[0] * x + m[4] * y + m[8] * z + m[12]; out[1] = m[1] * x + m[5] * y + m[9] * z + m[13]; out[2] = m[2] * x + m[6] * y + m[10] * z + m[14]; return out; },
   dir(m, x, y, z, out) { out[0] = m[0] * x + m[4] * y + m[8] * z; out[1] = m[1] * x + m[5] * y + m[9] * z; out[2] = m[2] * x + m[6] * y + m[10] * z; return out; },
 };
-const _t4a = M4.create(), _t4b = M4.create(), _t4c = M4.create();
+const _t4b = M4.create(), _t4c = M4.create();
 
 /* ---------------- renderer ---------------- */
 const canvas = document.getElementById('gl');
@@ -151,7 +133,7 @@ const NQU = {
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
   // release look pass: soft camera-side fill + two-tone neon rim on the infected, and wind for the foliage (weather.js)
   uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
-  uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
+  uReflOn: { value: 0 }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
@@ -198,7 +180,6 @@ class Geo {
     this.quad(m, [-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h], [0, 0, 1], c, e, mat);
     this.quad(m, [h, -h, -h], [-h, -h, -h], [-h, h, -h], [h, h, -h], [0, 0, -1], c, e, mat);
   }
-  boxAt(x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0, rx = 0, rz = 0) { this.box(M4.trs(_t4a, x, y, z, rx, ry, rz, sx, sy, sz), c, e, mat); }
   // cylinder along Y, radius 0.5, height 1, centered
   cyl(m, c, e = 0, mat = 0, seg = 12, rTop = 0.5, rBot = 0.5, caps = true) {
     const base = this.n;

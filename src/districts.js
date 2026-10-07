@@ -51,6 +51,7 @@ function supplyProp(g, sp) {
 }
 
 function buildDistricts(C) {
+  const SOOT = [0.06, 0.06, 0.065];   // sooted concrete and steel: the Metro's and the Refinery's dark tone
   const { B, solid, building, lamp, barrier, addSign, r, R, neonPick, setG } = C;
   const quad = (x0, x1, z0, z1, y, col, mat) => C.getG().quad(null, [x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], [0, 1, 0], col, 0, mat);
   // a contiguous row of buildings between a0..a1 along one axis. A cut [c0, c1] leaves an opening: the buildings it
@@ -74,7 +75,7 @@ function buildDistricts(C) {
     for (let i = 1; i <= n; i++) {
       const t = i / n, x = lerp(ax, bx, t), z = lerp(az, bz, t), y = lerp(ay, by, t) - Math.sin(t * Math.PI) * sag;
       C.getG().box(M4.align(M, px, py, pz, x, y, z, 0.035, 0.035), [0.03, 0.03, 0.035], 0, 0);
-      if (lanterns && i < n && i % 1 === 0) { const c = lc || [1, 0.4, 0.15]; C.getG().sphere(M4.trs(M, x, y - 0.3, z, 0, 0, 0, 0.36, 0.44, 0.36), c, 2.6, 0, 8, 6); WORLD.halos.push({ p: [x, y - 0.3, z], s: 1.3, c: [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5] }); }
+      if (lanterns && i < n) { const c = lc || [1, 0.4, 0.15]; C.getG().sphere(M4.trs(M, x, y - 0.3, z, 0, 0, 0, 0.36, 0.44, 0.36), c, 2.6, 0, 8, 6); WORLD.halos.push({ p: [x, y - 0.3, z], s: 1.3, c: [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5] }); }
       px = x; py = y; pz = z;
     }
   }
@@ -439,7 +440,7 @@ function buildDistricts(C) {
   // Line 3 ran in an open cut below the streets. The pumps died with the power: the track beds are knee-deep in black
   // water, a stalled train still waits at Sector 7 West, and one of the street bridges has come down into the cut.
   {
-    const WALL = [0.12, 0.12, 0.125], WALL2 = [0.1, 0.1, 0.105], TILE = [0.46, 0.45, 0.41], DARK = [0.06, 0.06, 0.065], L3 = hex('#ff3d7a'), TOP = 7.4;
+    const WALL = [0.12, 0.12, 0.125], WALL2 = [0.1, 0.1, 0.105], TILE = [0.46, 0.45, 0.41], L3 = hex('#ff3d7a'), TOP = 7.4;
     const TR = [-127.5, -98.5];   // the two track centre lines
     setG('near');
     quad(-136, -84, -136, -58, 0.011, [0.05, 0.051, 0.054], 16);                  // the floor of the cut
@@ -456,9 +457,9 @@ function buildDistricts(C) {
     for (let x = -130; x <= -90; x += 6) { B(x, TOP / 2 - 0.3, -135.7, 0.8, TOP - 0.6, 0.6, WALL2, 0, 16); solid(x - 0.4, x + 0.4, 0, TOP - 0.6, -136, -135.4); }
     B(-135.75, 6.9, -97, 0.5, 0.4, 78, WALL2, 0, 16); B(-110, 6.9, -135.75, 52, 0.4, 0.5, WALL2, 0, 16);
     B(-135.9, 0.35, -97, 0.2, 0.7, 78, [0.03, 0.035, 0.03], 0, 16); B(-110, 0.35, -135.9, 52, 0.7, 0.2, [0.03, 0.035, 0.03], 0, 16);   // tide mark
-    for (const y of [TOP + 0.55, TOP + 1.05]) { B(-136.2, y, -100, 0.07, 0.07, 84, DARK, 0, 4); B(-113, y, -136.2, 58, 0.07, 0.07, DARK, 0, 4); }
-    for (let z = -140; z <= -60; z += 2.4) B(-136.2, TOP + 0.55, z, 0.07, 1.1, 0.07, DARK, 0, 4);
-    for (let x = -140; x <= -86; x += 2.4) B(x, TOP + 0.55, -136.2, 0.07, 1.1, 0.07, DARK, 0, 4);
+    for (const y of [TOP + 0.55, TOP + 1.05]) { B(-136.2, y, -100, 0.07, 0.07, 84, SOOT, 0, 4); B(-113, y, -136.2, 58, 0.07, 0.07, SOOT, 0, 4); }
+    for (let z = -140; z <= -60; z += 2.4) B(-136.2, TOP + 0.55, z, 0.07, 1.1, 0.07, SOOT, 0, 4);
+    for (let x = -140; x <= -86; x += 2.4) B(x, TOP + 0.55, -136.2, 0.07, 1.1, 0.07, SOOT, 0, 4);
     // street lamps at the top, their heads out over the edge: they light the cut from above
     const edgeLamp = (x, z, dx, dz) => {
       B(x, TOP + 3, z, 0.22, 6, 0.22, [0.08, 0.08, 0.1], 0, 4);
@@ -479,7 +480,7 @@ function buildDistricts(C) {
       B(tx, 2.9, -135.94, 6.2, 5.8, 0.1, [0.004, 0.004, 0.006]);
       B(tx, 6.1, -135.7, 7.4, 0.6, 0.6, WALL2, 0, 16); for (const s of [-1, 1]) B(tx + s * 3.4, 2.9, -135.7, 0.6, 5.8, 0.6, WALL2, 0, 16);
       for (let i = 0; i < 6; i++) B(tx - 3.1 + i * 1.24, 6.1, -135.38, 0.55, 0.3, 0.04, i % 2 ? [0.03, 0.03, 0.03] : [0.9, 0.62, 0.08], i % 2 ? 0 : 0.6);
-      B(tx + 2.2, 4.6, -135.5, 0.4, 0.9, 0.3, DARK, 0, 4); B(tx + 2.2, 4.8, -135.33, 0.2, 0.2, 0.05, NEON.red, 4);
+      B(tx + 2.2, 4.6, -135.5, 0.4, 0.9, 0.3, SOOT, 0, 4); B(tx + 2.2, 4.8, -135.33, 0.2, 0.2, 0.05, NEON.red, 4);
       WORLD.halos.push({ p: [tx + 2.2, 4.8, -135.2], s: 1.1, c: [0.8, 0.05, 0.05] });
       for (const o of [-0.72, 0.72]) B(tx + o, 0.03, -97.5, 0.1, 0.06, 67, [0.3, 0.26, 0.24], 0, 4);   // rails just breaking the surface
       addSign(signTexture('LINE 3', '#ff3d7a', 'seg'), tx, 7.0, -135.3, 0, 4.4, 1.1, [1.3, 1.3, 1.3], 0, true);
@@ -529,7 +530,7 @@ function buildDistricts(C) {
     // a bridge that held: shelter from the rain, and a deck overhead
     B(-110, 7.45, -76, 52, 0.9, 8, WALL, 0, 16); solid(-136, -84, 7.0, 7.9, -80, -72);
     for (const bz of [-80.15, -71.85]) B(-110, 8.4, bz, 52, 1.0, 0.3, WALL2, 0, 16);
-    for (const bz of [-78.5, -73.5]) B(-110, 6.8, bz, 52, 0.4, 0.5, DARK, 0, 4);
+    for (const bz of [-78.5, -73.5]) B(-110, 6.8, bz, 52, 0.4, 0.5, SOOT, 0, 4);
     B(-113, 3.5, -76, 1.4, 7, 1.4, WALL2, 0, 16); WORLD.circles.push({ x: -113, z: -76, r: 0.75, h: 7 });
     WORLD.indoor.push({ x0: -136, x1: -84, z0: -80, z1: -72, y1: 7 });
     for (const x of [-126, -99]) { B(x, 6.5, -76, 0.6, 0.12, 0.3, [1, 0.55, 0.2], 3); WORLD.lights.push({ p: [x, 6, -76], r: 11, c: [1.6, 0.75, 0.22], shop: true }); }
@@ -556,7 +557,7 @@ function buildDistricts(C) {
     addSign(signTexture('METRO  LINE 3', '#ff3d7a', 'panel'), -91, 6.6, -31.75, 0, 10, 2.5, [1.3, 1.3, 1.3], 0, false);
     addSign(signTexture('SECTOR 7 WEST', '#ff3d7a', 'panel'), -91, 6.6, -58.25, Math.PI, 10, 2.5, [1.3, 1.3, 1.3], 0, false);
     for (const gx of [-99.2, -82.8]) {   // the magenta globes either side of the entrance
-      B(gx, 1.6, -31.2, 0.14, 3.2, 0.14, DARK, 0, 4); C.getG().sphere(M4.trs(M, gx, 3.45, -31.2, 0, 0, 0, 0.55, 0.55, 0.55), L3, 2.4, 0, 12, 8);
+      B(gx, 1.6, -31.2, 0.14, 3.2, 0.14, SOOT, 0, 4); C.getG().sphere(M4.trs(M, gx, 3.45, -31.2, 0, 0, 0, 0.55, 0.55, 0.55), L3, 2.4, 0, 12, 8);
       WORLD.halos.push({ p: [gx, 3.45, -31.2], s: 2, c: [0.6, 0.12, 0.28] }); WORLD.lights.push({ p: [gx, 3.2, -30.4], r: 9, c: [1.6, 0.3, 0.7], shop: true }); WORLD.circles.push({ x: gx, z: -31.2, r: 0.12, h: 3.2 });
     }
     // the yard tunnel: bare concrete, sodium lamps, the way marked in paint
@@ -585,7 +586,7 @@ function buildDistricts(C) {
   // Petrochem 7: a tank farm, a process unit still venting, a loading rack and a tanker at the jetty. Down the access
   // road from the Suburbs, or through the gate at the south end of the Docks. The small fuel tanks still hold pressure.
   {
-    const STEEL = [0.5, 0.5, 0.47], DARK = [0.06, 0.06, 0.065], YEL = [0.8, 0.6, 0.08], CONCR = [0.2, 0.2, 0.19];
+    const YEL = [0.8, 0.6, 0.08], CONCR = [0.2, 0.2, 0.19];
     setG('near');
     quad(104, 228, 66, 146, 0.012, [0.068, 0.066, 0.062], 16);                        // plant concrete
     quad(199, 213, 40, 66, 0.012, [0.07, 0.068, 0.064], 16);                          // the gate through the Docks wall
@@ -602,7 +603,7 @@ function buildDistricts(C) {
       const ax = z0 === z1, L = ax ? x1 - x0 : z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, out = ax ? (cz > 116 ? 1 : -1) : -1;
       for (const y of [0.2, 1.4, 2.6]) B(cx, y, cz, ax ? L : 0.05, 0.05, ax ? 0.05 : L, [0.2, 0.21, 0.22], 0, 4);
       for (const y of [3.05, 3.25, 3.45]) B(cx + (ax ? 0 : out * (y - 2.85)), y, cz + (ax ? out * (y - 2.85) : 0), ax ? L : 0.02, 0.02, ax ? 0.02 : L, [0.15, 0.15, 0.16], 0, 4);
-      for (let a = 0; a <= L + 0.01; a += 3) { const px = ax ? x0 + a : cx, pz = ax ? cz : z0 + a; B(px, 1.45, pz, 0.08, 2.9, 0.08, DARK, 0, 4); rot(px + (ax ? 0 : out * 0.2), 3.1, pz + (ax ? out * 0.2 : 0), 0.05, 0.6, 0.05, DARK, 0, 4, ax ? out * 0.6 : 0, 0, ax ? 0 : -out * 0.6); }
+      for (let a = 0; a <= L + 0.01; a += 3) { const px = ax ? x0 + a : cx, pz = ax ? cz : z0 + a; B(px, 1.45, pz, 0.08, 2.9, 0.08, SOOT, 0, 4); rot(px + (ax ? 0 : out * 0.2), 3.1, pz + (ax ? out * 0.2 : 0), 0.05, 0.6, 0.05, SOOT, 0, 4, ax ? out * 0.6 : 0, 0, ax ? 0 : -out * 0.6); }
       solid(ax ? x0 : cx - 0.1, ax ? x1 : cx + 0.1, 0, 3.4, ax ? cz - 0.1 : z0, ax ? cz + 0.1 : z1);
     };
     fence(60, 110.2, 108, 110.2); fence(60, 121.8, 108, 121.8);
@@ -618,12 +619,12 @@ function buildDistricts(C) {
     B(106, 7.1, 116, 0.6, 0.6, 11.4, [0.3, 0.2, 0.03], 0, 4); B(106, 8.3, 116, 0.4, 2.2, 8.4, [0.04, 0.04, 0.045], 0, 4);
     addSign(signTexture('PETROCHEM 7', '#ffb52e', 'seg'), 105.75, 8.3, 116, -Math.PI / 2, 8, 2, [1.4, 1.4, 1.4], 0, true);
     addSign(signTexture('SUBURBS', '#29e7ff', 'font'), 106.25, 8.3, 116, Math.PI / 2, 8, 2, [1.3, 1.3, 1.3], 0, true);
-    { const bx = 110.8, bz = 124.6; B(bx, 1.4, bz, 3, 2.8, 3, [0.16, 0.16, 0.17], 0, 8); B(bx - 1.52, 1.7, bz, 0.04, 1.0, 2.2, [0.3, 0.4, 0.42], 0.8); B(bx, 2.95, bz, 3.4, 0.2, 3.4, DARK, 0, 4); solid(bx - 1.5, bx + 1.5, 0, 2.8, bz - 1.5, bz + 1.5);
+    { const bx = 110.8, bz = 124.6; B(bx, 1.4, bz, 3, 2.8, 3, [0.16, 0.16, 0.17], 0, 8); B(bx - 1.52, 1.7, bz, 0.04, 1.0, 2.2, [0.3, 0.4, 0.42], 0.8); B(bx, 2.95, bz, 3.4, 0.2, 3.4, SOOT, 0, 4); solid(bx - 1.5, bx + 1.5, 0, 2.8, bz - 1.5, bz + 1.5);
       WORLD.lights.push({ p: [bx - 2.5, 2.2, bz], r: 8, c: [0.9, 1.1, 1.2], shop: true }); }
-    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, DARK, 0, 4); B(108.6, 1.32, 121.1, 0.42, 0.34, 0.5, [0.75, 0.62, 0.08], 0, 8);   // the boom, left up: hinged on its post, striped, no glow
+    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, SOOT, 0, 4); B(108.6, 1.32, 121.1, 0.42, 0.34, 0.5, [0.75, 0.62, 0.08], 0, 8);   // the boom, left up: hinged on its post, striped, no glow
     { const a = 0.48, py = 1.38, pz = 121.1, dy = Math.cos(a), dz = -Math.sin(a);
       for (let i = 0; i < 9; i++) { const t = 0.3 + i * 0.5; rot(108.6, py + dy * t, pz + dz * t, 0.12, 0.5, 0.12, i % 2 ? [0.72, 0.7, 0.66] : [0.62, 0.06, 0.05], 0, 8, -a, 0, 0); }
-      rot(108.6, py - dy * 0.35, pz - dz * 0.35, 0.26, 0.45, 0.26, DARK, 0, 4, -a, 0, 0); }   // counterweight
+      rot(108.6, py - dy * 0.35, pz - dz * 0.35, 0.26, 0.45, 0.26, SOOT, 0, 4, -a, 0, 0); }   // counterweight
     WORLD.circles.push({ x: 108.6, z: 121.1, r: 0.2, h: 1.2 });
     addSign(signTexture('DANGER  FLAMMABLE', '#ff3040', 'panel'), 107.85, 2.1, 103, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);
     addSign(signTexture('NO NAKED FLAMES', '#ff3040', 'panel'), 107.85, 2.1, 129, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);
@@ -632,7 +633,7 @@ function buildDistricts(C) {
     barrier(98, 113.5, 0); barrier(117, 119.3, 0);
     // sodium masts: the plant's own lighting, orange and hard
     const sodium = (x, z) => {
-      B(x, 7, z, 0.35, 14, 0.35, [0.14, 0.14, 0.15], 0, 4); B(x, 14.1, z, 1.8, 0.2, 0.5, DARK, 0, 4);
+      B(x, 7, z, 0.35, 14, 0.35, [0.14, 0.14, 0.15], 0, 4); B(x, 14.1, z, 1.8, 0.2, 0.5, SOOT, 0, 4);
       for (const o of [-0.6, 0.6]) B(x + o, 13.9, z, 0.5, 0.12, 0.35, [1, 0.62, 0.25], 3.5);
       WORLD.circles.push({ x, z, r: 0.25, h: 14 }); WORLD.lights.push({ p: [x, 13.3, z], r: 26, c: [1.8, 1.05, 0.45], kind: 'lamp' });
       WORLD.halos.push({ p: [x, 13.8, z], s: 3.2, c: [0.9, 0.5, 0.15] });
@@ -658,7 +659,7 @@ function buildDistricts(C) {
       g.sphere(M4.trs(M, x, h, z, 0, 0, 0, rad * 2, rad * 1.1, rad * 2), [0.5, 0.5, 0.48], 0, 4, 14, 6);
       for (let y = 6; y < h - 2; y += 6) { g.ring(M4.trs(M, x, y, z, 0, 0, 0, 1, 1, 1), [0.3, 0.22, 0.04], 0, 4, rad + 0.7, 0.06, 24, 3); B(x + rad + 0.2, y - 0.02, z, 1, 0.06, 1.2, [0.2, 0.2, 0.2], 0, 4);
         if ((y / 6) % 2) { B(x + rad + 0.75, y + 0.9, z, 0.2, 0.2, 0.2, [1, 0.8, 0.5], 3); WORLD.halos.push({ p: [x + rad + 0.9, y + 0.9, z], s: 1.1, c: [0.5, 0.35, 0.15] }); } }
-      B(x + rad + 0.1, h / 2, z - 0.6, 0.06, h, 0.06, DARK, 0, 4); B(x + rad + 0.1, h / 2, z + 0.6, 0.06, h, 0.06, DARK, 0, 4);   // ladder
+      B(x + rad + 0.1, h / 2, z - 0.6, 0.06, h, 0.06, SOOT, 0, 4); B(x + rad + 0.1, h / 2, z + 0.6, 0.06, h, 0.06, SOOT, 0, 4);   // ladder
       B(x, h + rad * 0.6 + 0.5, z, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [x, h + rad * 0.6 + 0.5, z], s: 1.6, c: [0.8, 0.05, 0.05] });
       WORLD.circles.push({ x, z, r: rad + 0.1, h });
     }
@@ -691,11 +692,11 @@ function buildDistricts(C) {
     for (const [lx, lz] of [[137, 128], [151, 128], [137, 138], [151, 138]]) WORLD.lights.push({ p: [lx, 5.8, lz], r: 11, c: [1.2, 1.25, 1.35] });
     addSign(signTexture('LOADING  BAY 1-2', '#ffb52e', 'seg'), 144, 5.7, 124.4, Math.PI, 8, 1.4, [1.3, 1.3, 1.3], 0, true);
     B(144, 0.12, 133, 24, 0.24, 1.4, CONCR, 0, 16); solid(132, 156, 0, 0.24, 132.3, 133.7);
-    for (const mx of [137, 144, 151]) { B(mx, 1.1, 133, 0.7, 1.8, 0.6, [0.2, 0.22, 0.25], 0, 8); B(mx, 1.5, 133.31, 0.4, 0.3, 0.02, NEON.lime, 1.4); WORLD.circles.push({ x: mx, z: 133, r: 0.35, h: 1.9 }); rot(mx, 4.2, 131.6, 0.18, 3.2, 0.18, DARK, 0, 4, 0.5, 0, 0); }
+    for (const mx of [137, 144, 151]) { B(mx, 1.1, 133, 0.7, 1.8, 0.6, [0.2, 0.22, 0.25], 0, 8); B(mx, 1.5, 133.31, 0.4, 0.3, 0.02, NEON.lime, 1.4); WORLD.circles.push({ x: mx, z: 133, r: 0.35, h: 1.9 }); rot(mx, 4.2, 131.6, 0.18, 3.2, 0.18, SOOT, 0, 4, 0.5, 0, 0); }
     const tanker = (x, z, dir) => {
       const g = C.getG(), paint = [0.7, 0.68, 0.62];
       B(x + dir * 6.3, 1.7, z, 2.4, 2.6, 2.5, [0.55, 0.08, 0.06], 0, 11); B(x + dir * 7.52, 2.2, z, 0.04, 0.9, 2.1, [0.05, 0.07, 0.08], 0.2, 0);
-      B(x, 0.7, z, 14.5, 0.35, 1.2, DARK, 0, 4);
+      B(x, 0.7, z, 14.5, 0.35, 1.2, SOOT, 0, 4);
       g.cyl(M4.trs(M, x - dir * 1.2, 2.2, z, 0, 0, Math.PI / 2, 2.5, 10, 2.5), paint, 0, 11, 16);
       B(x - dir * 1.2, 2.2, z, 9.4, 0.3, 2.56, [0.8, 0.45, 0.05], 0.15, 0);
       for (const wx of [-5, -3.6, 1, 6]) for (const s of [-1, 1]) C.getG().cyl(M4.trs(M, x + dir * wx, 0.5, z + s * 1.1, Math.PI / 2, 0, 0, 1, 0.35, 1), [0.03, 0.03, 0.03], 0, 15, 12);
@@ -703,11 +704,11 @@ function buildDistricts(C) {
     };
     tanker(143, 128, 1); tanker(145, 138, -1);
     // control room: squat, blast-proof, a few screens still on
-    { const cx = 220.5, cz = 134; B(cx, 3, cz, 11, 6, 16, [0.2, 0.2, 0.21], 0, 16); B(cx, 6.2, cz, 11.4, 0.4, 16.4, DARK, 0, 4); solid(cx - 5.5, cx + 5.5, 0, 6, cz - 8, cz + 8);
+    { const cx = 220.5, cz = 134; B(cx, 3, cz, 11, 6, 16, [0.2, 0.2, 0.21], 0, 16); B(cx, 6.2, cz, 11.4, 0.4, 16.4, SOOT, 0, 4); solid(cx - 5.5, cx + 5.5, 0, 6, cz - 8, cz + 8);
       for (let i = 0; i < 5; i++) B(cx - 5.52, 3.4, cz - 6 + i * 3, 0.04, 1.0, 2.2, i === 2 ? [0.2, 0.5, 0.45] : [0.05, 0.07, 0.08], i === 2 ? 1.4 : 0.1);
       B(cx - 5.52, 1.3, cz + 7, 0.05, 2.5, 1.4, [0.03, 0.03, 0.035], 0, 4);
       addSign(signTexture('CONTROL', '#29e7ff', 'seg'), cx - 5.55, 5.1, cz, -Math.PI / 2, 5, 1.25, [1.3, 1.3, 1.3], 0, true);
-      B(cx + 2, 9.5, cz - 4, 0.15, 7, 0.15, DARK, 0, 4); B(cx + 2, 13.1, cz - 4, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [cx + 2, 13.1, cz - 4], s: 1.3, c: [0.8, 0.05, 0.05] });
+      B(cx + 2, 9.5, cz - 4, 0.15, 7, 0.15, SOOT, 0, 4); B(cx + 2, 13.1, cz - 4, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [cx + 2, 13.1, cz - 4], s: 1.3, c: [0.8, 0.05, 0.05] });
       WORLD.lights.push({ p: [cx - 7, 3, cz], r: 10, c: [0.4, 1.1, 1.0], shop: true }); }
     // the jetty: loading arms over the water, a manifold, bollards, and a tanker that will never sail
     for (const az of [88, 100]) {
@@ -723,7 +724,7 @@ function buildDistricts(C) {
       B(237, 12.5, 129, 12, 11, 7, [0.6, 0.6, 0.58], 0, 8); for (let i = 0; i < 3; i++) B(237, 9.5 + i * 3, 125.45, 10, 0.7, 0.1, [0.9, 0.75, 0.5], i === 2 ? 1.6 : 0.3);
       B(237, 20, 131, 2.6, 5, 2.6, [0.1, 0.1, 0.12], 0, 4); B(237, 22.7, 131, 2.8, 0.5, 2.8, [0.8, 0.15, 0.1], 0.2, 4);
       for (const o of [-2.5, 0, 2.5]) C.getG().cyl(M4.trs(M, 237 + o, 7.6, 104, Math.PI / 2, 0, 0, 0.7, 40, 0.7), [0.35, 0.36, 0.33], 0, 4, 8);
-      B(237, 14, 96, 0.3, 14, 0.3, DARK, 0, 4); B(237, 21.2, 96, 0.4, 0.4, 0.4, NEON.red, 4); WORLD.halos.push({ p: [237, 21.2, 96], s: 1.6, c: [0.8, 0.05, 0.05] });
+      B(237, 14, 96, 0.3, 14, 0.3, SOOT, 0, 4); B(237, 21.2, 96, 0.4, 0.4, 0.4, NEON.red, 4); WORLD.halos.push({ p: [237, 21.2, 96], s: 1.6, c: [0.8, 0.05, 0.05] });
       B(230.45, 5, 108, 0.1, 1.2, 12, [0.9, 0.9, 0.85], 0.1, 0);
       solid(230.5, 243.5, -3, 20, 80, 136); }
     // the fuel tanks that still bite (hazards.js blows them up and brings them back)
@@ -751,7 +752,7 @@ function buildDistricts(C) {
     { const g = C.getG(), fx = 172, fz = 158;
       g.cyl(M4.trs(M, fx, 23, fz, 0, 0, 0, 1.6, 46, 1.6), [0.4, 0.4, 0.4], 0, 4, 12); g.cyl(M4.trs(M, fx, 46.3, fz, 0, 0, 0, 2.2, 0.6, 2.2), [0.2, 0.2, 0.2], 0, 4, 12);
       for (let i = 0; i < 12; i++) B(fx, 3 + i * 3.6, fz - 0.7, 0.9, 0.1, 0.1, [0.9, 0.1, 0.08], 0.2, 0);
-      for (const a of [0.5, 2.6, 4.7]) C.getG().box(M4.align(M, fx, 40, fz, fx + Math.cos(a) * 26, 0, fz + Math.sin(a) * 26, 0.05, 0.05), DARK, 0, 4);
+      for (const a of [0.5, 2.6, 4.7]) C.getG().box(M4.align(M, fx, 40, fz, fx + Math.cos(a) * 26, 0, fz + Math.sin(a) * 26, 0.05, 0.05), SOOT, 0, 4);
       WORLD.flares.push([fx, 46.9, fz]); WORLD.halos.push({ p: [fx, 48.5, fz], s: 9, c: [1.1, 0.5, 0.12] }); WORLD.lights.push({ p: [fx, 44, fz], r: 40, c: [2.2, 1.0, 0.3] }); }
     for (const [x, z, rad, h] of [[122, 168, 9, 12], [150, 172, 11, 15], [196, 166, 8, 11], [218, 176, 10, 13]]) {
       C.getG().cyl(M4.trs(M, x, h / 2, z, 0, 0, 0, rad * 2, h, rad * 2), [0.3, 0.3, 0.28], 0, 8, 24);

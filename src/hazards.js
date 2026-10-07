@@ -97,7 +97,7 @@ function updateHazards(dt) {
       t.fuse -= dt;
       const c = t.cook;
       if (c && d2 < 90 * 90) for (let k = 0; k < 3; k++) if (Math.random() < dt * 30) emit(c.x, c.y, c.z, c.nx * rand(4, 8) + rand(-0.6, 0.6), rand(0.4, 1.8), c.nz * rand(4, 8) + rand(-0.6, 0.6), rand(0.25, 0.45), [3, 1.2 + Math.random() * 0.5, 0.2], rand(0.2, 0.4), -1.5, 1.4, -0.3);
-      if (c && d2 < 35 * 35 && Math.random() < dt * 5) AUD.tick && AUD.tick();
+      if (c && d2 < 35 * 35 && Math.random() < dt * 5) AUD.tick();
       if (t.fuse <= 0) tankBlast(t);
     } else {
       if (t.burnT > 0) {

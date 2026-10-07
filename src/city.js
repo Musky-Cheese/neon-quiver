@@ -7,7 +7,7 @@ const WORLD = {
   circles: [],  // {x,z,r,h}
   signs: [],    // {tex,m,col,mode,seed,add}
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
-  cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
+  train: null, mesh: null, supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   carSpots: [], // wrecked cars {x, z, ry, kind: 'sedan'|'van', paint, roll} drawn from the Meshy models (r3.js loadMeshyCars)
   propSpots: [], // Meshy props {kind, x, z, ry, h, len, tint}: bushes, hedges, stone lanterns (r3.js loadMeshyProps)
@@ -25,7 +25,7 @@ const WORLD = {
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
-function signTexture(text, color, style, vertical, sub) {
+function signTexture(text, color, style, vertical) {
   const cv = document.createElement('canvas');
   const W = vertical ? 128 : 512, H = vertical ? 512 : 128; cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
@@ -42,11 +42,10 @@ function signTexture(text, color, style, vertical, sub) {
   } else if (style === 'seg') {
     x.shadowBlur = 0; segText(x, text, W / 2, H / 2, H * 0.52, { color, align: 'center', glow: 0.6, ghostColor: 'rgba(255,255,255,0.04)' });
   } else {
-    x.font = `700 ${sub ? 64 : 84}px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
-    const y = sub ? H * 0.4 : H / 2;
-    let fs = sub ? 64 : 84; while (x.measureText(text).width > W - 50 && fs > 20) { fs -= 4; x.font = `700 ${fs}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; }
+    x.font = `700 84px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const y = H / 2;
+    let fs = 84; while (x.measureText(text).width > W - 50 && fs > 20) { fs -= 4; x.font = `700 ${fs}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; }
     x.fillText(text, W / 2, y); x.shadowBlur = 0; x.fillStyle = '#fff'; x.globalAlpha = 0.6; x.fillText(text, W / 2, y);
-    if (sub) { x.globalAlpha = 1; x.font = `400 26px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; x.fillStyle = color; x.fillText(sub, W / 2, H * 0.8); }
   }
   return canvasTex(cv);
 }
@@ -190,9 +189,9 @@ function buildCity() {
       for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
       const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
       const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
-      const dl = P(dp[0] - fx, 2.8, 0.3); B(dp[0] + nx * 0.3, 2.75, dp[2] + nz * 0.3, tx ? 0.5 : 0.25, 0.1, tz ? 0.5 : 0.25, [1, 0.85, 0.6], 3);
+      B(dp[0] + nx * 0.3, 2.75, dp[2] + nz * 0.3, tx ? 0.5 : 0.25, 0.1, tz ? 0.5 : 0.25, [1, 0.85, 0.6], 3);
       WORLD.lights.push({ p: [dp[0] + nx * 2, 2.6, dp[2] + nz * 2], r: 9, c: [dc[0] * 1.2, dc[1] * 1.2, dc[2] * 1.2], shop: true });
-      if (R() < 0.45) { const [txt, st] = signWords[sw++ % signWords.length]; const sp = P(dp[0] * tx + dp[2] * tz - (fx * tx + fz * tz), 3.6, 0.15); addSign(signTexture(txt, '#' + dc.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, 5, 1.25, [1.5, 1.5, 1.5], 0, st !== 'panel'); }
+      if (R() < 0.45) { const [txt, st] = signWords[sw++ % signWords.length]; const sp = P(dp[0] * tx + dp[2] * tz - (fx * tx + fz * tz), 3.6, 0.15); addSign(signTexture(txt, rgbHex(dc), st), sp[0], sp[1], sp[2], ry, 5, 1.25, [1.5, 1.5, 1.5], 0, st !== 'panel'); }
       return;
     }
     // corner neon strips
@@ -209,13 +208,13 @@ function buildCity() {
     // horizontal sign above storefront
     const [txt, st] = opt.shop ? [SHOP_DEFS[opt.shop].sign, SHOP_DEFS[opt.shop].st] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
-    addSign(signTexture(txt, '#' + [nc, sc, NEON.amber][sw % 3].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
+    addSign(signTexture(txt, rgbHex([nc, sc, NEON.amber][sw % 3]), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
     // vertical blade sign
     if (R() < 0.75) {
       const along = (R() < 0.5 ? -1 : 1) * (span / 2 - 2.5), vh = r(7, 12), vy = r(9, 16);
       const vp = P(along, vy, 1.2); const vc = neonPick();
       B(vp[0], vy, vp[2], tx ? 0.25 : 2.3, vh + 0.4, tz ? 0.25 : 2.3, [0.03, 0.03, 0.04]);
-      const hexc = '#' + vc.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+      const hexc = rgbHex(vc);
       const t = signTexture(vertWords[vw++ % vertWords.length], hexc, 'font', true);
       // both faces of the blade (perpendicular to facade)
       const bry = ry + Math.PI / 2;
@@ -326,7 +325,6 @@ function buildCity() {
 
   g = gProps;
   // ---------- plaza props ----------
-  const metal = [0.13, 0.13, 0.16];
   // holo fountain
   g.cyl(M4.trs(M, 0, 0.45, 0, 0, 0, 0, 8.4, 0.9, 8.4), [0.1, 0.1, 0.13], 0, 4, 32);
   g.cyl(M4.trs(M, 0, 0.92, 0, 0, 0, 0, 7.4, 0.04, 7.4), NEON.cyan, 0.5, 0, 32);
@@ -372,26 +370,10 @@ function buildCity() {
 
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
-  // no flying traffic: the city is dead (WORLD.cars stays empty)
-  WORLD.train = { x: 34, speed: 0, wait: 0 };   // stalled over the plaza since the outbreak
+  WORLD.train = { x: 34, wait: 0 };   // stalled over the plaza since the outbreak
 }
 
-const _pv = [0, 0, 0];
-function updateCity(dt) {
-  for (const c of WORLD.cars) { c.t += c.s * dt; if (c.t > 480) c.t = -480; if (c.t < -480) c.t = 480; }
-  const T = WORLD.train;
-  // the monorail is dead: it never moves
-}
 function drawCityDynamic(time) {
-  for (const c of WORLD.cars) {
-    const x = c.alongX ? c.t : c.off, z = c.alongX ? c.off : c.t, ry = c.alongX ? (c.s > 0 ? Math.PI / 2 : -Math.PI / 2) : (c.s > 0 ? 0 : Math.PI);
-    if ((x - PLAYER.x) ** 2 + (z - PLAYER.z) ** 2 > 220 * 220) continue;
-    const L = c.big ? 9 : 4.2, W = c.big ? 3 : 1.8;
-    const m = M4.trs(poolM(), x, c.h, z, 0, ry, 0, W, c.big ? 2.2 : 0.9, L); drawItem(MESH.metal, m, [0.12, 0.12, 0.15]);
-    const f = M4.trs(poolM(), x + Math.sin(ry) * L / 2, c.h, z + Math.cos(ry) * L / 2, 0, ry, 0, W * 0.8, 0.2, 0.1); drawItem(MESH.box, f, [1, 1, 1], [3, 3, 2.6]);
-    const b = M4.trs(poolM(), x - Math.sin(ry) * L / 2, c.h, z - Math.cos(ry) * L / 2, 0, ry, 0, W * 0.8, 0.2, 0.1); drawItem(MESH.box, b, [1, 0.1, 0.1], [4, 0.2, 0.3]);
-    const u = M4.trs(poolM(), x, c.h - 0.5, z, 0, ry, 0, W * 0.9, 0.08, L * 0.9); drawItem(MESH.box, u, c.c, [c.c[0] * 2, c.c[1] * 2, c.c[2] * 2]);
-  }
   const T = WORLD.train;
   if (T.wait <= 0 && (T.x - PLAYER.x) ** 2 + (-24 - PLAYER.z) ** 2 < 260 * 260) for (let i = 0; i < 5; i++) {
     const x = T.x - i * 13.5;

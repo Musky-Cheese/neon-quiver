@@ -72,7 +72,7 @@ function updateBow(dt, input) {
 }
 
 // ---- viewmodel rendering -------------------------------------------------
-const _bc = M4.create(), _bm = M4.create(), _lm = M4.create(), _wm = M4.create(), _p0 = [0, 0, 0], _p1 = [0, 0, 0];
+const _bc = M4.create(), _bm = M4.create(), _lm = M4.create();
 function vm(mesh, local, col, emit, skin) { const m = poolM(); M4.mul(m, _bm, local); drawItem(mesh, m, col, emit, 0, VM_ITEMS, skin); return m; }
 const GAUNT_DARK = [0.075, 0.08, 0.095], GAUNT_PLATE = [0.2, 0.21, 0.24];
 function vmBox(x, y, z, sx, sy, sz, col, emit, rx = 0, ry = 0, rz = 0, mesh = MESH.box) { M4.trs(_lm, x, y, z, rx, ry, rz, sx, sy, sz); return vm(mesh, _lm, col, emit); }
@@ -114,7 +114,6 @@ function drawHand(pos, carrying, col, led) {
   const wrist = [pos[0] + 0.045 * S, pos[1] - 0.03 * S, pos[2] + 0.075 * S], elbow = [pos[0] + 0.24, pos[1] - 0.22, pos[2] + 0.5];
   M4.align(_lm, wrist[0], wrist[1], wrist[2], elbow[0], elbow[1], elbow[2], 0.078, 0.072, 0, 0, 1); vm(MODEL.g_forearm, _lm, GAUNT_PLATE, [led[0] * 1.3, led[1] * 1.3, led[2] * 1.3], GAUNT_DARK);
 }
-const _hm = M4.create(), _bmSave = M4.create();
 
 function drawBowViewmodel(camM, time, player) {
   const B = BOW, A = ARROWS[B.type];
@@ -222,7 +221,6 @@ function drawBowViewmodel(camM, time, player) {
   drawHand(handPos, carrying, [0.09, 0.09, 0.1], A.color);
   vmToWorld(camM, handPos, B.handWorld);
 }
-function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 
 // viewmodel is drawn with its own FOV; map a bow-local point to the world point that lands on the same pixel
 const VM_FOV = 60, _vc = [0, 0, 0];

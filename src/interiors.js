@@ -43,7 +43,6 @@ function makeRoom(g, gCast, fx, fz, th, W, D, RH, type, seed, solidFn) {
   { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
   propShopInterior(L, type);
 }
-const _im = M4.create();
 
 /* shared shell detail + dispatch; the legacy ramen / clinic / pawn rooms still draw their own furniture in props.js */
 function interiorKit(L, type) {

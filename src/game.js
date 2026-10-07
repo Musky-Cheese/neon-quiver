@@ -42,7 +42,6 @@ const PLAYER = {
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
   // where a sound happens, for AUD's 3D panner (height defaults to roughly head level)
   at(x, z, y) { return { x, y: y === undefined ? this.y + 1.4 : y, z }; },
-  panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
     d *= 1 - this.armor;   // Armor Plating
@@ -288,7 +287,7 @@ function updateProjectiles(dt) {
       const dmg = dmgBase * mult;
       const dir = a.dir.slice();
       const wasAlive = !z.dead;
-      if (hitPart === 'head' || hitPart === 'core') { GAME.hitMarker(true); if (hitPart === 'head') GAME.headHits++; }
+      if (hitPart === 'head' || hitPart === 'core') GAME.hitMarker(true);
       else GAME.hitMarker(false);
       GAME.hits++;
       // stick arrow into zombie (not rail)
@@ -436,12 +435,12 @@ function drawProjectiles() {
 
 /* ---------------- game state ---------------- */
 const GAME = {
-  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
+  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, combo: 0, comboT: 0,
   best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
-    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
+    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
     loadoutReset(); RECQ.length = 0; ARCS.length = 0; this.lastType = 0;
     ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
@@ -510,8 +509,8 @@ const GAME = {
         }
       }
     }
-    // 25 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
-    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick && AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
+    // INTERMISSION seconds between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
+    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
     if (this.armoryT > 0 && this.state === 'playing' && this.intermission) { this.armoryT -= dt; if (this.armoryT <= 0) this.openShop(); }
     if (this.state === 'shop') armoryTick();
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -812,7 +811,7 @@ function step(dt) {
       if (z.rig && z.state !== 'dying' && ((zd2 > 8100 && phase % 4) || (zd2 > 2025 && phase % 2))) continue;   // half rate past 45 m, quarter past 90 m
       poseZombieRig(z, z.chill > 0 && z.chillK <= 0 && !z.dead ? 0 : z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateArcs(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
-  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
+  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); updateWeather(dt); updateHazards(dt); }
   const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
@@ -860,9 +859,8 @@ function frame(now) {
 function setCamera(time) {
   const P = PLAYER;
   let x = P.x, y = P.y + P.eyeH - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
-  if (GAME.state === 'title' || GAME.attract) {
+  if (GAME.state === 'title') {
     const a = time * 0.06; x = Math.sin(a) * 19; z = Math.cos(a) * 19; y = 3.2 + Math.sin(time * 0.2) * 0.6; yaw = a + 0.35; pitch = 0.1; roll = 0;
-    if (GAME.camOverride) ({ x, y, z, yaw, pitch, roll } = GAME.camOverride);
   } else if (GAME.state === 'over') {
     const k = easeOut(Math.min(1, P.deathT / 1.2)); y = lerp(P.y + 1.62, 0.35, k); roll = k * 1.2; pitch = lerp(P.pitch, 0.3, k);
   }
@@ -957,7 +955,6 @@ async function boot() {
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await Promise.all([
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
-    loadHeroSakuras(),
     loadMeshyCars(),
     loadMeshyTrees(),
     loadMeshyProps(),
@@ -988,14 +985,13 @@ window.NQ = {
   renderOnce() { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); },
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
-  AUD,
   bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, PERF, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
+  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

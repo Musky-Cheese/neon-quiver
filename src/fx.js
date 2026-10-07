@@ -3,7 +3,7 @@
    ============================================================ */
 const MAXP = 5000;
 const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
-for (let i = 0; i < MAXP; i++) PART.p.push({ k: (i * 0.6180339887) % 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
+for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;

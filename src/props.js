@@ -10,7 +10,7 @@ const pT = (m, x, y, z, ry = 0, rx = 0, rz = 0) => M4.trs(m, x, y, z, rx, ry, rz
 // parent * local rigid transform
 const pChild = (parent, x, y, z, ry = 0, rx = 0, rz = 0) => M4.mul(PM.c, parent, pT(PM.b, x, y, z, ry, rx, rz));
 const pPt = (parent, x, y, z) => M4.pt(parent, x, y, z, [0, 0, 0]);
-const DARK = [0.1, 0.1, 0.12], STEEL = [0.2, 0.2, 0.22], CONC = [0.3, 0.29, 0.28];
+const DARK = [0.1, 0.1, 0.12], CONC = [0.3, 0.29, 0.28];
 // axis-aligned footprint of a local rectangle [x0,x1]x[z0,z1] turned by a quarter-turn yaw
 function pFoot(x, z, ry, lx0, lx1, lz0, lz1, y1) {
   const c = Math.round(Math.cos(ry)), s = Math.round(Math.sin(ry)), xs = [], zs = [];
@@ -70,45 +70,6 @@ function propHoverCarProc(g, R, x, z, ry, paint, variant = 0) {
   if (variant === 2) g.lathe(pT(PM.b, x + Math.cos(ry) * 2.6, 0.15, z - Math.sin(ry) * 2.6, 0.4, 1.2, 0.3), [[0.24, -0.16, DARK, 0], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
   const s = Math.sin(ry), co = Math.cos(ry);
   WORLD.circles.push({ x: x + s * 1.3, z: z + co * 1.3, r: 1.3, h: 1.7 }, { x: x - s * 1.3, z: z - co * 1.3, r: 1.3, h: 1.7 });
-}
-
-/* ---------- bioluminescent tree: branching trunk in a concrete planter, glowing canopy ---------- */
-function propTree(g, R, x, z, col) {
-  const r = (a, b) => a + (b - a) * R();
-  // planter with a lip, soil, and a thin light ring
-  g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
-  g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.035, 0.03, 0.025], 0, 16, 24);
-  g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), col, 2.2, 0, 1.415, 0.018, 40, 4);
-  const bark = [0.13, 0.1, 0.085], leaf = [col[0] * 0.22 + 0.03, col[1] * 0.22 + 0.06, col[2] * 0.22 + 0.04];
-  // roots flaring over the soil
-  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, 1.1, z], [x + Math.cos(a) * 0.35, 0.86, z + Math.sin(a) * 0.35], [x + Math.cos(a) * 0.7, 0.78, z + Math.sin(a) * 0.7]], [0.12, 0.07, 0.02], bark, 0, 12, 5); }
-  const tips = [];
-  function grow(p, d, len, rad, depth) {
-    const pts = [p], rr = [rad]; let q = p, dir = d.slice();
-    for (let s = 1; s <= 3; s++) {
-      dir = [dir[0] + r(-0.18, 0.18), dir[1] + 0.12 * (depth > 0 ? 1 : -0.3), dir[2] + r(-0.18, 0.18)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
-      q = [q[0] + dir[0] * len / 3, q[1] + dir[1] * len / 3, q[2] + dir[2] * len / 3]; pts.push(q); rr.push(rad * (1 - s * 0.12));
-    }
-    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 7 : 5, depth === 0);
-    if (depth === 0) { tips.push(q); return; }
-    const n = depth >= 2 ? 3 : 2, a0 = r(0, TAU);
-    for (let i = 0; i < n; i++) {
-      const a = a0 + i / n * TAU + r(-0.3, 0.3), spread = r(0.45, 0.8);
-      const nd = [dir[0] * (1 - spread) + Math.cos(a) * spread, dir[1] * (1 - spread * 0.6) + 0.25, dir[2] * (1 - spread) + Math.sin(a) * spread];
-      grow(q, nd, len * r(0.62, 0.78), rad * 0.62, depth - 1);
-    }
-    if (depth === 1) tips.push(q);
-  }
-  grow([x, 0.8, z], [r(-0.08, 0.08), 1, r(-0.08, 0.08)], 2.3, 0.2, 2);
-  // canopy: lumpy leaf clusters with glowing speckles, plus a few hanging fruit
-  for (const t of tips) {
-    g.blob(pT(PM.a, t[0], t[1] + 0.15, t[2], r(0, TAU)), r(0.6, 0.85), r(0.45, 0.6), r(0.6, 0.85), 0.42, r(0, 99), leaf, 3.6, 14, 14, 10, 1);
-    for (let i = 0; i < 2; i++) { const a = r(0, TAU); g.blob(pT(PM.a, t[0] + Math.cos(a) * 0.6, t[1] + r(-0.25, 0.3), t[2] + Math.sin(a) * 0.6, r(0, TAU)), r(0.32, 0.48), r(0.28, 0.4), r(0.32, 0.48), 0.45, r(0, 99), leaf, 3.6, 14, 10, 7, 1); }
-  }
-  for (let i = 0; i < 4; i++) { const t = tips[Math.floor(R() * tips.length)]; const fx = t[0] + r(-0.6, 0.6), fz = t[2] + r(-0.6, 0.6), fy = t[1] - r(0.5, 0.9);
-    g.tube([[fx, t[1] - 0.1, fz], [fx, fy + 0.1, fz]], [0.008, 0.008], DARK, 0, 0, 3, false); g.sphere(M4.trs(PM.a, fx, fy, fz, 0, 0, 0, 0.16, 0.2, 0.16), col, 3.2, 0, 8, 6); }
-  WORLD.halos.push({ p: [x, 4.2, z], s: 3.2, c: [col[0] * 0.25, col[1] * 0.25, col[2] * 0.25] });
-  WORLD.circles.push({ x, z, r: 1.45, h: 0.86 }, { x, z, r: 0.3, h: 5 });
 }
 
 /* ---------- park bench: bent steel frame, wooden slats. face: '+z' '-z' '+x' '-x' (direction a sitter looks) ---------- */
@@ -338,12 +299,12 @@ const pHash = (x, z, k = 0) => {
 };
 function propSpot(kind, x, z, ry, h, len = 0, tint = 1) { WORLD.propSpots.push({ kind, x, z, ry, h, len, tint }); }
 // one garden bush: a clipped boxwood dome, a loose leafy shrub, a pink satsuki azalea or a blue mophead hydrangea
-const BUSH_KINDS = [['boxwood', 0.3, 0.85, 1.15], ['shrub', 0.22, 1.0, 1.35], ['azalea', 0.26, 0.6, 0.85], ['hydrangea', 0.22, 0.85, 1.1]];   // kind, share, min/max height
+const BUSH_KINDS = [['boxwood', 0.85, 1.15], ['shrub', 1.0, 1.35], ['azalea', 0.6, 0.85], ['hydrangea', 0.85, 1.1]];   // kind, min/max height
 function propBush(x, z, s = 1, k = 0, flowers = 0.5) {
   const u = pHash(x, z, k), v = pHash(x, z, k + 7), w = pHash(x, z, k + 13);
   // flowers: the chance it is one of the flowering kinds
   const fl = u < flowers, set = fl ? BUSH_KINDS.slice(2) : BUSH_KINDS.slice(0, 2);
-  const [kind, , h0, h1] = set[Math.floor(v * set.length) % set.length];
+  const [kind, h0, h1] = set[Math.floor(v * set.length) % set.length];
   propSpot(kind, x, z, w * TAU, (h0 + (h1 - h0) * pHash(x, z, k + 21)) * s, 0, 0.82 + pHash(x, z, k + 29) * 0.3);
 }
 // a clipped hedge, its length along yaw ry, with the odd flowering bush tucked in front of it

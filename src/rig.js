@@ -9,7 +9,6 @@ const ZRIG = { ready: false, clips: {}, geos: {}, parts: {}, boneNames: [], inve
 const CLIP_RANGES = { walk: [0, 36, 1], run: [42, 60, 1], heavy: [66, 110, 1], boss_walk: [116, 172, 1], idle: [178, 238, 1], attack: [244, 274, 0], crawl: [280, 320, 1], crawl_attack: [326, 350, 0], slam: [356, 404, 0], roar: [410, 452, 0],
   walk_b: [458, 498, 1], walk_c: [504, 540, 1], run_b: [546, 564, 1], idle_b: [570, 642, 1] };
 const PARTMAP = [['torso_', 0], ['uarm_', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_', 5], ['jaw', 6], ['brute_helmet', 8], ['brute_', 7], ['boss_hump', 9], ['boss_arm', 9], ['walker_ribs', 9], ['runner_tendons', 9], ['brute_breach', 9]];
-const LOGICAL = ['root', 'pelvis', 'spine', 'neck', 'jaw', 'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'hipL', 'hipR', 'kneeL', 'kneeR'];
 
 async function loadZombieRig(url = 'models/zombie.glb') {
   let gltf;
@@ -137,7 +136,6 @@ function makeRig(z) {
     mesh.add(root);
     mesh.bind(new THREE.Skeleton(bones, T.inverses), T.bindMatrix);
     const B = {}; for (const b of bones) B[T.logicalOf[b.name]] = b;
-    B.shoulderL = B.shoulderL || B['shoulder.L']; // defensive
     const mixer = new THREE.AnimationMixer(mesh);
     // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
     const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
@@ -181,11 +179,10 @@ function zWantClip(z) {
   return ZRIG.clips[z.idleClip] ? z.idleClip : 'idle';
 }
 
-const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), _qa = new THREE.Quaternion();
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
 function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
-const _hv = [0, 0, 0];
 const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
 
 function poseZombieRig(z, dt, time) {
@@ -312,7 +309,6 @@ function zLife(z, r, dt, time) {
   z.bank = (z.bank || 0) + (clamp(dt > 0 ? dyaw / dt : 0, -3, 3) * 0.06 - (z.bank || 0)) * k;
   addRot(B.spine, 0, 0, -z.bank * (z.type === 'runner' ? 1.6 : 1));
 }
-const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
 // scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
 const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0], _cSkin = [0, 0, 0], _cCloth = [0, 0, 0], _cPants = [0, 0, 0];

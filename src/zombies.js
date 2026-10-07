@@ -26,8 +26,6 @@ const OUTFITS = {
   boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
 };
 OUTFITS.spitter = OUTFITS.walker; OUTFITS.screamer = OUTFITS.walker; OUTFITS.climber = OUTFITS.runner;
-const CLOTHES = OUTFITS.walker.map(o => o[0]);
-const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
@@ -71,7 +69,7 @@ function spawnZombie(type, x, z, wave) {
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
     R: { h: 0, hv: 0, t: 0, tv: 0, y: 0, yv: 0, l: 0, lv: 0 }, stumble: 0, legDmg: 0, crawl: false, crawlT: 0,
     // death physics
-    dv: V0(), pitch: 0, pitchV: 0, roll: 0, rollV: 0, crumple: 0, crumpleMode: false, pin: null, neckBleed: 0, fallBack: false,
+    dv: V0(), pitch: 0, pitchV: 0, roll: 0, rollV: 0, crumple: 0, crumpleMode: false, neckBleed: 0, fallBack: false,
     head: V0(), a: V0(), b: V0(), core: V0(), hipL: V0(), knL: V0(), ftL: V0(), hipR: V0(), knR: V0(), ftR: V0(),
   };
   // what each body looks like and how it moves: clothes, build, gait
@@ -761,7 +759,7 @@ function zFrame(z, part) { // 'head' -> neck frame, else torso frame (world matr
   return part === 'head' ? _F.neck : _F.tor;
 }
 function localize(z, part, pw, dir) {
-  if (ZRIG.ready) ensurePose(z); else drawZombieFramesOnly(z);
+  ensurePose(z);
   const F = zFrame(z, part);
   const inv = M4.invert(M4.create(), F); if (!inv) return null;
   return { lp: M4.pt(inv, pw[0], pw[1], pw[2], [0, 0, 0]), ld: M4.dir(inv, dir[0], dir[1], dir[2], [0, 0, 0]) };

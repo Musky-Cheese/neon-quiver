@@ -8,7 +8,7 @@
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
   cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
-  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, modelWorldMatrix, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
 
 /* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry at every render call ---- */
 const NQN = {};
@@ -27,8 +27,7 @@ function gpuSyncTextures() {
   TEXN.texA.value = NQU.uTexA.value || GPU_ARR; TEXN.texN.value = NQU.uTexN.value || GPU_ARR; TEXN.texR.value = NQU.uTexR.value || GPU_ARR;
 }
 // point lights for the glowing air (world position + range, colour x intensity): r3.js updateLights3 fills them
-const AIR_N = 16;   // = MAX_PL (r3.js)
-const AIR = { pos: Array.from({ length: AIR_N }, () => new THREE.Vector4()), col: Array.from({ length: AIR_N }, () => new THREE.Vector4()) };
+const AIR = { pos: Array.from({ length: MAX_PL }, () => new THREE.Vector4()), col: Array.from({ length: MAX_PL }, () => new THREE.Vector4()) };
 AIR.posN = uniformArray(AIR.pos, 'vec4').setGroup(renderGroup); AIR.colN = uniformArray(AIR.col, 'vec4').setGroup(renderGroup);
 
 /* ---- noise: real shader functions, not inlined at each of the ~60 call sites ---- */
@@ -513,7 +512,7 @@ function nqFog(material, out) {
   if (material.nqKind !== 'vm') If(NQN.uAirK.greaterThan(0.0001), () => {
     // light scattered by the rain haze between the eye and this surface, integrated along the view ray per point light
     const P = W.sub(cameraPosition), t = length(P), v = P.div(max(t, 1e-4)), air = vec3(0).toVar();
-    Loop(AIR_N, ({ i }) => {
+    Loop(MAX_PL, ({ i }) => {
       const lp = AIR.posN.element(i), lc = AIR.colN.element(i).rgb;
       If(dot(lc, vec3(1)).greaterThan(0), () => {   // unused pool slots and lights whose range misses the ray add exactly 0
         const Lp = lp.xyz.sub(cameraPosition), b = dot(v, Lp), h = sqrt(max(dot(Lp, Lp).sub(b.mul(b)), 0).add(0.06)).toVar(), rng = lp.w;

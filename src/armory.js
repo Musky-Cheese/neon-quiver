@@ -58,8 +58,8 @@ const upLv = (id) => LOADOUT.levels[id] || 0;
 function loadoutReset() { LOADOUT.levels = {}; LOADOUT.equipped = []; AQ.tab = 'arrows'; AQ.sel = 'piercer'; AQ.msg = ''; }
 
 // ---- screen state + design tokens ----
-const AQ = { tab: 'arrows', sel: 'piercer', msg: '', sec: -1, built: false };
-const AQC = { accent: '#38E1F2', glow30: 'rgba(56,225,242,0.30)', glow35: 'rgba(56,225,242,0.35)', glow45: 'rgba(56,225,242,0.45)', tabOn: 'rgb(17,43,55)', line: 'rgba(255,255,255,0.12)', line22: 'rgba(255,255,255,0.22)', dim: '#A3AAC2', gold: '#FFC857', pink: '#FF6FB4' };
+const AQ = { tab: 'arrows', sel: 'piercer', msg: '', sec: -1 };
+const AQC = { accent: '#38E1F2', dim: '#A3AAC2', gold: '#FFC857', pink: '#FF6FB4' };
 const aqItem = (id) => ARMORY.find((i) => i.id === id);
 const aqPad = (n) => String(n).padStart(2, '0');
 

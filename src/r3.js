@@ -2,8 +2,7 @@
    three.js scene graph + frame pipeline
    world pass (MSAA, baked occlusion) -> viewmodel pass -> bloom -> grade
    ============================================================ */
-const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
-const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
+const R3 = { W: 0, H: 0, quality: -1, tick: 0 };
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
@@ -204,7 +203,7 @@ function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
   // the sun's shadow box follows the player (snapped so the shadow texels don't swim)
-  const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
+  const sd = norm3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
   sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
   sun.shadow.autoUpdate = false;
   // lamps: nearest ones get the spot pool (the first few cast shadows); the same tile query also yields the static lights below
@@ -410,57 +409,6 @@ function addWorldChunks(geo, castShadow, receiveShadow, name) {
     mesh.userData.streamRadius = streamRadius;
     mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
   }
-}
-
-/* ---------------- Meshy hero sakuras ----------------
-   A handful of big downloaded trees (WORLD.heroTrees, placed in districts.js: x, z, height, yaw) share one geometry
-   and one draw call. If the GLB carries its own textures they are used (colour, normal, roughness, and the painted
-   cyan neon glows); a geometry-only GLB is split into pieces instead, the largest being the trunk and the rest blossom. */
-async function loadHeroSakuras() {
-  const spots = WORLD.heroTrees || []; if (!spots.length) return;
-  try {
-    const gltf = await new GLTFLoader().loadAsync('models/sakura.glb?v=' + (typeof SAKURA_VER === 'string' ? SAKURA_VER : '0'));
-    let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
-    if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
-    gltf.scene.updateMatrixWorld(true);
-    const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
-    if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
-    if (!geo.attributes.normal) geo.computeVertexNormals();
-    const pos = geo.attributes.position, idx = geo.index.array, n = pos.count;
-    const sm = srcMesh.material || {}, tex = sm.map || null;
-    const col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
-    if (tex) { col.fill(1); }
-    else {
-      const parent = new Int32Array(n), size = new Int32Array(n); for (let i = 0; i < n; i++) { parent[i] = i; size[i] = 1; }
-      const root = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
-      const join = (a, b) => { a = root(a); b = root(b); if (a === b) return; if (size[a] < size[b]) { const t = a; a = b; b = t; } parent[b] = a; size[a] += size[b]; };
-      for (let i = 0; i < idx.length; i += 3) { join(idx[i], idx[i + 1]); join(idx[i], idx[i + 2]); }
-      let trunk = 0; for (let i = 1; i < n; i++) if (size[root(i)] > size[root(trunk)]) trunk = i; trunk = root(trunk);
-      for (let i = 0; i < n; i++) {
-        const r = root(i), bark = r === trunk, v = ((r * 16807) & 255) / 255, k = bark ? 0.75 + 0.18 * v : 0.78 + 0.22 * v;
-        col[i * 3] = bark ? 0.12 * k : 1.0 * k; col[i * 3 + 1] = bark ? 0.065 * k : (0.38 + 0.3 * v) * k; col[i * 3 + 2] = bark ? 0.055 * k : (0.58 + 0.26 * v) * k;
-        nqm[i * 2] = bark ? 0.02 : 0.42; nqm[i * 2 + 1] = bark ? 13 : 0;
-      }
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
-    geo.computeBoundingBox();
-    // stand the model on its trunk base at the origin, 1 unit tall: the per-tree height becomes the scale
-    const bb = geo.boundingBox, H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
-    for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.06) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
-    cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
-    geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
-    let mat = MAT.static;
-    if (tex) {
-      mat = nqMaterial('static'); mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-      if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
-      mat.defines.NQ_MAPGLOW = '2.6'; mat.side = sm.side || THREE.FrontSide; mat.needsUpdate = true;
-    }
-    const trees = new THREE.InstancedMesh(geo, mat, spots.length), m = new THREE.Matrix4();
-    for (let i = 0; i < spots.length; i++) { const [x, z, h, ry] = spots[i]; m.compose(new THREE.Vector3(x, -0.05, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry || 0), new THREE.Vector3(h, h, h)); trees.setMatrixAt(i, m); }
-    trees.computeBoundingSphere(); geo.boundingSphere = trees.boundingSphere.clone();   // world streaming reads the geometry's sphere
-    trees.name = 'meshy-hero-sakuras'; trees.castShadow = true; trees.receiveShadow = true; trees.userData.streamRadius = 300; trees.instanceMatrix.needsUpdate = true;
-    scene.add(trees); WORLD_MESHES.push(trees); updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
-  } catch (e) { console.warn('hero sakura load failed', e); }
 }
 
 /* ---------------- sakura flower cards ----------------
@@ -773,7 +721,6 @@ function buildWorld3() {
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
-  R3.built = true;
 }
 
 /* ---------------- shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down ---------------- */
@@ -899,8 +846,6 @@ function updateEnv(cam) {
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
 const coneMat = coneMaterialGPU(VOL_U);
-const CONES = [];
-const HALOS = [];
 function buildVolumes() {
   // every lamp cone in one mesh: they share a material and blend additively (order-free), so one draw (two: back
   // faces, then front) replaces two per cone; the cones are baked in world space, their shading uses no model matrix
@@ -913,7 +858,7 @@ function buildVolumes() {
   if (cones.length) {
     const g = cones.length > 1 ? mergeGeometries(cones) : cones[0]; g.computeBoundingSphere(); g.computeBoundingBox(); g.userData.cullBox = g.boundingBox;
     const m = new THREE.Mesh(g, coneMat); m.name = 'cones'; m.renderOrder = 8; m.frustumCulled = true; m.matrixAutoUpdate = false;
-    scene.add(m); CONES.push(m);
+    scene.add(m);
   }
   const mat = haloMaterialGPU(VOL_U);
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
@@ -924,7 +869,7 @@ function buildVolumes() {
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
-    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh); HALOS.push(mesh);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh);
   }
 }
 
@@ -933,9 +878,7 @@ const reflRT = new THREE.RenderTarget(4, 4, { type: THREE.HalfFloatType });
 const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
 reflCam.coordinateSystem = renderer.coordinateSystem;   // the projection is copied from the main camera: never rebuilt from reflCam's own fov
 const _S = new THREE.Matrix4().makeScale(1, -1, 1);
-const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
-const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
-NQU.uRefl.value = BLACK_TEX;
+const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1 };
 const MIRROR_NEAR = 70, MIRROR_SMALL = /^(props|garden|forest|suburbs|glass|blossoms)/, _mirrorOff = [];
 function renderReflection(r) {
   const W = Math.max(4, R3.W), H = Math.max(4, R3.H);
@@ -949,15 +892,14 @@ function renderReflection(r) {
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
   const mode = SETTINGS.quality;
   const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
-  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  if (!refresh) { NQU.uReflOn.value = 1;
     TEXN.refl.value = reflRT.texture;
     return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
-  NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
-  TEXN.refl.value = BLACK_TEX;   // a pass can't sample the target it draws into
+  NQU.uReflOn.value = 0; TEXN.refl.value = GPU_BLACK;   // a pass can't sample the target it draws into
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
-  const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
+  renderer.shadowMap.needsUpdate = false;
   partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
@@ -971,10 +913,10 @@ function renderReflection(r) {
   for (const m of mirrorOff) m.visible = true;
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
-  NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  NQU.uReflOn.value = 1;
   TEXN.refl.value = reflRT.texture;
   REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
-  REFL_CACHE.quality = mode; REFL_CACHE.w = W; REFL_CACHE.h = H;
+  REFL_CACHE.quality = mode;
 }
 
 /* ---------------- post: passes ---------------- */
@@ -1145,7 +1087,7 @@ function renderGPU(T, W, H, time) {
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
     GPU_PROF.tag = 'reflection';
-    if (THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; TEXN.refl.value = BLACK_TEX; }
+    if (THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; TEXN.refl.value = GPU_BLACK; }
     GPU_PROF.tag = null; renderer.setRenderTarget(null);
     const f = T.fog; renderer.setClearColor(_clr.setRGB(f[0], f[1], f[2]), 0);   // alpha 0: the bow pass lays over the world by its alpha
     GPOST.pipe.render();

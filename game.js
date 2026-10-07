@@ -6,7 +6,6 @@ import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 const RIG_VER = "b5137a2697";   // content hash: a new model always busts the browser cache
-const SAKURA_VER = "3dce9e4243"; // Meshy hero-tree cache key
 const CARS_VER = "9c99c61797";   // Meshy car models cache key
 const TREE_VER = "0eb1f64b0a";   // Meshy tree model cache key
 const PROPS_VER = "171831ae7b";  // Meshy bushes and lanterns cache key
@@ -25,8 +24,9 @@ const MODEL_BLOB = "H4sIAEa/uWoC/+y5BVRdXZMmfIMluLsFdwnuEBxCcHcIDpeLQ9AAwS24uwZ3
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const lerp = (a, b, t) => a + (b - a) * t;
+const norm3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes); the shader's air-glow loop runs over the same count
 const rand = (a, b) => a + Math.random() * (b - a);
-const randi = (a, b) => Math.floor(rand(a, b + 1));
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
@@ -37,8 +37,6 @@ function hex(h, k = 1) { const n = parseInt(h.slice(1), 16); return [((n >> 16) 
 /* ---------------- mat4 (column-major) ---------------- */
 const M4 = {
   create() { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
-  identity(m) { m.fill(0); m[0] = m[5] = m[10] = m[15] = 1; return m; },
-  copy(o, a) { o.set(a); return o; },
   mul(out, a, b) {
     const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
       a20 = a[8], a21 = a[9], a22 = a[10], a23 = a[11], a30 = a[12], a31 = a[13], a32 = a[14], a33 = a[15];
@@ -59,23 +57,6 @@ const M4 = {
     m[8] = (syr * cx) * sz; m[9] = (-sxr) * sz; m[10] = (cy * cx) * sz; m[11] = 0;
     m[12] = tx; m[13] = ty; m[14] = tz; m[15] = 1;
     return m;
-  },
-  invertRigid(out, m) {
-    const r00 = m[0], r01 = m[1], r02 = m[2], r10 = m[4], r11 = m[5], r12 = m[6], r20 = m[8], r21 = m[9], r22 = m[10];
-    const tx = m[12], ty = m[13], tz = m[14];
-    out[0] = r00; out[1] = r10; out[2] = r20; out[3] = 0;
-    out[4] = r01; out[5] = r11; out[6] = r21; out[7] = 0;
-    out[8] = r02; out[9] = r12; out[10] = r22; out[11] = 0;
-    out[12] = -(r00 * tx + r01 * ty + r02 * tz);
-    out[13] = -(r10 * tx + r11 * ty + r12 * tz);
-    out[14] = -(r20 * tx + r21 * ty + r22 * tz);
-    out[15] = 1;
-    return out;
-  },
-  perspective(out, fovy, aspect, near, far) {
-    const f = 1 / Math.tan(fovy / 2); out.fill(0);
-    out[0] = f / aspect; out[5] = f; out[10] = (far + near) / (near - far); out[11] = -1; out[14] = 2 * far * near / (near - far);
-    return out;
   },
   invert(out, a) {
     const a00 = a[0], a01 = a[1], a02 = a[2], a03 = a[3], a10 = a[4], a11 = a[5], a12 = a[6], a13 = a[7],
@@ -113,7 +94,7 @@ const M4 = {
   pt(m, x, y, z, out) { out[0] = m[0] * x + m[4] * y + m[8] * z + m[12]; out[1] = m[1] * x + m[5] * y + m[9] * z + m[13]; out[2] = m[2] * x + m[6] * y + m[10] * z + m[14]; return out; },
   dir(m, x, y, z, out) { out[0] = m[0] * x + m[4] * y + m[8] * z; out[1] = m[1] * x + m[5] * y + m[9] * z; out[2] = m[2] * x + m[6] * y + m[10] * z; return out; },
 };
-const _t4a = M4.create(), _t4b = M4.create(), _t4c = M4.create();
+const _t4b = M4.create(), _t4c = M4.create();
 
 /* ---------------- renderer ---------------- */
 const canvas = document.getElementById('gl');
@@ -171,7 +152,7 @@ const NQU = {
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
   // release look pass: soft camera-side fill + two-tone neon rim on the infected, and wind for the foliage (weather.js)
   uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
-  uRefl: { value: null }, uReflOn: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) }, uRain: { value: 0.5 },
+  uReflOn: { value: 0 }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
@@ -218,7 +199,6 @@ class Geo {
     this.quad(m, [-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h], [0, 0, 1], c, e, mat);
     this.quad(m, [h, -h, -h], [-h, -h, -h], [-h, h, -h], [h, h, -h], [0, 0, -1], c, e, mat);
   }
-  boxAt(x, y, z, sx, sy, sz, c, e = 0, mat = 0, ry = 0, rx = 0, rz = 0) { this.box(M4.trs(_t4a, x, y, z, rx, ry, rz, sx, sy, sz), c, e, mat); }
   // cylinder along Y, radius 0.5, height 1, centered
   cyl(m, c, e = 0, mat = 0, seg = 12, rTop = 0.5, rBot = 0.5, caps = true) {
     const base = this.n;
@@ -451,7 +431,7 @@ async function loadModels() {
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
   cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
-  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, modelWorldMatrix, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
 
 /* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry at every render call ---- */
 const NQN = {};
@@ -470,8 +450,7 @@ function gpuSyncTextures() {
   TEXN.texA.value = NQU.uTexA.value || GPU_ARR; TEXN.texN.value = NQU.uTexN.value || GPU_ARR; TEXN.texR.value = NQU.uTexR.value || GPU_ARR;
 }
 // point lights for the glowing air (world position + range, colour x intensity): r3.js updateLights3 fills them
-const AIR_N = 16;   // = MAX_PL (r3.js)
-const AIR = { pos: Array.from({ length: AIR_N }, () => new THREE.Vector4()), col: Array.from({ length: AIR_N }, () => new THREE.Vector4()) };
+const AIR = { pos: Array.from({ length: MAX_PL }, () => new THREE.Vector4()), col: Array.from({ length: MAX_PL }, () => new THREE.Vector4()) };
 AIR.posN = uniformArray(AIR.pos, 'vec4').setGroup(renderGroup); AIR.colN = uniformArray(AIR.col, 'vec4').setGroup(renderGroup);
 
 /* ---- noise: real shader functions, not inlined at each of the ~60 call sites ---- */
@@ -956,7 +935,7 @@ function nqFog(material, out) {
   if (material.nqKind !== 'vm') If(NQN.uAirK.greaterThan(0.0001), () => {
     // light scattered by the rain haze between the eye and this surface, integrated along the view ray per point light
     const P = W.sub(cameraPosition), t = length(P), v = P.div(max(t, 1e-4)), air = vec3(0).toVar();
-    Loop(AIR_N, ({ i }) => {
+    Loop(MAX_PL, ({ i }) => {
       const lp = AIR.posN.element(i), lc = AIR.colN.element(i).rgb;
       If(dot(lc, vec3(1)).greaterThan(0), () => {   // unused pool slots and lights whose range misses the ray add exactly 0
         const Lp = lp.xyz.sub(cameraPosition), b = dot(v, Lp), h = sqrt(max(dot(Lp, Lp).sub(b.mul(b)), 0).add(0.06)).toVar(), rng = lp.w;
@@ -1288,7 +1267,7 @@ const pT = (m, x, y, z, ry = 0, rx = 0, rz = 0) => M4.trs(m, x, y, z, rx, ry, rz
 // parent * local rigid transform
 const pChild = (parent, x, y, z, ry = 0, rx = 0, rz = 0) => M4.mul(PM.c, parent, pT(PM.b, x, y, z, ry, rx, rz));
 const pPt = (parent, x, y, z) => M4.pt(parent, x, y, z, [0, 0, 0]);
-const DARK = [0.1, 0.1, 0.12], STEEL = [0.2, 0.2, 0.22], CONC = [0.3, 0.29, 0.28];
+const DARK = [0.1, 0.1, 0.12], CONC = [0.3, 0.29, 0.28];
 // axis-aligned footprint of a local rectangle [x0,x1]x[z0,z1] turned by a quarter-turn yaw
 function pFoot(x, z, ry, lx0, lx1, lz0, lz1, y1) {
   const c = Math.round(Math.cos(ry)), s = Math.round(Math.sin(ry)), xs = [], zs = [];
@@ -1348,45 +1327,6 @@ function propHoverCarProc(g, R, x, z, ry, paint, variant = 0) {
   if (variant === 2) g.lathe(pT(PM.b, x + Math.cos(ry) * 2.6, 0.15, z - Math.sin(ry) * 2.6, 0.4, 1.2, 0.3), [[0.24, -0.16, DARK, 0], [0.24, -0.16], [0.3, -0.14], [0.37, 0], [0.3, 0.13], [0.18, 0.18]], trim, 0, 4, 14, true, true);
   const s = Math.sin(ry), co = Math.cos(ry);
   WORLD.circles.push({ x: x + s * 1.3, z: z + co * 1.3, r: 1.3, h: 1.7 }, { x: x - s * 1.3, z: z - co * 1.3, r: 1.3, h: 1.7 });
-}
-
-/* ---------- bioluminescent tree: branching trunk in a concrete planter, glowing canopy ---------- */
-function propTree(g, R, x, z, col) {
-  const r = (a, b) => a + (b - a) * R();
-  // planter with a lip, soil, and a thin light ring
-  g.lathe(pT(PM.a, x, 0, z), [[1.36, 0], [1.4, 0.06], [1.37, 0.7], [1.47, 0.73], [1.47, 0.84], [1.3, 0.86], [1.27, 0.8]], CONC, 0, 16, 28, false, false);
-  g.cyl(M4.trs(PM.a, x, 0.76, z, 0, 0, 0, 2.56, 0.04, 2.56), [0.035, 0.03, 0.025], 0, 16, 24);
-  g.ring(M4.trs(PM.a, x, 0.42, z, 0, 0, 0, 1, 1, 1), col, 2.2, 0, 1.415, 0.018, 40, 4);
-  const bark = [0.13, 0.1, 0.085], leaf = [col[0] * 0.22 + 0.03, col[1] * 0.22 + 0.06, col[2] * 0.22 + 0.04];
-  // roots flaring over the soil
-  for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + r(0, 0.6); g.tube([[x, 1.1, z], [x + Math.cos(a) * 0.35, 0.86, z + Math.sin(a) * 0.35], [x + Math.cos(a) * 0.7, 0.78, z + Math.sin(a) * 0.7]], [0.12, 0.07, 0.02], bark, 0, 12, 5); }
-  const tips = [];
-  function grow(p, d, len, rad, depth) {
-    const pts = [p], rr = [rad]; let q = p, dir = d.slice();
-    for (let s = 1; s <= 3; s++) {
-      dir = [dir[0] + r(-0.18, 0.18), dir[1] + 0.12 * (depth > 0 ? 1 : -0.3), dir[2] + r(-0.18, 0.18)]; const L = Math.hypot(...dir); dir = dir.map(v => v / L);
-      q = [q[0] + dir[0] * len / 3, q[1] + dir[1] * len / 3, q[2] + dir[2] * len / 3]; pts.push(q); rr.push(rad * (1 - s * 0.12));
-    }
-    g.tube(pts, rr, bark, 0, 12, depth >= 2 ? 7 : 5, depth === 0);
-    if (depth === 0) { tips.push(q); return; }
-    const n = depth >= 2 ? 3 : 2, a0 = r(0, TAU);
-    for (let i = 0; i < n; i++) {
-      const a = a0 + i / n * TAU + r(-0.3, 0.3), spread = r(0.45, 0.8);
-      const nd = [dir[0] * (1 - spread) + Math.cos(a) * spread, dir[1] * (1 - spread * 0.6) + 0.25, dir[2] * (1 - spread) + Math.sin(a) * spread];
-      grow(q, nd, len * r(0.62, 0.78), rad * 0.62, depth - 1);
-    }
-    if (depth === 1) tips.push(q);
-  }
-  grow([x, 0.8, z], [r(-0.08, 0.08), 1, r(-0.08, 0.08)], 2.3, 0.2, 2);
-  // canopy: lumpy leaf clusters with glowing speckles, plus a few hanging fruit
-  for (const t of tips) {
-    g.blob(pT(PM.a, t[0], t[1] + 0.15, t[2], r(0, TAU)), r(0.6, 0.85), r(0.45, 0.6), r(0.6, 0.85), 0.42, r(0, 99), leaf, 3.6, 14, 14, 10, 1);
-    for (let i = 0; i < 2; i++) { const a = r(0, TAU); g.blob(pT(PM.a, t[0] + Math.cos(a) * 0.6, t[1] + r(-0.25, 0.3), t[2] + Math.sin(a) * 0.6, r(0, TAU)), r(0.32, 0.48), r(0.28, 0.4), r(0.32, 0.48), 0.45, r(0, 99), leaf, 3.6, 14, 10, 7, 1); }
-  }
-  for (let i = 0; i < 4; i++) { const t = tips[Math.floor(R() * tips.length)]; const fx = t[0] + r(-0.6, 0.6), fz = t[2] + r(-0.6, 0.6), fy = t[1] - r(0.5, 0.9);
-    g.tube([[fx, t[1] - 0.1, fz], [fx, fy + 0.1, fz]], [0.008, 0.008], DARK, 0, 0, 3, false); g.sphere(M4.trs(PM.a, fx, fy, fz, 0, 0, 0, 0.16, 0.2, 0.16), col, 3.2, 0, 8, 6); }
-  WORLD.halos.push({ p: [x, 4.2, z], s: 3.2, c: [col[0] * 0.25, col[1] * 0.25, col[2] * 0.25] });
-  WORLD.circles.push({ x, z, r: 1.45, h: 0.86 }, { x, z, r: 0.3, h: 5 });
 }
 
 /* ---------- park bench: bent steel frame, wooden slats. face: '+z' '-z' '+x' '-x' (direction a sitter looks) ---------- */
@@ -1616,12 +1556,12 @@ const pHash = (x, z, k = 0) => {
 };
 function propSpot(kind, x, z, ry, h, len = 0, tint = 1) { WORLD.propSpots.push({ kind, x, z, ry, h, len, tint }); }
 // one garden bush: a clipped boxwood dome, a loose leafy shrub, a pink satsuki azalea or a blue mophead hydrangea
-const BUSH_KINDS = [['boxwood', 0.3, 0.85, 1.15], ['shrub', 0.22, 1.0, 1.35], ['azalea', 0.26, 0.6, 0.85], ['hydrangea', 0.22, 0.85, 1.1]];   // kind, share, min/max height
+const BUSH_KINDS = [['boxwood', 0.85, 1.15], ['shrub', 1.0, 1.35], ['azalea', 0.6, 0.85], ['hydrangea', 0.85, 1.1]];   // kind, min/max height
 function propBush(x, z, s = 1, k = 0, flowers = 0.5) {
   const u = pHash(x, z, k), v = pHash(x, z, k + 7), w = pHash(x, z, k + 13);
   // flowers: the chance it is one of the flowering kinds
   const fl = u < flowers, set = fl ? BUSH_KINDS.slice(2) : BUSH_KINDS.slice(0, 2);
-  const [kind, , h0, h1] = set[Math.floor(v * set.length) % set.length];
+  const [kind, h0, h1] = set[Math.floor(v * set.length) % set.length];
   propSpot(kind, x, z, w * TAU, (h0 + (h1 - h0) * pHash(x, z, k + 21)) * s, 0, 0.82 + pHash(x, z, k + 29) * 0.3);
 }
 // a clipped hedge, its length along yaw ry, with the odd flowering bush tucked in front of it
@@ -1959,7 +1899,6 @@ function makeRoom(g, gCast, fx, fz, th, W, D, RH, type, seed, solidFn) {
   { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
   propShopInterior(L, type);
 }
-const _im = M4.create();
 
 /* shared shell detail + dispatch; the legacy ramen / clinic / pawn rooms still draw their own furniture in props.js */
 function interiorKit(L, type) {
@@ -2409,7 +2348,7 @@ function g_ring(K, a, dd, y) { K.cyl(a, dd, y, 0.14, 0.03, [0.08, 0.08, 0.09], 0
    ============================================================ */
 const THEMES = {
   noir: {
-    name: 'Rain Noir', blurb: 'Toned-down night. Sodium streetlights, warm windows, neon only as small accents.',
+    name: 'Rain Noir',
     fog: [0.045, 0.05, 0.062], fogDen: 0.011,
     zen: [0.008, 0.009, 0.013], mid: [0.03, 0.034, 0.044], glow: [0.14, 0.1, 0.06], cloud: [0.06, 0.062, 0.072], stars: 0.2, disc: [0.25, 0.28, 0.32], discDir: [-0.55, 0.42, -0.72],
     ambLo: [0.02, 0.021, 0.026], ambHi: [0.05, 0.056, 0.072], sun: [0.05, 0.06, 0.08], sunDir: [-0.35, 0.75, 0.25], rim: [0.12, 0.13, 0.16],
@@ -2418,7 +2357,7 @@ const THEMES = {
     rain: 0.7, rainCol: [0.5, 0.55, 0.65], lamp: [2.0, 1.2, 0.5], fountain: [0.35, 0.6, 0.7], shop: 0.45,
   },
   neon: {
-    name: 'Full Neon', blurb: 'The original look: saturated magenta and cyan, heavy bloom.',
+    name: 'Full Neon',
     fog: [0.10, 0.035, 0.12], fogDen: 0.0085,
     zen: [0.012, 0.008, 0.03], mid: [0.09, 0.025, 0.12], glow: [0.35, 0.08, 0.25], cloud: [0.16, 0.05, 0.2], stars: 1, disc: [0.75, 0.9, 1.0], discDir: [-0.55, 0.42, -0.72],
     ambLo: [0.03, 0.02, 0.05], ambHi: [0.06, 0.07, 0.14], sun: [0.1, 0.12, 0.22], sunDir: [-0.35, 0.75, 0.25], rim: [0.3, 0.16, 0.42],
@@ -2427,7 +2366,7 @@ const THEMES = {
     rain: 0.55, rainCol: [0.45, 0.55, 0.9], lamp: [1.2, 1.5, 2.0], fountain: [0.4, 1.6, 2.2], shop: 1,
   },
   smog: {
-    name: 'Brutalist Smog', blurb: 'Concrete megablocks in thick grey-green smog. Almost monochrome, oppressive and quiet.',
+    name: 'Brutalist Smog',
     fog: [0.15, 0.16, 0.145], fogDen: 0.02,
     zen: [0.08, 0.09, 0.085], mid: [0.13, 0.14, 0.125], glow: [0.05, 0.05, 0.03], cloud: [0.17, 0.18, 0.165], stars: 0, disc: [0, 0, 0], discDir: [-0.55, 0.42, -0.72],
     ambLo: [0.06, 0.065, 0.06], ambHi: [0.14, 0.15, 0.14], sun: [0.07, 0.07, 0.065], sunDir: [-0.35, 0.75, 0.25], rim: [0.08, 0.09, 0.08],
@@ -2436,7 +2375,7 @@ const THEMES = {
     rain: 0.25, rainCol: [0.5, 0.52, 0.5], lamp: [1.3, 1.3, 1.1], fountain: [0.3, 0.45, 0.45], shop: 0.3,
   },
   amber: {
-    name: 'Amber Haze', blurb: 'Dust storm over a dead megacity. Burnt orange air, silhouettes, a hazy low sun.',
+    name: 'Amber Haze',
     fog: [0.30, 0.12, 0.035], fogDen: 0.014,
     zen: [0.08, 0.035, 0.012], mid: [0.24, 0.09, 0.025], glow: [0.4, 0.15, 0.03], cloud: [0.34, 0.14, 0.04], stars: 0, disc: [1.2, 0.7, 0.3], discDir: [0.5, 0.12, -0.85],
     ambLo: [0.06, 0.03, 0.015], ambHi: [0.17, 0.085, 0.03], sun: [0.4, 0.18, 0.05], sunDir: [0.5, 0.25, -0.83], rim: [0.3, 0.14, 0.04],
@@ -2445,7 +2384,7 @@ const THEMES = {
     rain: 0.12, rainCol: [0.7, 0.45, 0.2], lamp: [1.6, 0.9, 0.4], fountain: [0.6, 0.45, 0.25], shop: 0.35,
   },
   dawn: {
-    name: 'Cold Dawn', blurb: 'Overcast morning after the outbreak. Readable daylight, blue-grey towers, color from blood and fire only.',
+    name: 'Cold Dawn',
     fog: [0.42, 0.46, 0.52], fogDen: 0.006,
     zen: [0.22, 0.3, 0.42], mid: [0.42, 0.46, 0.53], glow: [0.2, 0.15, 0.16], cloud: [0.58, 0.6, 0.65], stars: 0, disc: [1.0, 0.85, 0.75], discDir: [0.6, 0.16, -0.78],
     ambLo: [0.12, 0.12, 0.13], ambHi: [0.34, 0.37, 0.44], sun: [0.55, 0.5, 0.45], sunDir: [0.55, 0.45, -0.7], rim: [0.1, 0.1, 0.12],
@@ -2454,7 +2393,7 @@ const THEMES = {
     rain: 0.25, rainCol: [0.6, 0.62, 0.68], lamp: [0.15, 0.15, 0.15], fountain: [0.15, 0.3, 0.4], shop: 0.12,
   },
   blackout: {
-    name: 'Blackout', blurb: 'The grid is down. Moonlight, red emergency lamps, and whatever your arrows set on fire.',
+    name: 'Blackout',
     fog: [0.012, 0.013, 0.022], fogDen: 0.012,
     zen: [0.004, 0.005, 0.01], mid: [0.012, 0.014, 0.024], glow: [0.08, 0.012, 0.01], cloud: [0.02, 0.022, 0.035], stars: 1.3, disc: [0.9, 0.95, 1.05], discDir: [-0.55, 0.42, -0.72],
     ambLo: [0.012, 0.013, 0.02], ambHi: [0.03, 0.036, 0.065], sun: [0.08, 0.095, 0.14], sunDir: [-0.45, 0.6, -0.6], rim: [0.08, 0.1, 0.18],
@@ -2466,7 +2405,6 @@ const THEMES = {
 const THEME_ORDER = ['noir', 'smog', 'amber', 'dawn', 'blackout', 'neon'];
 let THEME = THEMES.noir;
 function setTheme(k) { const prev = THEME; THEME = THEMES[k] || THEMES.noir; if (prev !== THEME && typeof onThemeChanged === 'function') onThemeChanged(); }
-const _n3 = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
 // pushes the current look into the shared shader uniforms (lights, sky and post are handled in r3.js)
 function applyThemeUniforms() {
   const T = THEME;
@@ -2940,7 +2878,7 @@ const WX = {
   precip: 0.68, snow: 0, wind: 0.4, storm: 0,   // current (smoothed) values
   wet: 0.8, cover: 0,                            // surface state: how soaked, how snowed-over
   flash: 0, flashT: 8, gust: 0, thunder: [],
-  forced: null,                                   // testing / debugging: WX.force('snow')
+  forced: null,                                   // testing / debugging: set to a weather name to pin it
 };
 function wxPick() {
   const keys = Object.keys(WX_STATES).filter(k => k !== WX.state && !(WX.state === 'snow' && k === 'downpour'));
@@ -2953,7 +2891,6 @@ function wxSet(k) {
   if (GAME.state === 'playing' && prev !== k) { const msg = { downpour: 'STORM ROLLING IN', snow: 'THE RAIN IS TURNING TO SNOW', dry: 'THE RAIN EASES OFF' }[k]; if (msg) GAME.toast(msg, '#bfe4ff'); }
 }
 function wxReset() { wxSet('rain'); WX.precip = 0.68; WX.snow = 0; WX.wind = 0.4; WX.storm = 0; WX.wet = 0.8; WX.cover = 0; WX.flash = 0; WX.thunder.length = 0; }
-WX.force = (k) => { WX.forced = k; if (k) { wxSet(k); } };
 
 function updateWeather(dt) {
   WX.t += dt;
@@ -2989,7 +2926,7 @@ function wxSnowK() { return WX.precip * WX.snow; }
    ============================================================ */
 const MAXP = 5000;
 const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
-for (let i = 0; i < MAXP; i++) PART.p.push({ k: (i * 0.6180339887) % 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
+for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;
@@ -3097,7 +3034,7 @@ const WORLD = {
   circles: [],  // {x,z,r,h}
   signs: [],    // {tex,m,col,mode,seed,add}
   lights: [],   // static {p:[x,y,z], r, c:[r,g,b]}
-  cars: [], train: null, mesh: null, spawns: [], supplies: [], fires: [], steam: [], halos: [],
+  train: null, mesh: null, supplies: [], fires: [], steam: [], halos: [],
   petals: [],   // [x, y, z, radius] blossom canopies that shed petals
   carSpots: [], // wrecked cars {x, z, ry, kind: 'sedan'|'van', paint, roll} drawn from the Meshy models (r3.js loadMeshyCars)
   propSpots: [], // Meshy props {kind, x, z, ry, h, len, tint}: bushes, hedges, stone lanterns (r3.js loadMeshyProps)
@@ -3115,7 +3052,7 @@ const WORLD = {
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
-function signTexture(text, color, style, vertical, sub) {
+function signTexture(text, color, style, vertical) {
   const cv = document.createElement('canvas');
   const W = vertical ? 128 : 512, H = vertical ? 512 : 128; cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
@@ -3132,11 +3069,10 @@ function signTexture(text, color, style, vertical, sub) {
   } else if (style === 'seg') {
     x.shadowBlur = 0; segText(x, text, W / 2, H / 2, H * 0.52, { color, align: 'center', glow: 0.6, ghostColor: 'rgba(255,255,255,0.04)' });
   } else {
-    x.font = `700 ${sub ? 64 : 84}px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
-    const y = sub ? H * 0.4 : H / 2;
-    let fs = sub ? 64 : 84; while (x.measureText(text).width > W - 50 && fs > 20) { fs -= 4; x.font = `700 ${fs}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; }
+    x.font = `700 84px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle';
+    const y = H / 2;
+    let fs = 84; while (x.measureText(text).width > W - 50 && fs > 20) { fs -= 4; x.font = `700 ${fs}px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; }
     x.fillText(text, W / 2, y); x.shadowBlur = 0; x.fillStyle = '#fff'; x.globalAlpha = 0.6; x.fillText(text, W / 2, y);
-    if (sub) { x.globalAlpha = 1; x.font = `400 26px "Quiver Cn", "TeX Gyre Heros Cn", sans-serif`; x.fillStyle = color; x.fillText(sub, W / 2, H * 0.8); }
   }
   return canvasTex(cv);
 }
@@ -3280,9 +3216,9 @@ function buildCity() {
       for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
       const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
       const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
-      const dl = P(dp[0] - fx, 2.8, 0.3); B(dp[0] + nx * 0.3, 2.75, dp[2] + nz * 0.3, tx ? 0.5 : 0.25, 0.1, tz ? 0.5 : 0.25, [1, 0.85, 0.6], 3);
+      B(dp[0] + nx * 0.3, 2.75, dp[2] + nz * 0.3, tx ? 0.5 : 0.25, 0.1, tz ? 0.5 : 0.25, [1, 0.85, 0.6], 3);
       WORLD.lights.push({ p: [dp[0] + nx * 2, 2.6, dp[2] + nz * 2], r: 9, c: [dc[0] * 1.2, dc[1] * 1.2, dc[2] * 1.2], shop: true });
-      if (R() < 0.45) { const [txt, st] = signWords[sw++ % signWords.length]; const sp = P(dp[0] * tx + dp[2] * tz - (fx * tx + fz * tz), 3.6, 0.15); addSign(signTexture(txt, '#' + dc.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, 5, 1.25, [1.5, 1.5, 1.5], 0, st !== 'panel'); }
+      if (R() < 0.45) { const [txt, st] = signWords[sw++ % signWords.length]; const sp = P(dp[0] * tx + dp[2] * tz - (fx * tx + fz * tz), 3.6, 0.15); addSign(signTexture(txt, rgbHex(dc), st), sp[0], sp[1], sp[2], ry, 5, 1.25, [1.5, 1.5, 1.5], 0, st !== 'panel'); }
       return;
     }
     // corner neon strips
@@ -3299,13 +3235,13 @@ function buildCity() {
     // horizontal sign above storefront
     const [txt, st] = opt.shop ? [SHOP_DEFS[opt.shop].sign, SHOP_DEFS[opt.shop].st] : signWords[sw++ % signWords.length];
     const signW = Math.min(span * 0.7, 11), sp = P(r(-span * 0.1, span * 0.1), 5.2, 0.15);
-    addSign(signTexture(txt, '#' + [nc, sc, NEON.amber][sw % 3].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join(''), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
+    addSign(signTexture(txt, rgbHex([nc, sc, NEON.amber][sw % 3]), st), sp[0], sp[1], sp[2], ry, signW, signW / 4, [1.6, 1.6, 1.6], 0, st !== 'panel');
     // vertical blade sign
     if (R() < 0.75) {
       const along = (R() < 0.5 ? -1 : 1) * (span / 2 - 2.5), vh = r(7, 12), vy = r(9, 16);
       const vp = P(along, vy, 1.2); const vc = neonPick();
       B(vp[0], vy, vp[2], tx ? 0.25 : 2.3, vh + 0.4, tz ? 0.25 : 2.3, [0.03, 0.03, 0.04]);
-      const hexc = '#' + vc.map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+      const hexc = rgbHex(vc);
       const t = signTexture(vertWords[vw++ % vertWords.length], hexc, 'font', true);
       // both faces of the blade (perpendicular to facade)
       const bry = ry + Math.PI / 2;
@@ -3416,7 +3352,6 @@ function buildCity() {
 
   g = gProps;
   // ---------- plaza props ----------
-  const metal = [0.13, 0.13, 0.16];
   // holo fountain
   g.cyl(M4.trs(M, 0, 0.45, 0, 0, 0, 0, 8.4, 0.9, 8.4), [0.1, 0.1, 0.13], 0, 4, 32);
   g.cyl(M4.trs(M, 0, 0.92, 0, 0, 0, 0, 7.4, 0.04, 7.4), NEON.cyan, 0.5, 0, 32);
@@ -3462,26 +3397,10 @@ function buildCity() {
 
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
-  // no flying traffic: the city is dead (WORLD.cars stays empty)
-  WORLD.train = { x: 34, speed: 0, wait: 0 };   // stalled over the plaza since the outbreak
+  WORLD.train = { x: 34, wait: 0 };   // stalled over the plaza since the outbreak
 }
 
-const _pv = [0, 0, 0];
-function updateCity(dt) {
-  for (const c of WORLD.cars) { c.t += c.s * dt; if (c.t > 480) c.t = -480; if (c.t < -480) c.t = 480; }
-  const T = WORLD.train;
-  // the monorail is dead: it never moves
-}
 function drawCityDynamic(time) {
-  for (const c of WORLD.cars) {
-    const x = c.alongX ? c.t : c.off, z = c.alongX ? c.off : c.t, ry = c.alongX ? (c.s > 0 ? Math.PI / 2 : -Math.PI / 2) : (c.s > 0 ? 0 : Math.PI);
-    if ((x - PLAYER.x) ** 2 + (z - PLAYER.z) ** 2 > 220 * 220) continue;
-    const L = c.big ? 9 : 4.2, W = c.big ? 3 : 1.8;
-    const m = M4.trs(poolM(), x, c.h, z, 0, ry, 0, W, c.big ? 2.2 : 0.9, L); drawItem(MESH.metal, m, [0.12, 0.12, 0.15]);
-    const f = M4.trs(poolM(), x + Math.sin(ry) * L / 2, c.h, z + Math.cos(ry) * L / 2, 0, ry, 0, W * 0.8, 0.2, 0.1); drawItem(MESH.box, f, [1, 1, 1], [3, 3, 2.6]);
-    const b = M4.trs(poolM(), x - Math.sin(ry) * L / 2, c.h, z - Math.cos(ry) * L / 2, 0, ry, 0, W * 0.8, 0.2, 0.1); drawItem(MESH.box, b, [1, 0.1, 0.1], [4, 0.2, 0.3]);
-    const u = M4.trs(poolM(), x, c.h - 0.5, z, 0, ry, 0, W * 0.9, 0.08, L * 0.9); drawItem(MESH.box, u, c.c, [c.c[0] * 2, c.c[1] * 2, c.c[2] * 2]);
-  }
   const T = WORLD.train;
   if (T.wait <= 0 && (T.x - PLAYER.x) ** 2 + (-24 - PLAYER.z) ** 2 < 260 * 260) for (let i = 0; i < 5; i++) {
     const x = T.x - i * 13.5;
@@ -3552,6 +3471,7 @@ function supplyProp(g, sp) {
 }
 
 function buildDistricts(C) {
+  const SOOT = [0.06, 0.06, 0.065];   // sooted concrete and steel: the Metro's and the Refinery's dark tone
   const { B, solid, building, lamp, barrier, addSign, r, R, neonPick, setG } = C;
   const quad = (x0, x1, z0, z1, y, col, mat) => C.getG().quad(null, [x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], [0, 1, 0], col, 0, mat);
   // a contiguous row of buildings between a0..a1 along one axis. A cut [c0, c1] leaves an opening: the buildings it
@@ -3575,7 +3495,7 @@ function buildDistricts(C) {
     for (let i = 1; i <= n; i++) {
       const t = i / n, x = lerp(ax, bx, t), z = lerp(az, bz, t), y = lerp(ay, by, t) - Math.sin(t * Math.PI) * sag;
       C.getG().box(M4.align(M, px, py, pz, x, y, z, 0.035, 0.035), [0.03, 0.03, 0.035], 0, 0);
-      if (lanterns && i < n && i % 1 === 0) { const c = lc || [1, 0.4, 0.15]; C.getG().sphere(M4.trs(M, x, y - 0.3, z, 0, 0, 0, 0.36, 0.44, 0.36), c, 2.6, 0, 8, 6); WORLD.halos.push({ p: [x, y - 0.3, z], s: 1.3, c: [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5] }); }
+      if (lanterns && i < n) { const c = lc || [1, 0.4, 0.15]; C.getG().sphere(M4.trs(M, x, y - 0.3, z, 0, 0, 0, 0.36, 0.44, 0.36), c, 2.6, 0, 8, 6); WORLD.halos.push({ p: [x, y - 0.3, z], s: 1.3, c: [c[0] * 0.5, c[1] * 0.5, c[2] * 0.5] }); }
       px = x; py = y; pz = z;
     }
   }
@@ -3940,7 +3860,7 @@ function buildDistricts(C) {
   // Line 3 ran in an open cut below the streets. The pumps died with the power: the track beds are knee-deep in black
   // water, a stalled train still waits at Sector 7 West, and one of the street bridges has come down into the cut.
   {
-    const WALL = [0.12, 0.12, 0.125], WALL2 = [0.1, 0.1, 0.105], TILE = [0.46, 0.45, 0.41], DARK = [0.06, 0.06, 0.065], L3 = hex('#ff3d7a'), TOP = 7.4;
+    const WALL = [0.12, 0.12, 0.125], WALL2 = [0.1, 0.1, 0.105], TILE = [0.46, 0.45, 0.41], L3 = hex('#ff3d7a'), TOP = 7.4;
     const TR = [-127.5, -98.5];   // the two track centre lines
     setG('near');
     quad(-136, -84, -136, -58, 0.011, [0.05, 0.051, 0.054], 16);                  // the floor of the cut
@@ -3957,9 +3877,9 @@ function buildDistricts(C) {
     for (let x = -130; x <= -90; x += 6) { B(x, TOP / 2 - 0.3, -135.7, 0.8, TOP - 0.6, 0.6, WALL2, 0, 16); solid(x - 0.4, x + 0.4, 0, TOP - 0.6, -136, -135.4); }
     B(-135.75, 6.9, -97, 0.5, 0.4, 78, WALL2, 0, 16); B(-110, 6.9, -135.75, 52, 0.4, 0.5, WALL2, 0, 16);
     B(-135.9, 0.35, -97, 0.2, 0.7, 78, [0.03, 0.035, 0.03], 0, 16); B(-110, 0.35, -135.9, 52, 0.7, 0.2, [0.03, 0.035, 0.03], 0, 16);   // tide mark
-    for (const y of [TOP + 0.55, TOP + 1.05]) { B(-136.2, y, -100, 0.07, 0.07, 84, DARK, 0, 4); B(-113, y, -136.2, 58, 0.07, 0.07, DARK, 0, 4); }
-    for (let z = -140; z <= -60; z += 2.4) B(-136.2, TOP + 0.55, z, 0.07, 1.1, 0.07, DARK, 0, 4);
-    for (let x = -140; x <= -86; x += 2.4) B(x, TOP + 0.55, -136.2, 0.07, 1.1, 0.07, DARK, 0, 4);
+    for (const y of [TOP + 0.55, TOP + 1.05]) { B(-136.2, y, -100, 0.07, 0.07, 84, SOOT, 0, 4); B(-113, y, -136.2, 58, 0.07, 0.07, SOOT, 0, 4); }
+    for (let z = -140; z <= -60; z += 2.4) B(-136.2, TOP + 0.55, z, 0.07, 1.1, 0.07, SOOT, 0, 4);
+    for (let x = -140; x <= -86; x += 2.4) B(x, TOP + 0.55, -136.2, 0.07, 1.1, 0.07, SOOT, 0, 4);
     // street lamps at the top, their heads out over the edge: they light the cut from above
     const edgeLamp = (x, z, dx, dz) => {
       B(x, TOP + 3, z, 0.22, 6, 0.22, [0.08, 0.08, 0.1], 0, 4);
@@ -3980,7 +3900,7 @@ function buildDistricts(C) {
       B(tx, 2.9, -135.94, 6.2, 5.8, 0.1, [0.004, 0.004, 0.006]);
       B(tx, 6.1, -135.7, 7.4, 0.6, 0.6, WALL2, 0, 16); for (const s of [-1, 1]) B(tx + s * 3.4, 2.9, -135.7, 0.6, 5.8, 0.6, WALL2, 0, 16);
       for (let i = 0; i < 6; i++) B(tx - 3.1 + i * 1.24, 6.1, -135.38, 0.55, 0.3, 0.04, i % 2 ? [0.03, 0.03, 0.03] : [0.9, 0.62, 0.08], i % 2 ? 0 : 0.6);
-      B(tx + 2.2, 4.6, -135.5, 0.4, 0.9, 0.3, DARK, 0, 4); B(tx + 2.2, 4.8, -135.33, 0.2, 0.2, 0.05, NEON.red, 4);
+      B(tx + 2.2, 4.6, -135.5, 0.4, 0.9, 0.3, SOOT, 0, 4); B(tx + 2.2, 4.8, -135.33, 0.2, 0.2, 0.05, NEON.red, 4);
       WORLD.halos.push({ p: [tx + 2.2, 4.8, -135.2], s: 1.1, c: [0.8, 0.05, 0.05] });
       for (const o of [-0.72, 0.72]) B(tx + o, 0.03, -97.5, 0.1, 0.06, 67, [0.3, 0.26, 0.24], 0, 4);   // rails just breaking the surface
       addSign(signTexture('LINE 3', '#ff3d7a', 'seg'), tx, 7.0, -135.3, 0, 4.4, 1.1, [1.3, 1.3, 1.3], 0, true);
@@ -4030,7 +3950,7 @@ function buildDistricts(C) {
     // a bridge that held: shelter from the rain, and a deck overhead
     B(-110, 7.45, -76, 52, 0.9, 8, WALL, 0, 16); solid(-136, -84, 7.0, 7.9, -80, -72);
     for (const bz of [-80.15, -71.85]) B(-110, 8.4, bz, 52, 1.0, 0.3, WALL2, 0, 16);
-    for (const bz of [-78.5, -73.5]) B(-110, 6.8, bz, 52, 0.4, 0.5, DARK, 0, 4);
+    for (const bz of [-78.5, -73.5]) B(-110, 6.8, bz, 52, 0.4, 0.5, SOOT, 0, 4);
     B(-113, 3.5, -76, 1.4, 7, 1.4, WALL2, 0, 16); WORLD.circles.push({ x: -113, z: -76, r: 0.75, h: 7 });
     WORLD.indoor.push({ x0: -136, x1: -84, z0: -80, z1: -72, y1: 7 });
     for (const x of [-126, -99]) { B(x, 6.5, -76, 0.6, 0.12, 0.3, [1, 0.55, 0.2], 3); WORLD.lights.push({ p: [x, 6, -76], r: 11, c: [1.6, 0.75, 0.22], shop: true }); }
@@ -4057,7 +3977,7 @@ function buildDistricts(C) {
     addSign(signTexture('METRO  LINE 3', '#ff3d7a', 'panel'), -91, 6.6, -31.75, 0, 10, 2.5, [1.3, 1.3, 1.3], 0, false);
     addSign(signTexture('SECTOR 7 WEST', '#ff3d7a', 'panel'), -91, 6.6, -58.25, Math.PI, 10, 2.5, [1.3, 1.3, 1.3], 0, false);
     for (const gx of [-99.2, -82.8]) {   // the magenta globes either side of the entrance
-      B(gx, 1.6, -31.2, 0.14, 3.2, 0.14, DARK, 0, 4); C.getG().sphere(M4.trs(M, gx, 3.45, -31.2, 0, 0, 0, 0.55, 0.55, 0.55), L3, 2.4, 0, 12, 8);
+      B(gx, 1.6, -31.2, 0.14, 3.2, 0.14, SOOT, 0, 4); C.getG().sphere(M4.trs(M, gx, 3.45, -31.2, 0, 0, 0, 0.55, 0.55, 0.55), L3, 2.4, 0, 12, 8);
       WORLD.halos.push({ p: [gx, 3.45, -31.2], s: 2, c: [0.6, 0.12, 0.28] }); WORLD.lights.push({ p: [gx, 3.2, -30.4], r: 9, c: [1.6, 0.3, 0.7], shop: true }); WORLD.circles.push({ x: gx, z: -31.2, r: 0.12, h: 3.2 });
     }
     // the yard tunnel: bare concrete, sodium lamps, the way marked in paint
@@ -4086,7 +4006,7 @@ function buildDistricts(C) {
   // Petrochem 7: a tank farm, a process unit still venting, a loading rack and a tanker at the jetty. Down the access
   // road from the Suburbs, or through the gate at the south end of the Docks. The small fuel tanks still hold pressure.
   {
-    const STEEL = [0.5, 0.5, 0.47], DARK = [0.06, 0.06, 0.065], YEL = [0.8, 0.6, 0.08], CONCR = [0.2, 0.2, 0.19];
+    const YEL = [0.8, 0.6, 0.08], CONCR = [0.2, 0.2, 0.19];
     setG('near');
     quad(104, 228, 66, 146, 0.012, [0.068, 0.066, 0.062], 16);                        // plant concrete
     quad(199, 213, 40, 66, 0.012, [0.07, 0.068, 0.064], 16);                          // the gate through the Docks wall
@@ -4103,7 +4023,7 @@ function buildDistricts(C) {
       const ax = z0 === z1, L = ax ? x1 - x0 : z1 - z0, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, out = ax ? (cz > 116 ? 1 : -1) : -1;
       for (const y of [0.2, 1.4, 2.6]) B(cx, y, cz, ax ? L : 0.05, 0.05, ax ? 0.05 : L, [0.2, 0.21, 0.22], 0, 4);
       for (const y of [3.05, 3.25, 3.45]) B(cx + (ax ? 0 : out * (y - 2.85)), y, cz + (ax ? out * (y - 2.85) : 0), ax ? L : 0.02, 0.02, ax ? 0.02 : L, [0.15, 0.15, 0.16], 0, 4);
-      for (let a = 0; a <= L + 0.01; a += 3) { const px = ax ? x0 + a : cx, pz = ax ? cz : z0 + a; B(px, 1.45, pz, 0.08, 2.9, 0.08, DARK, 0, 4); rot(px + (ax ? 0 : out * 0.2), 3.1, pz + (ax ? out * 0.2 : 0), 0.05, 0.6, 0.05, DARK, 0, 4, ax ? out * 0.6 : 0, 0, ax ? 0 : -out * 0.6); }
+      for (let a = 0; a <= L + 0.01; a += 3) { const px = ax ? x0 + a : cx, pz = ax ? cz : z0 + a; B(px, 1.45, pz, 0.08, 2.9, 0.08, SOOT, 0, 4); rot(px + (ax ? 0 : out * 0.2), 3.1, pz + (ax ? out * 0.2 : 0), 0.05, 0.6, 0.05, SOOT, 0, 4, ax ? out * 0.6 : 0, 0, ax ? 0 : -out * 0.6); }
       solid(ax ? x0 : cx - 0.1, ax ? x1 : cx + 0.1, 0, 3.4, ax ? cz - 0.1 : z0, ax ? cz + 0.1 : z1);
     };
     fence(60, 110.2, 108, 110.2); fence(60, 121.8, 108, 121.8);
@@ -4119,12 +4039,12 @@ function buildDistricts(C) {
     B(106, 7.1, 116, 0.6, 0.6, 11.4, [0.3, 0.2, 0.03], 0, 4); B(106, 8.3, 116, 0.4, 2.2, 8.4, [0.04, 0.04, 0.045], 0, 4);
     addSign(signTexture('PETROCHEM 7', '#ffb52e', 'seg'), 105.75, 8.3, 116, -Math.PI / 2, 8, 2, [1.4, 1.4, 1.4], 0, true);
     addSign(signTexture('SUBURBS', '#29e7ff', 'font'), 106.25, 8.3, 116, Math.PI / 2, 8, 2, [1.3, 1.3, 1.3], 0, true);
-    { const bx = 110.8, bz = 124.6; B(bx, 1.4, bz, 3, 2.8, 3, [0.16, 0.16, 0.17], 0, 8); B(bx - 1.52, 1.7, bz, 0.04, 1.0, 2.2, [0.3, 0.4, 0.42], 0.8); B(bx, 2.95, bz, 3.4, 0.2, 3.4, DARK, 0, 4); solid(bx - 1.5, bx + 1.5, 0, 2.8, bz - 1.5, bz + 1.5);
+    { const bx = 110.8, bz = 124.6; B(bx, 1.4, bz, 3, 2.8, 3, [0.16, 0.16, 0.17], 0, 8); B(bx - 1.52, 1.7, bz, 0.04, 1.0, 2.2, [0.3, 0.4, 0.42], 0.8); B(bx, 2.95, bz, 3.4, 0.2, 3.4, SOOT, 0, 4); solid(bx - 1.5, bx + 1.5, 0, 2.8, bz - 1.5, bz + 1.5);
       WORLD.lights.push({ p: [bx - 2.5, 2.2, bz], r: 8, c: [0.9, 1.1, 1.2], shop: true }); }
-    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, DARK, 0, 4); B(108.6, 1.32, 121.1, 0.42, 0.34, 0.5, [0.75, 0.62, 0.08], 0, 8);   // the boom, left up: hinged on its post, striped, no glow
+    B(108.6, 0.6, 121.1, 0.3, 1.2, 0.3, SOOT, 0, 4); B(108.6, 1.32, 121.1, 0.42, 0.34, 0.5, [0.75, 0.62, 0.08], 0, 8);   // the boom, left up: hinged on its post, striped, no glow
     { const a = 0.48, py = 1.38, pz = 121.1, dy = Math.cos(a), dz = -Math.sin(a);
       for (let i = 0; i < 9; i++) { const t = 0.3 + i * 0.5; rot(108.6, py + dy * t, pz + dz * t, 0.12, 0.5, 0.12, i % 2 ? [0.72, 0.7, 0.66] : [0.62, 0.06, 0.05], 0, 8, -a, 0, 0); }
-      rot(108.6, py - dy * 0.35, pz - dz * 0.35, 0.26, 0.45, 0.26, DARK, 0, 4, -a, 0, 0); }   // counterweight
+      rot(108.6, py - dy * 0.35, pz - dz * 0.35, 0.26, 0.45, 0.26, SOOT, 0, 4, -a, 0, 0); }   // counterweight
     WORLD.circles.push({ x: 108.6, z: 121.1, r: 0.2, h: 1.2 });
     addSign(signTexture('DANGER  FLAMMABLE', '#ff3040', 'panel'), 107.85, 2.1, 103, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);
     addSign(signTexture('NO NAKED FLAMES', '#ff3040', 'panel'), 107.85, 2.1, 129, -Math.PI / 2, 4, 1, [1.2, 1.2, 1.2], 0, false);
@@ -4133,7 +4053,7 @@ function buildDistricts(C) {
     barrier(98, 113.5, 0); barrier(117, 119.3, 0);
     // sodium masts: the plant's own lighting, orange and hard
     const sodium = (x, z) => {
-      B(x, 7, z, 0.35, 14, 0.35, [0.14, 0.14, 0.15], 0, 4); B(x, 14.1, z, 1.8, 0.2, 0.5, DARK, 0, 4);
+      B(x, 7, z, 0.35, 14, 0.35, [0.14, 0.14, 0.15], 0, 4); B(x, 14.1, z, 1.8, 0.2, 0.5, SOOT, 0, 4);
       for (const o of [-0.6, 0.6]) B(x + o, 13.9, z, 0.5, 0.12, 0.35, [1, 0.62, 0.25], 3.5);
       WORLD.circles.push({ x, z, r: 0.25, h: 14 }); WORLD.lights.push({ p: [x, 13.3, z], r: 26, c: [1.8, 1.05, 0.45], kind: 'lamp' });
       WORLD.halos.push({ p: [x, 13.8, z], s: 3.2, c: [0.9, 0.5, 0.15] });
@@ -4159,7 +4079,7 @@ function buildDistricts(C) {
       g.sphere(M4.trs(M, x, h, z, 0, 0, 0, rad * 2, rad * 1.1, rad * 2), [0.5, 0.5, 0.48], 0, 4, 14, 6);
       for (let y = 6; y < h - 2; y += 6) { g.ring(M4.trs(M, x, y, z, 0, 0, 0, 1, 1, 1), [0.3, 0.22, 0.04], 0, 4, rad + 0.7, 0.06, 24, 3); B(x + rad + 0.2, y - 0.02, z, 1, 0.06, 1.2, [0.2, 0.2, 0.2], 0, 4);
         if ((y / 6) % 2) { B(x + rad + 0.75, y + 0.9, z, 0.2, 0.2, 0.2, [1, 0.8, 0.5], 3); WORLD.halos.push({ p: [x + rad + 0.9, y + 0.9, z], s: 1.1, c: [0.5, 0.35, 0.15] }); } }
-      B(x + rad + 0.1, h / 2, z - 0.6, 0.06, h, 0.06, DARK, 0, 4); B(x + rad + 0.1, h / 2, z + 0.6, 0.06, h, 0.06, DARK, 0, 4);   // ladder
+      B(x + rad + 0.1, h / 2, z - 0.6, 0.06, h, 0.06, SOOT, 0, 4); B(x + rad + 0.1, h / 2, z + 0.6, 0.06, h, 0.06, SOOT, 0, 4);   // ladder
       B(x, h + rad * 0.6 + 0.5, z, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [x, h + rad * 0.6 + 0.5, z], s: 1.6, c: [0.8, 0.05, 0.05] });
       WORLD.circles.push({ x, z, r: rad + 0.1, h });
     }
@@ -4192,11 +4112,11 @@ function buildDistricts(C) {
     for (const [lx, lz] of [[137, 128], [151, 128], [137, 138], [151, 138]]) WORLD.lights.push({ p: [lx, 5.8, lz], r: 11, c: [1.2, 1.25, 1.35] });
     addSign(signTexture('LOADING  BAY 1-2', '#ffb52e', 'seg'), 144, 5.7, 124.4, Math.PI, 8, 1.4, [1.3, 1.3, 1.3], 0, true);
     B(144, 0.12, 133, 24, 0.24, 1.4, CONCR, 0, 16); solid(132, 156, 0, 0.24, 132.3, 133.7);
-    for (const mx of [137, 144, 151]) { B(mx, 1.1, 133, 0.7, 1.8, 0.6, [0.2, 0.22, 0.25], 0, 8); B(mx, 1.5, 133.31, 0.4, 0.3, 0.02, NEON.lime, 1.4); WORLD.circles.push({ x: mx, z: 133, r: 0.35, h: 1.9 }); rot(mx, 4.2, 131.6, 0.18, 3.2, 0.18, DARK, 0, 4, 0.5, 0, 0); }
+    for (const mx of [137, 144, 151]) { B(mx, 1.1, 133, 0.7, 1.8, 0.6, [0.2, 0.22, 0.25], 0, 8); B(mx, 1.5, 133.31, 0.4, 0.3, 0.02, NEON.lime, 1.4); WORLD.circles.push({ x: mx, z: 133, r: 0.35, h: 1.9 }); rot(mx, 4.2, 131.6, 0.18, 3.2, 0.18, SOOT, 0, 4, 0.5, 0, 0); }
     const tanker = (x, z, dir) => {
       const g = C.getG(), paint = [0.7, 0.68, 0.62];
       B(x + dir * 6.3, 1.7, z, 2.4, 2.6, 2.5, [0.55, 0.08, 0.06], 0, 11); B(x + dir * 7.52, 2.2, z, 0.04, 0.9, 2.1, [0.05, 0.07, 0.08], 0.2, 0);
-      B(x, 0.7, z, 14.5, 0.35, 1.2, DARK, 0, 4);
+      B(x, 0.7, z, 14.5, 0.35, 1.2, SOOT, 0, 4);
       g.cyl(M4.trs(M, x - dir * 1.2, 2.2, z, 0, 0, Math.PI / 2, 2.5, 10, 2.5), paint, 0, 11, 16);
       B(x - dir * 1.2, 2.2, z, 9.4, 0.3, 2.56, [0.8, 0.45, 0.05], 0.15, 0);
       for (const wx of [-5, -3.6, 1, 6]) for (const s of [-1, 1]) C.getG().cyl(M4.trs(M, x + dir * wx, 0.5, z + s * 1.1, Math.PI / 2, 0, 0, 1, 0.35, 1), [0.03, 0.03, 0.03], 0, 15, 12);
@@ -4204,11 +4124,11 @@ function buildDistricts(C) {
     };
     tanker(143, 128, 1); tanker(145, 138, -1);
     // control room: squat, blast-proof, a few screens still on
-    { const cx = 220.5, cz = 134; B(cx, 3, cz, 11, 6, 16, [0.2, 0.2, 0.21], 0, 16); B(cx, 6.2, cz, 11.4, 0.4, 16.4, DARK, 0, 4); solid(cx - 5.5, cx + 5.5, 0, 6, cz - 8, cz + 8);
+    { const cx = 220.5, cz = 134; B(cx, 3, cz, 11, 6, 16, [0.2, 0.2, 0.21], 0, 16); B(cx, 6.2, cz, 11.4, 0.4, 16.4, SOOT, 0, 4); solid(cx - 5.5, cx + 5.5, 0, 6, cz - 8, cz + 8);
       for (let i = 0; i < 5; i++) B(cx - 5.52, 3.4, cz - 6 + i * 3, 0.04, 1.0, 2.2, i === 2 ? [0.2, 0.5, 0.45] : [0.05, 0.07, 0.08], i === 2 ? 1.4 : 0.1);
       B(cx - 5.52, 1.3, cz + 7, 0.05, 2.5, 1.4, [0.03, 0.03, 0.035], 0, 4);
       addSign(signTexture('CONTROL', '#29e7ff', 'seg'), cx - 5.55, 5.1, cz, -Math.PI / 2, 5, 1.25, [1.3, 1.3, 1.3], 0, true);
-      B(cx + 2, 9.5, cz - 4, 0.15, 7, 0.15, DARK, 0, 4); B(cx + 2, 13.1, cz - 4, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [cx + 2, 13.1, cz - 4], s: 1.3, c: [0.8, 0.05, 0.05] });
+      B(cx + 2, 9.5, cz - 4, 0.15, 7, 0.15, SOOT, 0, 4); B(cx + 2, 13.1, cz - 4, 0.3, 0.3, 0.3, NEON.red, 4); WORLD.halos.push({ p: [cx + 2, 13.1, cz - 4], s: 1.3, c: [0.8, 0.05, 0.05] });
       WORLD.lights.push({ p: [cx - 7, 3, cz], r: 10, c: [0.4, 1.1, 1.0], shop: true }); }
     // the jetty: loading arms over the water, a manifold, bollards, and a tanker that will never sail
     for (const az of [88, 100]) {
@@ -4224,7 +4144,7 @@ function buildDistricts(C) {
       B(237, 12.5, 129, 12, 11, 7, [0.6, 0.6, 0.58], 0, 8); for (let i = 0; i < 3; i++) B(237, 9.5 + i * 3, 125.45, 10, 0.7, 0.1, [0.9, 0.75, 0.5], i === 2 ? 1.6 : 0.3);
       B(237, 20, 131, 2.6, 5, 2.6, [0.1, 0.1, 0.12], 0, 4); B(237, 22.7, 131, 2.8, 0.5, 2.8, [0.8, 0.15, 0.1], 0.2, 4);
       for (const o of [-2.5, 0, 2.5]) C.getG().cyl(M4.trs(M, 237 + o, 7.6, 104, Math.PI / 2, 0, 0, 0.7, 40, 0.7), [0.35, 0.36, 0.33], 0, 4, 8);
-      B(237, 14, 96, 0.3, 14, 0.3, DARK, 0, 4); B(237, 21.2, 96, 0.4, 0.4, 0.4, NEON.red, 4); WORLD.halos.push({ p: [237, 21.2, 96], s: 1.6, c: [0.8, 0.05, 0.05] });
+      B(237, 14, 96, 0.3, 14, 0.3, SOOT, 0, 4); B(237, 21.2, 96, 0.4, 0.4, 0.4, NEON.red, 4); WORLD.halos.push({ p: [237, 21.2, 96], s: 1.6, c: [0.8, 0.05, 0.05] });
       B(230.45, 5, 108, 0.1, 1.2, 12, [0.9, 0.9, 0.85], 0.1, 0);
       solid(230.5, 243.5, -3, 20, 80, 136); }
     // the fuel tanks that still bite (hazards.js blows them up and brings them back)
@@ -4252,7 +4172,7 @@ function buildDistricts(C) {
     { const g = C.getG(), fx = 172, fz = 158;
       g.cyl(M4.trs(M, fx, 23, fz, 0, 0, 0, 1.6, 46, 1.6), [0.4, 0.4, 0.4], 0, 4, 12); g.cyl(M4.trs(M, fx, 46.3, fz, 0, 0, 0, 2.2, 0.6, 2.2), [0.2, 0.2, 0.2], 0, 4, 12);
       for (let i = 0; i < 12; i++) B(fx, 3 + i * 3.6, fz - 0.7, 0.9, 0.1, 0.1, [0.9, 0.1, 0.08], 0.2, 0);
-      for (const a of [0.5, 2.6, 4.7]) C.getG().box(M4.align(M, fx, 40, fz, fx + Math.cos(a) * 26, 0, fz + Math.sin(a) * 26, 0.05, 0.05), DARK, 0, 4);
+      for (const a of [0.5, 2.6, 4.7]) C.getG().box(M4.align(M, fx, 40, fz, fx + Math.cos(a) * 26, 0, fz + Math.sin(a) * 26, 0.05, 0.05), SOOT, 0, 4);
       WORLD.flares.push([fx, 46.9, fz]); WORLD.halos.push({ p: [fx, 48.5, fz], s: 9, c: [1.1, 0.5, 0.12] }); WORLD.lights.push({ p: [fx, 44, fz], r: 40, c: [2.2, 1.0, 0.3] }); }
     for (const [x, z, rad, h] of [[122, 168, 9, 12], [150, 172, 11, 15], [196, 166, 8, 11], [218, 176, 10, 13]]) {
       C.getG().cyl(M4.trs(M, x, h / 2, z, 0, 0, 0, rad * 2, h, rad * 2), [0.3, 0.3, 0.28], 0, 8, 24);
@@ -4639,7 +4559,7 @@ function updateBow(dt, input) {
 }
 
 // ---- viewmodel rendering -------------------------------------------------
-const _bc = M4.create(), _bm = M4.create(), _lm = M4.create(), _wm = M4.create(), _p0 = [0, 0, 0], _p1 = [0, 0, 0];
+const _bc = M4.create(), _bm = M4.create(), _lm = M4.create();
 function vm(mesh, local, col, emit, skin) { const m = poolM(); M4.mul(m, _bm, local); drawItem(mesh, m, col, emit, 0, VM_ITEMS, skin); return m; }
 const GAUNT_DARK = [0.075, 0.08, 0.095], GAUNT_PLATE = [0.2, 0.21, 0.24];
 function vmBox(x, y, z, sx, sy, sz, col, emit, rx = 0, ry = 0, rz = 0, mesh = MESH.box) { M4.trs(_lm, x, y, z, rx, ry, rz, sx, sy, sz); return vm(mesh, _lm, col, emit); }
@@ -4681,7 +4601,6 @@ function drawHand(pos, carrying, col, led) {
   const wrist = [pos[0] + 0.045 * S, pos[1] - 0.03 * S, pos[2] + 0.075 * S], elbow = [pos[0] + 0.24, pos[1] - 0.22, pos[2] + 0.5];
   M4.align(_lm, wrist[0], wrist[1], wrist[2], elbow[0], elbow[1], elbow[2], 0.078, 0.072, 0, 0, 1); vm(MODEL.g_forearm, _lm, GAUNT_PLATE, [led[0] * 1.3, led[1] * 1.3, led[2] * 1.3], GAUNT_DARK);
 }
-const _hm = M4.create(), _bmSave = M4.create();
 
 function drawBowViewmodel(camM, time, player) {
   const B = BOW, A = ARROWS[B.type];
@@ -4789,7 +4708,6 @@ function drawBowViewmodel(camM, time, player) {
   drawHand(handPos, carrying, [0.09, 0.09, 0.1], A.color);
   vmToWorld(camM, handPos, B.handWorld);
 }
-function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
 
 // viewmodel is drawn with its own FOV; map a bow-local point to the world point that lands on the same pixel
 const VM_FOV = 60, _vc = [0, 0, 0];
@@ -4956,8 +4874,6 @@ const OUTFITS = {
   boss: [[[0.14, 0.15, 0.2], [0.1, 0.11, 0.16]]],
 };
 OUTFITS.spitter = OUTFITS.walker; OUTFITS.screamer = OUTFITS.walker; OUTFITS.climber = OUTFITS.runner;
-const CLOTHES = OUTFITS.walker.map(o => o[0]);
-const PANTS = [JEANS, BLACK, KHAKI, [0.2, 0.2, 0.22], [0.13, 0.16, 0.11]];
 const HAIRS = [[0.06, 0.05, 0.04], [0.16, 0.1, 0.06], [0.3, 0.27, 0.22], [0.05, 0.05, 0.06], [0.42, 0.35, 0.22], [0.34, 0.34, 0.33]];
 const ZOMBIES = [];
 const STEPN = { n: 0 };
@@ -5001,7 +4917,7 @@ function spawnZombie(type, x, z, wave) {
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
     R: { h: 0, hv: 0, t: 0, tv: 0, y: 0, yv: 0, l: 0, lv: 0 }, stumble: 0, legDmg: 0, crawl: false, crawlT: 0,
     // death physics
-    dv: V0(), pitch: 0, pitchV: 0, roll: 0, rollV: 0, crumple: 0, crumpleMode: false, pin: null, neckBleed: 0, fallBack: false,
+    dv: V0(), pitch: 0, pitchV: 0, roll: 0, rollV: 0, crumple: 0, crumpleMode: false, neckBleed: 0, fallBack: false,
     head: V0(), a: V0(), b: V0(), core: V0(), hipL: V0(), knL: V0(), ftL: V0(), hipR: V0(), knR: V0(), ftR: V0(),
   };
   // what each body looks like and how it moves: clothes, build, gait
@@ -5691,7 +5607,7 @@ function zFrame(z, part) { // 'head' -> neck frame, else torso frame (world matr
   return part === 'head' ? _F.neck : _F.tor;
 }
 function localize(z, part, pw, dir) {
-  if (ZRIG.ready) ensurePose(z); else drawZombieFramesOnly(z);
+  ensurePose(z);
   const F = zFrame(z, part);
   const inv = M4.invert(M4.create(), F); if (!inv) return null;
   return { lp: M4.pt(inv, pw[0], pw[1], pw[2], [0, 0, 0]), ld: M4.dir(inv, dir[0], dir[1], dir[2], [0, 0, 0]) };
@@ -5826,7 +5742,7 @@ function updateObjectives(dt) {
       if (o.y <= 0) { o.landed = true; AUD.land(1.5); burst(o.x, 0.3, o.z, 40, [0.3, 0.28, 0.26], 5, 0.9, 0.25, 3, 2, 1); flashLight(o.x, 1.5, o.z, [3, 1.4, 0.4], 14, 0.4); }
     } else {
       const near = d < 2.4, hold = near && INPUT.keys.KeyE;
-      if (hold) { o.prog += dt; o.tick -= dt; if (o.tick <= 0) { o.tick = 0.5; AUD.tick && AUD.tick(); } } else o.prog = Math.max(0, o.prog - dt * 0.5);
+      if (hold) { o.prog += dt; o.tick -= dt; if (o.tick <= 0) { o.tick = 0.5; AUD.tick(); } } else o.prog = Math.max(0, o.prog - dt * 0.5);
       // the flare keeps smoking, and the noise of a crate being forced draws them in
       if (Math.random() < dt * 14) emit(o.x + 0.5, 1.0, o.z + 0.4, rand(-0.2, 0.2) + WX.wind * 0.6, rand(1, 1.8), rand(-0.2, 0.2), rand(2, 3.5), [1.4, 0.2, 0.08], rand(0.25, 0.45), -0.25, 0.5, 0.7, 0.55);
       o.spawnT -= dt;
@@ -6105,7 +6021,7 @@ function updateHazards(dt) {
       t.fuse -= dt;
       const c = t.cook;
       if (c && d2 < 90 * 90) for (let k = 0; k < 3; k++) if (Math.random() < dt * 30) emit(c.x, c.y, c.z, c.nx * rand(4, 8) + rand(-0.6, 0.6), rand(0.4, 1.8), c.nz * rand(4, 8) + rand(-0.6, 0.6), rand(0.25, 0.45), [3, 1.2 + Math.random() * 0.5, 0.2], rand(0.2, 0.4), -1.5, 1.4, -0.3);
-      if (c && d2 < 35 * 35 && Math.random() < dt * 5) AUD.tick && AUD.tick();
+      if (c && d2 < 35 * 35 && Math.random() < dt * 5) AUD.tick();
       if (t.fuse <= 0) tankBlast(t);
     } else {
       if (t.burnT > 0) {
@@ -6226,7 +6142,6 @@ const ZRIG = { ready: false, clips: {}, geos: {}, parts: {}, boneNames: [], inve
 const CLIP_RANGES = { walk: [0, 36, 1], run: [42, 60, 1], heavy: [66, 110, 1], boss_walk: [116, 172, 1], idle: [178, 238, 1], attack: [244, 274, 0], crawl: [280, 320, 1], crawl_attack: [326, 350, 0], slam: [356, 404, 0], roar: [410, 452, 0],
   walk_b: [458, 498, 1], walk_c: [504, 540, 1], run_b: [546, 564, 1], idle_b: [570, 642, 1] };
 const PARTMAP = [['torso_', 0], ['uarm_', 1], ['farm', 2], ['pelvis', 3], ['thigh', 4], ['shin', 4], ['head_', 5], ['jaw', 6], ['brute_helmet', 8], ['brute_', 7], ['boss_hump', 9], ['boss_arm', 9], ['walker_ribs', 9], ['runner_tendons', 9], ['brute_breach', 9]];
-const LOGICAL = ['root', 'pelvis', 'spine', 'neck', 'jaw', 'shoulderL', 'shoulderR', 'elbowL', 'elbowR', 'hipL', 'hipR', 'kneeL', 'kneeR'];
 
 async function loadZombieRig(url = 'models/zombie.glb') {
   let gltf;
@@ -6354,7 +6269,6 @@ function makeRig(z) {
     mesh.add(root);
     mesh.bind(new THREE.Skeleton(bones, T.inverses), T.bindMatrix);
     const B = {}; for (const b of bones) B[T.logicalOf[b.name]] = b;
-    B.shoulderL = B.shoulderL || B['shoulder.L']; // defensive
     const mixer = new THREE.AnimationMixer(mesh);
     // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
     const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
@@ -6398,11 +6312,10 @@ function zWantClip(z) {
   return ZRIG.clips[z.idleClip] ? z.idleClip : 'idle';
 }
 
-const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), _qa = new THREE.Quaternion();
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
 function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
-const _hv = [0, 0, 0];
 const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
 
 function poseZombieRig(z, dt, time) {
@@ -6529,7 +6442,6 @@ function zLife(z, r, dt, time) {
   z.bank = (z.bank || 0) + (clamp(dt > 0 ? dyaw / dt : 0, -3, 3) * 0.06 - (z.bank || 0)) * k;
   addRot(B.spine, 0, 0, -z.bank * (z.type === 'runner' ? 1.6 : 1));
 }
-const _v3 = (a) => a;
 function setV(v, c, k = 1) { v.set(c[0] * k, c[1] * k, c[2] * k); }
 // scratch colours for drawZombieRig (copied straight into the material's uniforms, never kept)
 const _vein = [0, 0, 0], _skin = [0, 0, 0], _cloth = [0, 0, 0], _pants = [0, 0, 0], _cSkin = [0, 0, 0], _cCloth = [0, 0, 0], _cPants = [0, 0, 0];
@@ -6612,8 +6524,7 @@ function drawZombieRig(z, time) {
    three.js scene graph + frame pipeline
    world pass (MSAA, baked occlusion) -> viewmodel pass -> bloom -> grade
    ============================================================ */
-const MAX_PL = 16;             // point-light pool (static shop/fountain lights + dynamic flashes)
-const R3 = { W: 0, H: 0, quality: -1, envDirty: true, built: false, tick: 0 };
+const R3 = { W: 0, H: 0, quality: -1, tick: 0 };
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
 function onThemeChanged() { ENV_DIRTY = true; }
@@ -6814,7 +6725,7 @@ function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
   // the sun's shadow box follows the player (snapped so the shadow texels don't swim)
-  const sd = _n3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
+  const sd = norm3(T.sunDir), ox = Math.round(cam[0] / 4) * 4, oz = Math.round(cam[2] / 4) * 4;
   sun.color.setRGB(T.sun[0], T.sun[1], T.sun[2]); sun.position.set(ox + sd[0] * 120, sd[1] * 120, oz + sd[2] * 120); sun.target.position.set(ox, 0, oz);
   sun.shadow.autoUpdate = false;
   // lamps: nearest ones get the spot pool (the first few cast shadows); the same tile query also yields the static lights below
@@ -7020,57 +6931,6 @@ function addWorldChunks(geo, castShadow, receiveShadow, name) {
     mesh.userData.streamRadius = streamRadius;
     mesh.matrixAutoUpdate = false; mesh.frustumCulled = true; scene.add(mesh); WORLD_MESHES.push(mesh);
   }
-}
-
-/* ---------------- Meshy hero sakuras ----------------
-   A handful of big downloaded trees (WORLD.heroTrees, placed in districts.js: x, z, height, yaw) share one geometry
-   and one draw call. If the GLB carries its own textures they are used (colour, normal, roughness, and the painted
-   cyan neon glows); a geometry-only GLB is split into pieces instead, the largest being the trunk and the rest blossom. */
-async function loadHeroSakuras() {
-  const spots = WORLD.heroTrees || []; if (!spots.length) return;
-  try {
-    const gltf = await new GLTFLoader().loadAsync('models/sakura.glb?v=' + (typeof SAKURA_VER === 'string' ? SAKURA_VER : '0'));
-    let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
-    if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
-    gltf.scene.updateMatrixWorld(true);
-    const geo = srcMesh.geometry.clone(); geo.applyMatrix4(srcMesh.matrixWorld);
-    if (!geo.index) { const n0 = geo.attributes.position.count, ix = new Uint32Array(n0); for (let i = 0; i < n0; i++) ix[i] = i; geo.setIndex(new THREE.BufferAttribute(ix, 1)); }
-    if (!geo.attributes.normal) geo.computeVertexNormals();
-    const pos = geo.attributes.position, idx = geo.index.array, n = pos.count;
-    const sm = srcMesh.material || {}, tex = sm.map || null;
-    const col = new Float32Array(n * 3), nqm = new Float32Array(n * 2);
-    if (tex) { col.fill(1); }
-    else {
-      const parent = new Int32Array(n), size = new Int32Array(n); for (let i = 0; i < n; i++) { parent[i] = i; size[i] = 1; }
-      const root = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
-      const join = (a, b) => { a = root(a); b = root(b); if (a === b) return; if (size[a] < size[b]) { const t = a; a = b; b = t; } parent[b] = a; size[a] += size[b]; };
-      for (let i = 0; i < idx.length; i += 3) { join(idx[i], idx[i + 1]); join(idx[i], idx[i + 2]); }
-      let trunk = 0; for (let i = 1; i < n; i++) if (size[root(i)] > size[root(trunk)]) trunk = i; trunk = root(trunk);
-      for (let i = 0; i < n; i++) {
-        const r = root(i), bark = r === trunk, v = ((r * 16807) & 255) / 255, k = bark ? 0.75 + 0.18 * v : 0.78 + 0.22 * v;
-        col[i * 3] = bark ? 0.12 * k : 1.0 * k; col[i * 3 + 1] = bark ? 0.065 * k : (0.38 + 0.3 * v) * k; col[i * 3 + 2] = bark ? 0.055 * k : (0.58 + 0.26 * v) * k;
-        nqm[i * 2] = bark ? 0.02 : 0.42; nqm[i * 2 + 1] = bark ? 13 : 0;
-      }
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.setAttribute('nqm', new THREE.BufferAttribute(nqm, 2));
-    geo.computeBoundingBox();
-    // stand the model on its trunk base at the origin, 1 unit tall: the per-tree height becomes the scale
-    const bb = geo.boundingBox, H = Math.max(1e-3, bb.max.y - bb.min.y); let cx = 0, cz = 0, cn = 0;
-    for (let i = 0; i < n; i++) if (pos.getY(i) < bb.min.y + H * 0.06) { cx += pos.getX(i); cz += pos.getZ(i); cn++; }
-    cx = cn ? cx / cn : (bb.min.x + bb.max.x) / 2; cz = cn ? cz / cn : (bb.min.z + bb.max.z) / 2;
-    geo.translate(-cx, -bb.min.y, -cz); geo.scale(1 / H, 1 / H, 1 / H); geo.computeBoundingBox(); geo.computeBoundingSphere();
-    let mat = MAT.static;
-    if (tex) {
-      mat = nqMaterial('static'); mat.map = tex; tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8;
-      if (sm.normalMap) { mat.normalMap = sm.normalMap; mat.normalScale.set(1, 1); }
-      mat.defines.NQ_MAPGLOW = '2.6'; mat.side = sm.side || THREE.FrontSide; mat.needsUpdate = true;
-    }
-    const trees = new THREE.InstancedMesh(geo, mat, spots.length), m = new THREE.Matrix4();
-    for (let i = 0; i < spots.length; i++) { const [x, z, h, ry] = spots[i]; m.compose(new THREE.Vector3(x, -0.05, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ry || 0), new THREE.Vector3(h, h, h)); trees.setMatrixAt(i, m); }
-    trees.computeBoundingSphere(); geo.boundingSphere = trees.boundingSphere.clone();   // world streaming reads the geometry's sphere
-    trees.name = 'meshy-hero-sakuras'; trees.castShadow = true; trees.receiveShadow = true; trees.userData.streamRadius = 300; trees.instanceMatrix.needsUpdate = true;
-    scene.add(trees); WORLD_MESHES.push(trees); updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
-  } catch (e) { console.warn('hero sakura load failed', e); }
 }
 
 /* ---------------- sakura flower cards ----------------
@@ -7383,7 +7243,6 @@ function buildWorld3() {
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
   buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
-  R3.built = true;
 }
 
 /* ---------------- shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down ---------------- */
@@ -7509,8 +7368,6 @@ function updateEnv(cam) {
 /* ---------------- light you can see: cones under lamps, halos round bulbs ---------------- */
 const VOL_U = { uLamp: { value: new THREE.Color() }, uVolK: { value: 1 } };
 const coneMat = coneMaterialGPU(VOL_U);
-const CONES = [];
-const HALOS = [];
 function buildVolumes() {
   // every lamp cone in one mesh: they share a material and blend additively (order-free), so one draw (two: back
   // faces, then front) replaces two per cone; the cones are baked in world space, their shading uses no model matrix
@@ -7523,7 +7380,7 @@ function buildVolumes() {
   if (cones.length) {
     const g = cones.length > 1 ? mergeGeometries(cones) : cones[0]; g.computeBoundingSphere(); g.computeBoundingBox(); g.userData.cullBox = g.boundingBox;
     const m = new THREE.Mesh(g, coneMat); m.name = 'cones'; m.renderOrder = 8; m.frustumCulled = true; m.matrixAutoUpdate = false;
-    scene.add(m); CONES.push(m);
+    scene.add(m);
   }
   const mat = haloMaterialGPU(VOL_U);
   // all halos in one instanced draw: additive (order-free) camera-facing quads, a few hundred of them
@@ -7534,7 +7391,7 @@ function buildVolumes() {
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
-    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh); HALOS.push(mesh);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh);
   }
 }
 
@@ -7543,9 +7400,7 @@ const reflRT = new THREE.RenderTarget(4, 4, { type: THREE.HalfFloatType });
 const reflCam = new THREE.PerspectiveCamera(); reflCam.matrixAutoUpdate = false; reflCam.matrixWorldAutoUpdate = false;
 reflCam.coordinateSystem = renderer.coordinateSystem;   // the projection is copied from the main camera: never rebuilt from reflCam's own fov
 const _S = new THREE.Matrix4().makeScale(1, -1, 1);
-const BLACK_TEX = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); BLACK_TEX.needsUpdate = true;
-const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1, w: 0, h: 0 };
-NQU.uRefl.value = BLACK_TEX;
+const REFL_CACHE = { valid: false, frame: 0, matrix: new THREE.Matrix4(), quality: -1 };
 const MIRROR_NEAR = 70, MIRROR_SMALL = /^(props|garden|forest|suburbs|glass|blossoms)/, _mirrorOff = [];
 function renderReflection(r) {
   const W = Math.max(4, R3.W), H = Math.max(4, R3.H);
@@ -7559,15 +7414,14 @@ function renderReflection(r) {
   const stale = R3.tick - REFL_CACHE.frame >= cadence;
   const mode = SETTINGS.quality;
   const refresh = !REFL_CACHE.valid || REFL_CACHE.quality !== mode || movedFar || turnedFar || stale;
-  if (!refresh) { NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  if (!refresh) { NQU.uReflOn.value = 1;
     TEXN.refl.value = reflRT.texture;
     return; }
   reflCam.projectionMatrix.copy(camera.projectionMatrix); reflCam.projectionMatrixInverse.copy(camera.projectionMatrixInverse);
   reflCam.matrixWorld.copy(_S).multiply(camera.matrixWorld).multiply(_S); reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
-  NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX;
-  TEXN.refl.value = BLACK_TEX;   // a pass can't sample the target it draws into
+  NQU.uReflOn.value = 0; TEXN.refl.value = GPU_BLACK;   // a pass can't sample the target it draws into
   const f = THEME.fog; r.setRenderTarget(reflRT); r.setClearColor(new THREE.Color(f[0], f[1], f[2]), 1); r.clear(true, true, false);
-  const sm = renderer.shadowMap.autoUpdate; renderer.shadowMap.needsUpdate = false;
+  renderer.shadowMap.needsUpdate = false;
   partPoints.visible = false; rainLines.visible = false; snowPts.visible = false;
   const decalVis = DECAL_POOL.map(m => m.visible); for (const m of DECAL_POOL) m.visible = false;
   const hiddenRigs = [];
@@ -7581,10 +7435,10 @@ function renderReflection(r) {
   for (const m of mirrorOff) m.visible = true;
   for (const m of hiddenRigs) m.visible = true; for (let i = 0; i < DECAL_POOL.length; i++) DECAL_POOL[i].visible = decalVis[i];
   partPoints.visible = true; rainLines.visible = true; snowPts.visible = true;
-  NQU.uRefl.value = reflRT.texture; NQU.uReflOn.value = 1; NQU.uRes.value.set(R3.W, R3.H);
+  NQU.uReflOn.value = 1;
   TEXN.refl.value = reflRT.texture;
   REFL_CACHE.valid = true; REFL_CACHE.frame = R3.tick; REFL_CACHE.matrix.copy(camera.matrixWorld);
-  REFL_CACHE.quality = mode; REFL_CACHE.w = W; REFL_CACHE.h = H;
+  REFL_CACHE.quality = mode;
 }
 
 /* ---------------- post: passes ---------------- */
@@ -7755,7 +7609,7 @@ function renderGPU(T, W, H, time) {
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
   try {
     GPU_PROF.tag = 'reflection';
-    if (THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; NQU.uRefl.value = BLACK_TEX; TEXN.refl.value = BLACK_TEX; }
+    if (THEME.wet > 0.2) renderReflection(renderer); else { NQU.uReflOn.value = 0; TEXN.refl.value = GPU_BLACK; }
     GPU_PROF.tag = null; renderer.setRenderTarget(null);
     const f = T.fog; renderer.setClearColor(_clr.setRGB(f[0], f[1], f[2]), 0);   // alpha 0: the bow pass lays over the world by its alpha
     GPOST.pipe.render();
@@ -7823,8 +7677,8 @@ const upLv = (id) => LOADOUT.levels[id] || 0;
 function loadoutReset() { LOADOUT.levels = {}; LOADOUT.equipped = []; AQ.tab = 'arrows'; AQ.sel = 'piercer'; AQ.msg = ''; }
 
 // ---- screen state + design tokens ----
-const AQ = { tab: 'arrows', sel: 'piercer', msg: '', sec: -1, built: false };
-const AQC = { accent: '#38E1F2', glow30: 'rgba(56,225,242,0.30)', glow35: 'rgba(56,225,242,0.35)', glow45: 'rgba(56,225,242,0.45)', tabOn: 'rgb(17,43,55)', line: 'rgba(255,255,255,0.12)', line22: 'rgba(255,255,255,0.22)', dim: '#A3AAC2', gold: '#FFC857', pink: '#FF6FB4' };
+const AQ = { tab: 'arrows', sel: 'piercer', msg: '', sec: -1 };
+const AQC = { accent: '#38E1F2', dim: '#A3AAC2', gold: '#FFC857', pink: '#FF6FB4' };
 const aqItem = (id) => ARMORY.find((i) => i.id === id);
 const aqPad = (n) => String(n).padStart(2, '0');
 
@@ -8026,7 +7880,6 @@ const PLAYER = {
   dmgFlash: 0, hurtDirs: [], vmIn: 0, fov: 78, lastHurt: 0, dead: false, deathT: 0, beat: 0,
   // where a sound happens, for AUD's 3D panner (height defaults to roughly head level)
   at(x, z, y) { return { x, y: y === undefined ? this.y + 1.4 : y, z }; },
-  panOf(x, z) { const dx = x - this.x, dz = z - this.z, L = Math.hypot(dx, dz) || 1; return clamp((dx * Math.cos(this.yaw) - dz * Math.sin(this.yaw)) / L, -1, 1); },
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
     d *= 1 - this.armor;   // Armor Plating
@@ -8272,7 +8125,7 @@ function updateProjectiles(dt) {
       const dmg = dmgBase * mult;
       const dir = a.dir.slice();
       const wasAlive = !z.dead;
-      if (hitPart === 'head' || hitPart === 'core') { GAME.hitMarker(true); if (hitPart === 'head') GAME.headHits++; }
+      if (hitPart === 'head' || hitPart === 'core') GAME.hitMarker(true);
       else GAME.hitMarker(false);
       GAME.hits++;
       // stick arrow into zombie (not rail)
@@ -8420,12 +8273,12 @@ function drawProjectiles() {
 
 /* ---------------- game state ---------------- */
 const GAME = {
-  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, headHits: 0, combo: 0, comboT: 0,
+  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, combo: 0, comboT: 0,
   best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
-    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'headHits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
+    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
     loadoutReset(); RECQ.length = 0; ARCS.length = 0; this.lastType = 0;
     ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
@@ -8494,8 +8347,8 @@ const GAME = {
         }
       }
     }
-    // 25 s between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
-    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick && AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
+    // INTERMISSION seconds between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
+    if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
     if (this.armoryT > 0 && this.state === 'playing' && this.intermission) { this.armoryT -= dt; if (this.armoryT <= 0) this.openShop(); }
     if (this.state === 'shop') armoryTick();
     if (this.bannerT > 0) this.bannerT -= dt;
@@ -8796,7 +8649,7 @@ function step(dt) {
       if (z.rig && z.state !== 'dying' && ((zd2 > 8100 && phase % 4) || (zd2 > 2025 && phase % 2))) continue;   // half rate past 45 m, quarter past 90 m
       poseZombieRig(z, z.chill > 0 && z.chillK <= 0 && !z.dead ? 0 : z._pdt, t); z._pdt = 0; } } updateProjectiles(dt); updateArcs(dt); updateZProj(dt); updateFires(dt); updatePickups(dt); updateDebris(dt);
   }
-  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateCity(dt); updateDecals(dt); }
+  if (GAME.state !== 'paused') { updateParticles(dt); updateLights(dt); updateFloats(dt); updateDecals(dt); }
   if (NAV.ready) { NAV.t -= dt; if (NAV.t <= 0 && GAME.state !== 'title') { NAV.t = 0.3; navUpdate(PLAYER.x, PLAYER.z); } }
   if (GAME.state !== 'paused' && GAME.state !== 'shop') { updateSupplies(dt); updateAmbient(dt); updateObjectives(dt); updateWeather(dt); updateHazards(dt); }
   const dnow = districtAt(PLAYER.x, PLAYER.z); if (dnow !== PLAYER.district) { const first = !PLAYER.district; PLAYER.district = dnow; if (!first && GAME.state === 'playing') GAME.toast(dnow.name, '#bff6ff'); }
@@ -8844,9 +8697,8 @@ function frame(now) {
 function setCamera(time) {
   const P = PLAYER;
   let x = P.x, y = P.y + P.eyeH - (P.sink || 0), z = P.z, yaw = P.yaw, pitch = P.pitch, roll = P.roll;
-  if (GAME.state === 'title' || GAME.attract) {
+  if (GAME.state === 'title') {
     const a = time * 0.06; x = Math.sin(a) * 19; z = Math.cos(a) * 19; y = 3.2 + Math.sin(time * 0.2) * 0.6; yaw = a + 0.35; pitch = 0.1; roll = 0;
-    if (GAME.camOverride) ({ x, y, z, yaw, pitch, roll } = GAME.camOverride);
   } else if (GAME.state === 'over') {
     const k = easeOut(Math.min(1, P.deathT / 1.2)); y = lerp(P.y + 1.62, 0.35, k); roll = k * 1.2; pitch = lerp(P.pitch, 0.3, k);
   }
@@ -8941,7 +8793,6 @@ async function boot() {
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await Promise.all([
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
-    loadHeroSakuras(),
     loadMeshyCars(),
     loadMeshyTrees(),
     loadMeshyProps(),
@@ -8972,14 +8823,13 @@ window.NQ = {
   renderOnce() { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); },
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
-  AUD,
   bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, PERF, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,
   freeze(b) { GAME.frozen = b; },
   run(n, dt = 1 / 60) { for (let i = 0; i < n; i++) step(dt); },
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => BLACK_TEX,
+  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };
