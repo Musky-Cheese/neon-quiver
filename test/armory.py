@@ -36,7 +36,7 @@ with sync_playwright() as pw:
     pg.keyboard.press('KeyE')
     check(J("() => NQ.GAME.state") == 'shop', 'E at a terminal opens the armory')
     check(J("() => !document.getElementById('scr-shop').hidden"), 'armory screen visible')
-    t = J("() => document.getElementById('aqTimer').textContent"); check(t.startswith('0:4'), f'countdown shows {t}')
+    t = J("() => document.getElementById('aqTimer').textContent"); check(t.startswith('0:5'), f'countdown shows {t}')   # 60 s, minus the ~3 s spent walking up to the terminal
     # buy Tracer (90) if affordable, else just verify the "Need X more" label
     J("() => { NQ.GAME.scrap = 1000; NQ.armoryPickTab('arrows'); NQ.armoryPick('tracer'); }")
     check(J("() => NQ.armoryBuy()"), 'buy Tracer')
@@ -86,7 +86,7 @@ with sync_playwright() as pw:
     for (w, h) in [(1920, 1080), (1366, 768)]:
         b, pg, errs = open_game(pw, url, w, h, capture=True, loop=False)
         pg.evaluate("""() => { NQ.play(); NQ.GAME.wave = 7; Object.assign(NQ.LOADOUT.levels, { piercer: 1, cryo: 2, drawspeed: 2, quiver: 1, maxhp: 1 });
-            NQ.LOADOUT.equipped.push('piercer', 'cryo'); NQ.GAME.scrap = 640; NQ.GAME.intermission = true; NQ.GAME.interT = 45; NQ.GAME.openShop(); NQ.armoryPick('cryo'); }""")
+            NQ.LOADOUT.equipped.push('piercer', 'cryo'); NQ.GAME.scrap = 640; NQ.GAME.intermission = true; NQ.GAME.interT = 60; NQ.GAME.openShop(); NQ.armoryPick('cryo'); }""")
         pg.evaluate("() => document.fonts.ready")
         pg.wait_for_timeout(400)
         pg.screenshot(path=os.path.join(OUT, f'armory-{w}x{h}.png'))

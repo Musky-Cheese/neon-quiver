@@ -7863,7 +7863,7 @@ for (const [k, b] of VOLS) AUD.vol[b] = clamp(+SETTINGS[k] || 0, 0, 1);
 
 /* ---------------- player ---------------- */
 const REGEN = { delay: 6 };   // out of combat = 6 s without taking a hit; the rate (1 HP every 4 s at base) comes from the armory
-const INTERMISSION = 45;      // seconds between waves, shown in the Armory and the HUD (Start wave / N skips it)
+const INTERMISSION = 60;      // seconds between waves, shown in the Armory and the HUD (Start wave / N skips it)
 const EYE = 1.62, CROUCH_DROP = 0.55;
 function newAmmo() { const a = ARROWS.map(() => 0); a[0] = 20; return a; }
 const PLAYER = {

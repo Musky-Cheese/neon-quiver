@@ -373,7 +373,7 @@ button, select, input { font-family: var(--f); }
           <h1>Armory</h1>
         </div>
         <div class="aq-headr">
-          <div class="aq-timer"><div class="aq-lbl">NEXT WAVE IN</div><div class="aq-time" id="aqTimer" role="timer">0:45</div></div>
+          <div class="aq-timer"><div class="aq-lbl">NEXT WAVE IN</div><div class="aq-time" id="aqTimer" role="timer">1:00</div></div>
           <div class="aq-scrap">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FFC857" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8 5v10l-8 5-8-5V7z"></path><path d="M12 7l4 2.5v5L12 17l-4-2.5v-5z"></path></svg>
             <div class="aq-scrapcol"><div class="aq-scrapn" id="aqScrap">0</div><div class="aq-lbl aq-lbl-s">SCRAP</div></div>
@@ -462,7 +462,7 @@ button, select, input { font-family: var(--f); }
    ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var GAME_JS = "game.js?v=8aa21e63cb";   // build.py: 'game.js?v=…'
+  var GAME_JS = "game.js?v=d3a90a0f3f";   // build.py: 'game.js?v=…'
   var q = new URLSearchParams(location.search), forced = q.get('gpu');
   var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 
