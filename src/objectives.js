@@ -85,7 +85,7 @@ function updateObjectives(dt) {
   }
   const o = OBJ.cur; if (!o) return;
   o.t += dt;
-  const d = Math.hypot(PLAYER.x - o.x, PLAYER.z - o.z), maxAlive = Math.min(36, 9 + GAME.wave * 2);
+  const d = Math.hypot(PLAYER.x - o.x, PLAYER.z - o.z), maxAlive = GAME.maxAlive();
   if (o.type === 'uplink') {
     const inside = d < o.r;
     if (inside) o.prog += dt;

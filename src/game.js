@@ -453,7 +453,7 @@ const GAME = {
     this.wave++;
     refillForWave();
     const boss = this.wave % 5 === 0, M = mutRoll(this.wave);   // a sector alert bends this wave (objectives.js)
-    const n = Math.round((6 + this.wave * 3.2) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
+    const n = Math.round((8 + this.wave * 4) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : M ? `SECTOR ALERT · ${M.name} · ${M.sub}` : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : M ? M.col : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
@@ -489,10 +489,11 @@ const GAME = {
     }
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
+  maxAlive() { return Math.min(44, 11 + Math.round(this.wave * 2.5)); },   // how many may be up at once (objectives' extra spawns respect it too)
   aliveCount() { let n = 0; for (const z of ZOMBIES) if (!z.dead) n++; return n; },
   update(dt) {
     if (this.state === 'playing') {
-      const maxAlive = Math.min(36, 9 + this.wave * 2);
+      const maxAlive = this.maxAlive();
       if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
