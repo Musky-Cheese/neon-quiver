@@ -84,8 +84,15 @@ class NQLighting extends THREE.PhysicalLightingModel {
     super.indirect(builder);
   }
 }
-// per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included
-const zRef = (k, t) => reference('userData.u.' + k + '.value', t);
+// per-body values of the infected live on the mesh (rig.js), so one compiled pipeline serves every zombie, shadow pass included.
+// The arrays need a fixed name: WGSL names an unnamed array uniform after a fresh node id, which made each body's shader unique.
+const Z_ARRAYS = new Set(['uPT', 'uPS', 'uPE', 'uHide']);
+const zRef = (k, t) => { const r = reference('userData.u.' + k + '.value', t); return Z_ARRAYS.has(k) ? r.setName('z_' + k) : r; };
+// The same goes for three's skinning, which reads each skeleton's bones through an unnamed buffer: every body compiled its own
+// vertex program for every pass it entered (world, mirror, each shadow-casting lamp), a ~30 ms stall mid-wave each time. With a
+// fixed name all bodies share one program per pass; each mesh still binds its own bone matrices.
+{ const set = THREE.ReferenceNode.prototype.setNodeType;
+  THREE.ReferenceNode.prototype.setNodeType = function (t) { if (this.name === null && this.property === 'skeleton.boneMatrices') this.name = 'boneMatrices'; return set.call(this, t); }; }
 let ZOMBIE_POSITION = null;
 class NQMaterial extends THREE.MeshStandardNodeMaterial {
   constructor(kind) {
