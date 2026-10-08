@@ -173,7 +173,7 @@ function buildDistricts(C) {
   B(76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each NIGHT MARKET sign reads on its own side, not mirrored through the other
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(billboardTexture(2), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
+  addSign(billboardTexture(4), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1, 1, 1], 1, true);
   WORLD.supplies.push({ kind: 'terminal', x: 79, z: 25, ry: Math.PI / 2 + 0.3, d: 'market' }, { kind: 'cache', x: 134, z: -2, d: 'market' }, { kind: 'cache', x: 108, z: -27, d: 'market' });
 
 
