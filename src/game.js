@@ -431,12 +431,12 @@ function drawProjectiles() {
 
 /* ---------------- game state ---------------- */
 const GAME = {
-  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, armoryT: 0, kills: 0, headshots: 0, shots: 0, hits: 0, combo: 0, comboT: 0,
+  state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, kills: 0, headshots: 0, shots: 0, hits: 0, combo: 0, comboT: 0,
   best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
-    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'combo', 'comboT', 'bossCount', 'armoryT']) this[k] = 0;
+    for (const k of ['wave', 'score', 'scrap', 'kills', 'headshots', 'shots', 'hits', 'combo', 'comboT', 'bossCount']) this[k] = 0;
     loadoutReset(); RECQ.length = 0; ARCS.length = 0; this.lastType = 0;
     ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; DECALS.length = 0; DEBRIS.length = 0; this.boss = null; this.intermission = false; this.interT = 0; for (const sp of WORLD.supplies) sp.cd = 0; this.clearedShown = false; this.bossPending = 0; this.toasts = []; this.bannerT = 0; this.toSpawn = 0; document.getElementById('bossbar').hidden = true;
     Object.assign(PLAYER, { x: 0, y: 0, z: 14, vx: 0, vz: 0, vy: 0, yaw: 0, pitch: 0.02, dead: false, deathT: 0, dmgFlash: 0, vmIn: 0, hurtDirs: [] });
@@ -449,7 +449,7 @@ const GAME = {
   },
   startWave() {
     if (this.state !== 'playing') return;
-    this.intermission = false; this.clearedShown = false; this.armoryT = 0;
+    this.intermission = false; this.clearedShown = false;
     this.wave++;
     refillForWave();
     const boss = this.wave % 5 === 0, M = mutRoll(this.wave);   // a sector alert bends this wave (objectives.js)
@@ -501,14 +501,13 @@ const GAME = {
         this.clearT += dt;
         if (this.clearT > 0.4 && !this.clearedShown) {
           const M = mutDef(); this.clearedShown = true; const bonus = Math.round((20 + this.wave * 6) * (M ? M.bonus : 1)); this.scrap += bonus; this.score += bonus * 12;
-          this.showBanner('WAVE CLEARED', M ? `+${bonus} SCRAP · ${M.name} BONUS · ARMORY OPENING` : `+${bonus} SCRAP · ARMORY OPENING`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
-          this.intermission = true; this.interT = INTERMISSION; this.armoryT = 1.8;   // a beat to see the banner, then the Armory opens
+          this.showBanner('WAVE CLEARED', M ? `+${bonus} SCRAP · ${M.name} BONUS · ARMORY TERMINALS ONLINE` : `+${bonus} SCRAP · ARMORY TERMINALS ONLINE`, '#29e7ff'); AUD.cleared(); AUD.intensity = 0.35; hudScore();
+          this.intermission = true; this.interT = INTERMISSION;   // the Armory only opens at a terminal (E), never on its own
         }
       }
     }
     // INTERMISSION seconds between waves; the clock keeps running while you shop, and the next wave kicks you out of the armory
     if (this.intermission && (this.state === 'playing' || this.state === 'shop')) { const t0 = this.interT; this.interT -= dt; if (this.state === 'playing' && Math.ceil(t0) !== Math.ceil(this.interT) && this.interT > 0 && this.interT <= 5) AUD.tick(); if (this.interT <= 0) { this.intermission = false; this.clearedShown = false; if (this.state === 'shop') this.closeShop(); else this.startWave(); } }
-    if (this.armoryT > 0 && this.state === 'playing' && this.intermission) { this.armoryT -= dt; if (this.armoryT <= 0) this.openShop(); }
     if (this.state === 'shop') armoryTick();
     if (this.bannerT > 0) this.bannerT -= dt;
     this.hm.t = Math.max(0, this.hm.t - dt);
@@ -545,7 +544,7 @@ const GAME = {
   showBanner(title, sub, color) { this.banner = { title, sub, color }; this.bannerT = 3; },
   openShop() {
     if (this.state !== 'playing') return;
-    this.state = 'shop'; this.armoryT = 0; AUD.drawStop(); INPUT.mouseDown = false; INPUT.keys = {}; HOOK.aiming = false; HOOK.aim = null; BOW.state = 'ready'; BOW.draw = 0;
+    this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; INPUT.keys = {}; HOOK.aiming = false; HOOK.aim = null; BOW.state = 'ready'; BOW.draw = 0;
     if (document.exitPointerLock) document.exitPointerLock(); setScreen('shop'); armoryOpen(); AUD.armory();
   },
   closeShop() { if (this.state !== 'shop') return; setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // Esc keeps the countdown running
