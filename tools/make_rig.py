@@ -199,7 +199,7 @@ def pose_for(clip, t, kind):
     hipY = abs(c) * 0.04 - 0.02
     knLa = max(0, -c) * 0.95 + 0.08 + 0.12 * max(0, c) * max(0, w)
     knRa = max(0, c) * 0.95 + 0.08 + 0.12 * max(0, -c) * max(0, -w)
-    pelRx = 0.0; pelRz = c * 0.06; roll = 0.0; jaw = 0.15; spineRz = -pelRz * 0.7
+    pelRx = 0.0; pelRz = c * 0.06; roll = 0.0; jaw = 0.15; spineRz = -pelRz * 0.7; fwd = 0.0
     if kind == 'walker':
         if clip == 'walk':        # shamble: arms hanging and swinging loosely, head lolling forward
             shL = -0.25 - w * 0.22; shR = -0.3 + w * 0.2; elL, elR = -0.3 - 0.1 * max(0, -w), -0.45 - 0.1 * max(0, w)
@@ -238,15 +238,24 @@ def pose_for(clip, t, kind):
         else:                     # idle_b: hunched, sniffing the air, head sweeping side to side
             lean = 0.5; shL = shR = -0.12; elL = elR = -0.2; headRx = -0.25 + 0.1 * math.sin(p * 4); headRy = 0.55 * math.sin(p); roll = 0.1 * math.sin(p * 2)
             jaw = 0.3 + 0.1 * math.sin(p * 6)
-    if clip == 'attack':          # wind up, lunge, grab and bite, recover
+    if clip == 'attack':          # rear back with claws up, lunge a step in, arms driving at the throat, clutch and bite, recover
+        # The game hits at t = 0.55, just after full reach. Shoulder angles are relative to the spine, so they carry the
+        # lean (plus the game's hunch layer) to keep the arms level with the player instead of pointing at the floor.
         a = t
-        up = smooth(a / 0.35); lun = smooth((a - 0.3) / 0.25); rec = smooth((a - 0.68) / 0.32)
-        k = lun * (1 - rec)
-        shL = lerp(lerp(-0.3, -1.9, up), -1.25, lun); shR = lerp(lerp(-0.3, -1.8, up), -1.15, lun)
-        shL = lerp(shL, -0.3, rec); shR = lerp(shR, -0.3, rec)
-        elL = lerp(-0.3, -1.25, k); elR = lerp(-0.35, -1.35, k); spread = 0.18 - 0.1 * k
-        lean = lerp(lerp(0.3, 0.08, up * (1 - lun)), 0.62, k); headRx = lerp(-0.2 * up, 0.35, k); jaw = 0.25 + 0.7 * smooth((a - 0.45) / 0.12) * (1 - rec)
-        hipLa = -0.35 * k; knLa = 0.1 + 0.25 * k; hipRa = 0.22 * k; knRa = 0.12 + 0.1 * k; hipY = -0.05 * k; twist = 0.2 * math.sin(a * math.pi)
+        ant = smooth(a / 0.3); hit = ease_out((a - 0.3) / 0.18); grab = smooth((a - 0.5) / 0.14); rec = smooth((a - 0.7) / 0.3)
+        lean = lerp(lerp(lerp(lerp(0.3, 0.02, ant), 0.42, hit), 0.5, grab), 0.3, rec)
+        shL = lerp(lerp(lerp(lerp(-0.3, -1.7, ant), -2.3, hit), -1.95, grab), -0.3, rec)
+        shR = lerp(lerp(lerp(lerp(-0.3, -1.6, ant), -2.2, hit), -1.9, grab), -0.3, rec)
+        elL = lerp(lerp(lerp(lerp(-0.3, -1.05, ant), -0.12, hit), -0.75, grab), -0.3, rec)
+        elR = lerp(lerp(lerp(lerp(-0.35, -1.15, ant), -0.16, hit), -0.85, grab), -0.35, rec)
+        spread = lerp(lerp(lerp(lerp(0.08, 0.5, ant), -0.05, hit), -0.12, grab), 0.08, rec)
+        headRx = lerp(lerp(lerp(lerp(0.1, -0.3, ant), -0.5, hit), -0.42, grab), 0.1, rec)   # face up at the player through the bite
+        jaw = lerp(lerp(lerp(lerp(0.2, 0.55, ant), 0.95, hit), 0.15, smooth((a - 0.56) / 0.06)), 0.2, rec)   # snaps shut on the hit
+        step = hit * (1 - rec); back = ant * (1 - hit)   # weight onto the back foot, then a step in on the left
+        hipLa = -0.5 * step + 0.08 * back; knLa = 0.1 + 0.3 * step + 0.12 * back
+        hipRa = 0.32 * step - 0.05 * back; knRa = 0.1 + 0.22 * step + 0.18 * back
+        hipY = -0.06 * step - 0.03 * back; fwd = 0.16 * step - 0.05 * back
+        twist = -0.1 * back + 0.08 * step * (1 - grab) + 0.05 * math.sin(a * 60) * grab * (1 - rec)   # wound up, then a worrying shake
         pelRz = 0.0; spineRz = 0.0; roll = 0.0
     if clip in ('crawl', 'crawl_attack'):
         hipY = 0.2 - 0.95; pelRx = 1.42; lean = 0.08; headRx = -1.1 + 0.08 * w; twist = w * 0.15; pelRz = 0.05 * c; spineRz = 0
@@ -264,7 +273,7 @@ def pose_for(clip, t, kind):
         headRx = lerp(headRx, -0.7, k); shL = shR = lerp(shL, -0.9, k); spread = lerp(spread, 0.9, k); lean = lerp(lean, -0.15, k); jaw = lerp(0.15, 0.9, k)
         hipLa = hipRa = 0.02; knLa = knRa = 0.1; hipY = 0; twist = 0.04 * math.sin(a * 40)
     P = {}
-    P['pelvis'] = (pelRx, twist, pelRz); P['loc'] = (0, hipY, 0)
+    P['pelvis'] = (pelRx, twist, pelRz); P['loc'] = (0, hipY, fwd)
     P['spine'] = (lean, -twist * 1.5, spineRz)
     P['neck'] = (headRx, headRy + twist * 0.6, roll - spineRz * 0.5)
     P['jaw'] = (jaw, 0, 0)

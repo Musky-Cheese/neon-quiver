@@ -274,6 +274,9 @@ function zLife(z, r, dt, time) {
   const wantP = alive && dist < 14 ? clamp(-Math.atan2((PLAYER.y || 0) + 1.6 - (z.y + 1.7 * z.scale), dist), -0.4, 0.4) : 0;
   const k = 1 - Math.exp(-dt * 4);
   z.look += (want - z.look) * k; z.lookP += (wantP - z.lookP) * k;
+  // the arm layers below hand over to the attack clip smoothly instead of snapping off when a strike starts (and back on after)
+  z.atkW = (z.atkW || 0) + ((z.state === 'attack' ? 1 : 0) - (z.atkW || 0)) * (1 - Math.exp(-dt * 12));
+  const free = 1 - z.atkW;
   const wy = z.crawl ? 0.4 : 1;
   addRot(B.neck, z.lookP * 0.6 * wy, z.look * 0.65 * wy, 0); addRot(B.spine, 0, z.look * 0.3 * wy, 0);
   if (!alive) return;
@@ -291,17 +294,18 @@ function zLife(z, r, dt, time) {
     const sway = Math.sin(time * Q.swayF + z.seed * 3), sway2 = Math.sin(time * Q.swayF * 0.61 + z.seed);
     addRot(B.spine, Q.hunch * bk + 0.03 * sway2 * still, Q.twist * bk, (Q.drop + 0.05 * sway * still) * bk);
     addRot(B.neck, -Q.hunch * 0.45 * bk, 0, (Q.tilt + 0.06 * sway2 * still) * bk);   // lift the gaze back toward level, keep the lolling tilt
-    if (z.state !== 'attack') {
-      addRot(B.shoulderL, Q.armL * bk, 0, Q.outL * bk); addRot(B.shoulderR, Q.armR * bk, 0, -Q.outR * bk);
-      addRot(B.elbowL, Q.elL * bk, 0, 0); addRot(B.elbowR, Q.elR * bk, 0, 0);
+    if (free > 0.001) {
+      const f = bk * free;
+      addRot(B.shoulderL, Q.armL * f, 0, Q.outL * f); addRot(B.shoulderR, Q.armR * f, 0, -Q.outR * f);
+      addRot(B.elbowL, Q.elL * f, 0, 0); addRot(B.elbowR, Q.elR * f, 0, 0);
     }
   }
   // twitches: short spasms through the hit-reaction springs
   z.twT -= dt;
   if (z.twT <= 0) { z.twT = rand(1.5, 7); const R = z.R, s = z.type === 'brute' ? 0.4 : 1; R.hv += rand(-5, 5) * s; R.yv += rand(-3, 3) * s; if (Math.random() < 0.4) R.tv += rand(-2, 2) * s; }
   // reach for the player when close
-  if (z.state !== 'attack' && !z.crawl && z.type !== 'boss') {
-    const reach = clamp((3.2 - dist) / 2, 0, 1) * (Math.abs(rel) < 1 ? 1 : 0);
+  if (free > 0.001 && !z.crawl && z.type !== 'boss') {
+    const reach = clamp((3.2 - dist) / 2, 0, 1) * (Math.abs(rel) < 1 ? 1 : 0) * free;
     if (reach > 0) { addRot(B.shoulderL, -0.7 * reach, 0, 0); addRot(B.shoulderR, -0.6 * reach, 0, 0); addRot(B.elbowL, 0.25 * reach, 0, 0); addRot(B.elbowR, 0.25 * reach, 0, 0); }
   }
   // lean into turns
