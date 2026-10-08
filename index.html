@@ -327,7 +327,7 @@ button, select, input { font-family: var(--f); }
           <kbd>W A S D</kbd><span>Move · <kbd>Shift</kbd> sprint (until you're winded) · <kbd>Space</kbd> jump · hold <kbd>C</kbd> crouch</span>
           <kbd>1 – 3</kbd><span>The special arrows in your quiver; press the same key again, or <kbd>`</kbd>, for standard arrows (or mouse wheel) · <kbd>X</kbd> last arrow</span>
           <kbd>Q</kbd><span>Grappling hook: tap to fire, or hold to preview where it grabs and what the fall will cost, then release. High anchors mean long falls, and falls hurt</span>
-          <kbd>E</kbd><span>Reopen the Armory at a terminal between waves · <kbd>N</kbd> start the next wave early</span>
+          <kbd>E</kbd><span>Open the Armory at a terminal between waves · <kbd>N</kbd> start the next wave early</span>
           <kbd>P / Esc</kbd><span>Pause</span>
         </div>
       </div>
@@ -384,7 +384,7 @@ button, select, input { font-family: var(--f); }
       <div class="aq-body">
         <nav class="aq-nav" aria-label="Shop categories">
           <div class="aq-tabs" id="aqTabs"></div>
-          <div class="aq-hint">Esc · back to the street<br>E at a terminal · reopen</div>
+          <div class="aq-hint">Esc · back to the street<br>E at a terminal · open again</div>
         </nav>
         <section class="aq-main">
           <div class="aq-tabhead"><h2 id="aqTabTitle">Special arrows</h2><p id="aqTabBlurb"></p></div>
@@ -462,7 +462,7 @@ button, select, input { font-family: var(--f); }
    ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var GAME_JS = "game.js?v=bcdd8c387f";   // build.py: 'game.js?v=…'
+  var GAME_JS = "game.js?v=f401ac590f";   // build.py: 'game.js?v=…'
   var q = new URLSearchParams(location.search), forced = q.get('gpu');
   var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 

@@ -292,5 +292,5 @@ function drawObjective(hx, W, H) {
   hx.font = '700 13px "Quiver Cn", sans-serif'; hx.textAlign = 'center'; hx.fillStyle = '#bff6ff';
   hx.fillText(`ARMORY ${Math.round(t.d)} m`, x, y + 24);
   hx.font = '700 15px "Quiver Cn", sans-serif'; hx.fillStyle = '#e9ecff';
-  hx.fillText(GAME.nearTerminal ? 'PRESS E TO REOPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  ARMORY TERMINALS REOPEN THE SHOP  ·  N TO START NOW`, cx, H - 64);
+  hx.fillText(GAME.nearTerminal ? 'PRESS E TO OPEN THE ARMORY' : `NEXT WAVE IN ${Math.ceil(GAME.interT)}s  ·  SPEND SCRAP AT AN ARMORY TERMINAL  ·  N TO START NOW`, cx, H - 64);
 }

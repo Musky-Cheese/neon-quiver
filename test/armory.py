@@ -1,4 +1,4 @@
-"""Armory smoke test: clear a wave, the shop opens on its own, buy/equip/unlock, every special arrow fires cleanly,
+"""Armory smoke test: clear a wave, the shop opens only at a terminal, buy/equip/unlock, every special arrow fires cleanly,
 standard arrows can be picked back up, and the armory board is screenshotted at 1920x1080 and 1366x768.
 Run from the repo root: python3 test/armory.py  (writes test/out/armory-*.png)"""
 import os, sys, json
@@ -27,8 +27,14 @@ with sync_playwright() as pw:
     check(J("() => NQ.GAME.clearedShown && NQ.GAME.intermission"), 'wave cleared, intermission running')
     scrap1 = J("() => NQ.GAME.scrap"); print('  scrap after wave 1:', scrap1)
     check(scrap1 > 0, 'kills + clear bonus pay scrap')
-    J("() => NQ.run(70, 1 / 30)")   # ~2.3 s: armory opens after 1.8 s
-    check(J("() => NQ.GAME.state") == 'shop', 'armory opens by itself after the wave')
+    J("() => NQ.run(90, 1 / 30)")   # 3 s: the armory must not open on its own
+    check(J("() => NQ.GAME.state") == 'playing', 'armory stays shut away from a terminal')
+    check(J("() => !NQ.GAME.nearTerminal"), 'no terminal prompt away from a terminal')
+    # walk up to the nearest terminal: E opens it
+    J("() => { const t = NQ.WORLD.supplies.find(s => s.kind === 'terminal'); NQ.pose({ x: t.x + 1, z: t.z }); NQ.run(1, 1 / 30); }")
+    check(bool(J("() => NQ.GAME.nearTerminal")), 'terminal prompt at the terminal')
+    pg.keyboard.press('KeyE')
+    check(J("() => NQ.GAME.state") == 'shop', 'E at a terminal opens the armory')
     check(J("() => !document.getElementById('scr-shop').hidden"), 'armory screen visible')
     t = J("() => document.getElementById('aqTimer').textContent"); check(t.startswith('0:4'), f'countdown shows {t}')
     # buy Tracer (90) if affordable, else just verify the "Need X more" label

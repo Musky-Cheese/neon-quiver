@@ -1,6 +1,6 @@
 /* ============================================================
    Armory: the between-waves upgrade shop and quiver loadout.
-   Opens on its own a moment after each wave is cleared. Scrap from kills buys arrow unlocks and levels,
+   Opens only at an Armory Terminal (E) between waves. Scrap from kills buys arrow unlocks and levels,
    bow tuning and survival perks; up to 3 special arrows ride in the quiver (keys 1–3), standard arrows always do.
    Layout, copy and logic follow the "Neon Quiver – Upgrade shop" design canvas: a 1920×1080 board scaled to fit.
    ============================================================ */
