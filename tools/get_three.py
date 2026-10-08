@@ -1,6 +1,6 @@
 # Downloads the latest three.js package (npm tarball) into neon-quiver/vendor/
 import urllib.request, json, os
-OUT = r"C:\Users\fouad\Downloads\neon-quiver\vendor"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'vendor')
 os.makedirs(OUT, exist_ok=True)
 meta = json.loads(urllib.request.urlopen("https://registry.npmjs.org/three/latest", timeout=60).read())
 url = meta["dist"]["tarball"]
