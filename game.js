@@ -3245,8 +3245,25 @@ function buildCity() {
       return;
     }
     if (opt.tenement) {     // alley walls: fire escapes, AC units, pipes, one lit doorway
-      const floors = Math.floor((h - 3) / 3.3);
-      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < Math.min(floors, 7); f++) { const p = P(a, f * 3.3 + 0.6, 0.7); B(p[0], p[1], p[2], tx ? 3.2 : 1.3, 0.08, tz ? 3.2 : 1.3, [0.07, 0.07, 0.08], 0, 4); const q = P(a, f * 3.3 + 1.1, 1.3); B(q[0], q[1], q[2], tx ? 3.2 : 0.05, 0.9, tz ? 3.2 : 0.05, [0.06, 0.06, 0.07], 0, 4); }
+      // fire escapes: a grated landing per floor on wall brackets, railings, a steep stair flight up to the next landing
+      // (switching back each floor), and the drop ladder hung up out of reach under the first. Scenery only: nothing to stand on.
+      const floors = Math.floor((h - 3) / 3.3), nF = Math.min(floors, 7), IRON = [0.07, 0.07, 0.08];
+      const Bf = (along, y, out, sA, sy, sO) => { const p = P(along, y, out); B(p[0], y, p[2], tx ? sA : sO, sy, tz ? sA : sO, IRON, 0, 4); };
+      const Lf = (a0, y0, o0, a1, y1, o1, w) => { const p = P(a0, y0, o0), q = P(a1, y1, o1); g.box(M4.align(M, p[0], p[1], p[2], q[0], q[1], q[2], w, w), IRON, 0, 4); };
+      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < nF; f++) {
+        const y = f * 3.3 + 0.6, dir = f % 2 ? 1 : -1;
+        Bf(a, y, 0.7, 3.2, 0.06, 1.3);                                                    // the deck
+        for (const ry of [0.5, 0.95]) Bf(a, y + ry, 1.33, 3.2, 0.04, 0.04);                // front rails
+        for (const s of [-1, 1]) { Bf(a + s * 1.6, y + 0.95, 0.7, 0.04, 0.04, 1.3); Lf(a + s * 1.35, y - 0.9, 0.04, a + s * 1.35, y - 0.03, 1.28, 0.05); }   // end rails, brackets
+        for (const s of [-1, 0, 1]) Bf(a + s * 1.6, y + 0.48, 1.33, 0.045, 0.95, 0.045);   // posts
+        if (f + 1 < nF) {                                                                  // the flight up, along the outer half of the deck
+          const a0 = a - dir * 1.15, a1 = a + dir * 1.15;
+          for (const o of [0.78, 1.24]) Lf(a0, y, o, a1, y + 3.3, o, 0.05);
+          for (let k = 1; k < 8; k++) Bf(lerp(a0, a1, k / 8), y + 3.3 * k / 8, 1.01, 0.24, 0.035, 0.44);
+          Lf(a0, y + 0.9, 1.26, a1, y + 4.2, 1.26, 0.035);
+        }
+        if (f === 1) { const la = a + dir * 1.25; for (const o of [0.84, 1.18]) Bf(la, y - 0.75, o, 0.045, 1.5, 0.045); for (let k = 0; k < 5; k++) Bf(la, y - 1.4 + k * 0.3, 1.01, 0.03, 0.03, 0.34); }
+      }
       for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
       const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
       const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
@@ -3782,6 +3799,13 @@ function buildDistricts(C) {
   cable(-110, 7, 1.5, -94, 7.5, -1.5, 1, true, [0.9, 0.2, 0.6]);
   for (const [x, z] of [[-113, -4], [-135, 22], [-90, 18], [-113, 30], [-128, -30]]) { B(x, 3.6, z, 0.18, 0.18, 0.9, [0.1, 0.1, 0.1], 0, 4); B(x, 3.5, z, 0.5, 0.1, 0.5, [1, 0.8, 0.55], 3.5); WORLD.halos.push({ p: [x, 3.45, z], s: 1.6, c: [0.6, 0.42, 0.22] }); WORLD.lights.push({ p: [x, 3.2, z], r: 11, c: [1.6, 1.1, 0.55], shop: true }); }
   lamp(-80, -20); lamp(-88, 22);
+  // entrance gantry where the avenue from the plaza comes out: a rusted girder, a string of bare bulbs, the name in neon
+  for (const az of [-6.5, 6.5]) { B(-76, 3.5, az, 0.5, 7, 0.5, [0.14, 0.08, 0.05], 0, 4); WORLD.circles.push({ x: -76, z: az, r: 0.35, h: 7 }); }
+  B(-76, 7.2, 0, 0.6, 0.5, 14.5, [0.14, 0.08, 0.05], 0, 4);
+  B(-76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each sign reads on its own side
+  for (const [txt, c, st, sx, ry, seed] of [['THE WARRENS', '#ff2e88', 'font', -75.65, Math.PI / 2, 31.5], ['SECTOR 7 PLAZA', '#29e7ff', 'seg', -76.35, -Math.PI / 2, 67.5]])   // fixed seeds (fraction >= 0.08, or the sign renders dead): addSign's roll would shift the layout dice
+    WORLD.signs.push({ tex: signTexture(txt, c, st), m: M4.trs(M4.create(), sx, 8.2, 0, 0, ry, 0, 9, 2.25, 1), col: [1.4, 1.4, 1.4], mode: 0, seed, add: true });
+  cable(-76, 6.9, -6.2, -76, 6.9, 6.2, 0.7, true, [1, 0.75, 0.4]);
   bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 

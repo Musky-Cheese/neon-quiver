@@ -184,8 +184,25 @@ function buildCity() {
       return;
     }
     if (opt.tenement) {     // alley walls: fire escapes, AC units, pipes, one lit doorway
-      const floors = Math.floor((h - 3) / 3.3);
-      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < Math.min(floors, 7); f++) { const p = P(a, f * 3.3 + 0.6, 0.7); B(p[0], p[1], p[2], tx ? 3.2 : 1.3, 0.08, tz ? 3.2 : 1.3, [0.07, 0.07, 0.08], 0, 4); const q = P(a, f * 3.3 + 1.1, 1.3); B(q[0], q[1], q[2], tx ? 3.2 : 0.05, 0.9, tz ? 3.2 : 0.05, [0.06, 0.06, 0.07], 0, 4); }
+      // fire escapes: a grated landing per floor on wall brackets, railings, a steep stair flight up to the next landing
+      // (switching back each floor), and the drop ladder hung up out of reach under the first. Scenery only: nothing to stand on.
+      const floors = Math.floor((h - 3) / 3.3), nF = Math.min(floors, 7), IRON = [0.07, 0.07, 0.08];
+      const Bf = (along, y, out, sA, sy, sO) => { const p = P(along, y, out); B(p[0], y, p[2], tx ? sA : sO, sy, tz ? sA : sO, IRON, 0, 4); };
+      const Lf = (a0, y0, o0, a1, y1, o1, w) => { const p = P(a0, y0, o0), q = P(a1, y1, o1); g.box(M4.align(M, p[0], p[1], p[2], q[0], q[1], q[2], w, w), IRON, 0, 4); };
+      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < nF; f++) {
+        const y = f * 3.3 + 0.6, dir = f % 2 ? 1 : -1;
+        Bf(a, y, 0.7, 3.2, 0.06, 1.3);                                                    // the deck
+        for (const ry of [0.5, 0.95]) Bf(a, y + ry, 1.33, 3.2, 0.04, 0.04);                // front rails
+        for (const s of [-1, 1]) { Bf(a + s * 1.6, y + 0.95, 0.7, 0.04, 0.04, 1.3); Lf(a + s * 1.35, y - 0.9, 0.04, a + s * 1.35, y - 0.03, 1.28, 0.05); }   // end rails, brackets
+        for (const s of [-1, 0, 1]) Bf(a + s * 1.6, y + 0.48, 1.33, 0.045, 0.95, 0.045);   // posts
+        if (f + 1 < nF) {                                                                  // the flight up, along the outer half of the deck
+          const a0 = a - dir * 1.15, a1 = a + dir * 1.15;
+          for (const o of [0.78, 1.24]) Lf(a0, y, o, a1, y + 3.3, o, 0.05);
+          for (let k = 1; k < 8; k++) Bf(lerp(a0, a1, k / 8), y + 3.3 * k / 8, 1.01, 0.24, 0.035, 0.44);
+          Lf(a0, y + 0.9, 1.26, a1, y + 4.2, 1.26, 0.035);
+        }
+        if (f === 1) { const la = a + dir * 1.25; for (const o of [0.84, 1.18]) Bf(la, y - 0.75, o, 0.045, 1.5, 0.045); for (let k = 0; k < 5; k++) Bf(la, y - 1.4 + k * 0.3, 1.01, 0.03, 0.03, 0.34); }
+      }
       for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
       const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
       const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
