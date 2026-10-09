@@ -139,6 +139,9 @@ function makeRig(z) {
     const mixer = new THREE.AnimationMixer(mesh);
     // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
     const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
+    // three recomputes a bone's Euler .rotation (a matrix, an asin and two atan2) on every quaternion write, and the mixer
+    // and the procedural layers write each bone's quaternion many times per pose; nothing ever reads a bone's .rotation
+    for (const b of bones) b.quaternion._onChange(noop);
     r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1, mz, clips: mz ? mz.clips : ZRIG.clips };
     // three refreshes a skeleton (and re-uploads its bone texture) once per render call - reflection, world, bow pass...
     // The bones only move in poseZombieRig, so recompute them only when a new pose has been made since the last time.
@@ -179,8 +182,16 @@ function zWantClip(z) {
   return ZRIG.clips[z.idleClip] ? z.idleClip : 'idle';
 }
 
-const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
-function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), noop = () => {};
+// three's YXZ Euler-to-quaternion, with the trig skipped on an axis whose angle is zero (most of the procedural layers
+// turn one axis): cos(±0) is exactly 1 and sin(±0) is exactly ±0 = angle / 2, so every product below is the same bit
+// for bit as Quaternion.setFromEuler's, signed zeros included
+function qEuler(x, y, z) {
+  const c1 = x === 0 ? 1 : Math.cos(x / 2), s1 = x === 0 ? x / 2 : Math.sin(x / 2);
+  const c2 = y === 0 ? 1 : Math.cos(y / 2), s2 = y === 0 ? y / 2 : Math.sin(y / 2);
+  const c3 = z === 0 ? 1 : Math.cos(z / 2), s3 = z === 0 ? z / 2 : Math.sin(z / 2);
+  return _q.set(s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 - s1 * s2 * c3, c1 * c2 * c3 + s1 * s2 * s3);
+}
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
 const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
@@ -200,7 +211,7 @@ function poseZombieRig(z, dt, time) {
   }
   const act = r.cur ? zAction(r, r.cur) : null, dur = act ? act.getClip().duration : 1;
   if (act) {
-    const timed = { attack: z.atkT, crawl_attack: z.atkT, slam: z.atkT, roar: z.type === 'boss' ? clamp(z.roarT / 1.4, 0, 1) : null }[r.cur];
+    const c = r.cur, timed = c === 'attack' || c === 'crawl_attack' || c === 'slam' ? z.atkT : c === 'roar' ? (z.type === 'boss' ? clamp(z.roarT / 1.4, 0, 1) : null) : undefined;
     if (timed !== undefined && timed !== null && z.state !== 'dying') { act.timeScale = 0; act.time = clamp(timed, 0, 0.999) * dur; }
     else if (z.state === 'dying') act.timeScale = 0;
     else if (r.cur === 'idle') act.timeScale = 1;

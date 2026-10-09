@@ -32,6 +32,14 @@ const M4 = {
   },
   // T * Ry * Rx * Rz * S
   trs(m, tx, ty, tz, rx, ry, rz, sx, sy, sz) {
+    if (rx === 0 && rz === 0) {   // yaw only (most props, pickups, decals): the same expressions with cos 0 = 1 and sin 0 = 0 written in, bit for bit
+      const cy = Math.cos(ry), syr = Math.sin(ry);
+      m[0] = (cy + (syr * 0) * 0) * sx; m[1] = 0 * sx; m[2] = (-syr + (cy * 0) * 0) * sx; m[3] = 0;
+      m[4] = (-cy * 0 + syr * 0) * sy; m[5] = sy; m[6] = (syr * 0 + cy * 0) * sy; m[7] = 0;
+      m[8] = syr * sz; m[9] = (-0) * sz; m[10] = cy * sz; m[11] = 0;
+      m[12] = tx; m[13] = ty; m[14] = tz; m[15] = 1;
+      return m;
+    }
     const cx = Math.cos(rx), sxr = Math.sin(rx), cy = Math.cos(ry), syr = Math.sin(ry), cz = Math.cos(rz), szr = Math.sin(rz);
     m[0] = (cy * cz + syr * sxr * szr) * sx; m[1] = (cx * szr) * sx; m[2] = (-syr * cz + cy * sxr * szr) * sx; m[3] = 0;
     m[4] = (-cy * szr + syr * sxr * cz) * sy; m[5] = (cx * cz) * sy; m[6] = (syr * szr + cy * sxr * cz) * sy; m[7] = 0;

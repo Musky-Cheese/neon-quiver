@@ -841,7 +841,8 @@ function frame(now) {
   try {
     if (!GAME.frozen) step(dt);
     // the Armory is an opaque full-screen board, and a lost GPU context can't draw: skip the 3D frame and the HUD
-    if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
+    // the canvas HUD measures its element before the DOM HUD writes its text, so a changed number never forces a synchronous layout mid-frame
+    if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); drawHUD2D(GAME.time); if (GAME.state !== 'title') hudFrame(); }
     FRAME_ERR.n = 0;
   } catch (e) {
     // one bad frame is survivable; three in a row means the game is wedged: stop and say so instead of freezing silently
@@ -977,7 +978,7 @@ window.NQ = {
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
   setTheme, THEMES,
-  renderOnce() { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); },
+  renderOnce() { render(GAME.time); drawHUD2D(GAME.time); if (GAME.state !== 'title') hudFrame(); },
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, PERF, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,

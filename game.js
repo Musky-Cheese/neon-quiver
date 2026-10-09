@@ -51,6 +51,14 @@ const M4 = {
   },
   // T * Ry * Rx * Rz * S
   trs(m, tx, ty, tz, rx, ry, rz, sx, sy, sz) {
+    if (rx === 0 && rz === 0) {   // yaw only (most props, pickups, decals): the same expressions with cos 0 = 1 and sin 0 = 0 written in, bit for bit
+      const cy = Math.cos(ry), syr = Math.sin(ry);
+      m[0] = (cy + (syr * 0) * 0) * sx; m[1] = 0 * sx; m[2] = (-syr + (cy * 0) * 0) * sx; m[3] = 0;
+      m[4] = (-cy * 0 + syr * 0) * sy; m[5] = sy; m[6] = (syr * 0 + cy * 0) * sy; m[7] = 0;
+      m[8] = syr * sz; m[9] = (-0) * sz; m[10] = cy * sz; m[11] = 0;
+      m[12] = tx; m[13] = ty; m[14] = tz; m[15] = 1;
+      return m;
+    }
     const cx = Math.cos(rx), sxr = Math.sin(rx), cy = Math.cos(ry), syr = Math.sin(ry), cz = Math.cos(rz), szr = Math.sin(rz);
     m[0] = (cy * cz + syr * sxr * szr) * sx; m[1] = (cx * szr) * sx; m[2] = (-syr * cz + cy * sxr * szr) * sx; m[3] = 0;
     m[4] = (-cy * szr + syr * sxr * cz) * sy; m[5] = (cx * cz) * sy; m[6] = (syr * szr + cy * sxr * cz) * sy; m[7] = 0;
@@ -2530,6 +2538,9 @@ function segText(ctx, text, x, y, h, opts = {}) {
 /* ============================================================
    Synth audio: SFX + ambient + music, all generated
    ============================================================ */
+// an ambient level is re-aimed every frame; an exponential approach restarted at its own current value toward the same
+// target is the same curve, so a target the param already has is not re-sent (each event is an insertion on the audio thread)
+function paramTarget(p, v, t, tc) { if (p._nqv === v) return; p._nqv = v; p.setTargetAtTime(v, t, tc); }
 function fillPink(d) {   // Paul Kellet's pink noise filter
   let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
   for (let i = 0; i < d.length; i++) {
@@ -2595,7 +2606,9 @@ const AUD = {
   setVolume(k, x) { this.vol[k] = clamp(+x, 0, 1); this.applyVol(); },
   // the player's ears: called every frame with the eye position and view yaw (forward is -z rotated by yaw, as for the camera)
   listen(x, y, z, yaw) {
-    if (!this.ctx) return; const L = this.ctx.listener; this.lis.x = x; this.lis.y = y; this.lis.z = z;
+    if (!this.ctx) return; const L = this.ctx.listener, l = this.lis;
+    if (l.x === x && l.y === y && l.z === z && l.yaw === yaw) return;   // standing still: nothing to tell the audio thread
+    l.x = x; l.y = y; l.z = z; l.yaw = yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     if (L.positionX) { L.positionX.value = x; L.positionY.value = y; L.positionZ.value = z; L.forwardX.value = fx; L.forwardY.value = 0; L.forwardZ.value = fz; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
     else { L.setPosition(x, y, z); L.setOrientation(fx, 0, fz, 0, 1, 0); }
@@ -2719,7 +2732,7 @@ const AUD = {
       this.harb = { g, hl, horn: rand(6, 20), creak: rand(3, 9) };
     }
     const H = this.harb, t = this.now();
-    H.g.gain.setTargetAtTime(0.55 * k, t, 0.6);
+    paramTarget(H.g.gain, 0.55 * k, t, 0.6);
     if (k < 0.05) return;
     H.horn -= dt; H.creak -= dt;
     if (H.horn <= 0) { H.horn = rand(28, 55); for (const f of [82, 87.5, 164]) this.tone('sawtooth', f, f * 0.985, 2.6, 0.07 * k * (f > 100 ? 0.4 : 1), H.hl, t, 0.35); }
@@ -2761,14 +2774,14 @@ const AUD = {
     if (!this.ctx || !this.rainG) return; const t = this.now(), L = this.rainL;
     // slow, uneven swelling like gusts pushing sheets of rain past
     const swell = 0.86 + 0.14 * Math.sin(t * 0.31) * Math.sin(t * 0.083 + 1.3) + 0.06 * Math.sin(t * 1.7 + Math.sin(t * 0.21) * 3);
-    this.rainG.gain.setTargetAtTime((0.02 + 0.24 * rain) * swell * (1 + 0.25 * wind), t, 0.5);
+    paramTarget(this.rainG.gain, (0.02 + 0.24 * rain) * swell * (1 + 0.25 * wind), t, 0.5);
     // light rain is soft and dull with a few sharp drops; heavy rain is fuller, lower and brighter
-    L.wash.f.frequency.setTargetAtTime(1100 + 900 * rain, t, 1.5);
-    L.wash.g.gain.setTargetAtTime(L.wash.base * (0.6 + 0.6 * rain), t, 1.5);
-    L.hiss.g.gain.setTargetAtTime(L.hiss.base * (0.3 + 1.4 * rain * rain), t, 1.5);
-    L.body.g.gain.setTargetAtTime(L.body.base * rain * rain * 1.6, t, 1.5);
-    this.windG.gain.setTargetAtTime(0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
-    this.windF.frequency.setTargetAtTime(320 + 260 * wind + 120 * Math.sin(t * 0.4) + 90 * Math.sin(t * 1.3), t, 0.6);
+    paramTarget(L.wash.f.frequency, 1100 + 900 * rain, t, 1.5);
+    paramTarget(L.wash.g.gain, L.wash.base * (0.6 + 0.6 * rain), t, 1.5);
+    paramTarget(L.hiss.g.gain, L.hiss.base * (0.3 + 1.4 * rain * rain), t, 1.5);
+    paramTarget(L.body.g.gain, L.body.base * rain * rain * 1.6, t, 1.5);
+    paramTarget(this.windG.gain, 0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
+    paramTarget(this.windF.frequency, 320 + 260 * wind + 120 * Math.sin(t * 0.4) + 90 * Math.sin(t * 1.3), t, 0.6);
     if (rain < 0.03) { this._dropT = t; this._plinkT = t; return; }
     // random droplets (poisson-ish spacing, clustered by the swell)
     if (this._dropT < t - 0.3) this._dropT = t;
@@ -2943,13 +2956,13 @@ function wxSnowK() { return WX.precip * WX.snow; }
    Particles, dynamic lights, floating damage numbers
    ============================================================ */
 const MAXP = 5000;
-const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
+const PART = { n: 0, alive: 0, data: new Float32Array(MAXP * 8), p: [] };
 for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;
   p.x = x; p.y = y; p.z = z; p.vx = vx; p.vy = vy; p.vz = vz; p.life = life; p.max = life; p.r = col[0]; p.g = col[1]; p.b = col[2]; p.a = a;
-  p.size = size; p.grav = grav; p.drag = drag; p.grow = grow; p.alive = true; p.blood = false;
+  p.size = size; p.grav = grav; p.drag = drag; p.grow = grow; if (!p.alive) { p.alive = true; PART.alive++; } p.blood = false;
   return p;
 }
 function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
@@ -2959,14 +2972,16 @@ function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
   }
 }
 function updateParticles(dt) {
-  let n = 0; const d = PART.data;
-  for (const p of PART.p) {
+  let n = 0; const d = PART.data, P = PART.p, live = PART.alive; let seen = 0;
+  for (let i = 0; i < MAXP && seen < live; i++) {   // stop once every live particle has been seen: the pool is mostly dead slots
+    const p = P[i];
     if (!p.alive) continue;
-    p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }
+    seen++;
+    p.life -= dt; if (p.life <= 0) { p.alive = false; PART.alive--; continue; }
     p.vy -= p.grav * dt; const k = Math.max(0, 1 - p.drag * dt); p.vx *= k; p.vy *= k; p.vz *= k;
     p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
     if (p.y < 0.03 && p.grav > 0) {
-      if (p.blood) { if (Math.random() < 0.3) addDecal(p.x, p.z, Math.abs(p.size) * rand(2.5, 5)); p.alive = false; continue; }
+      if (p.blood) { if (Math.random() < 0.3) addDecal(p.x, p.z, Math.abs(p.size) * rand(2.5, 5)); p.alive = false; PART.alive--; continue; }
       p.y = 0.03; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6;
     }
     p.size += p.grow * dt * Math.sign(p.size || 1);
@@ -3010,7 +3025,8 @@ const DECAL_LIFE = 110;   // blood pools linger a lot longer before they fade (w
 const DECAL_CAP = 150;    // and more of them can be on the ground at once (was 90)
 function addDecal(x, z, r) {
   if (Math.abs(x) > 60 || Math.abs(z) > 60) return;
-  DECALS.push({ x, z, r: clamp(r, 0.08, 1.4), rot: Math.random() * TAU, t: 0, v: Math.floor(Math.random() * 4) });
+  const rr = clamp(r, 0.08, 1.4), rot = Math.random() * TAU;
+  DECALS.push({ x, z, r: rr, rot, t: 0, v: Math.floor(Math.random() * 4), m: M4.trs(new Float32Array(16), x, 0.035, z, -Math.PI / 2, rot, 0, rr * 2, rr * 2, 1) });   // placed once, drawn from this matrix
   if (DECALS.length > DECAL_CAP) DECALS.shift();
 }
 function updateDecals(dt) { for (let i = DECALS.length - 1; i >= 0; i--) { const d = DECALS[i]; d.t += dt; if (d.t > DECAL_LIFE) DECALS.splice(i, 1); } }
@@ -4289,51 +4305,74 @@ function buildNav() {
   while (qh < qt) { const k = Q[qh++], i = k % NAV.w, j = (k / NAV.w) | 0;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= NAV.w || b >= NAV.h) continue; const n = b * NAV.w + a; if (!reach[n] && !B[n]) { reach[n] = 1; Q[qt++] = n; } } }
   for (let k = 0; k < N; k++) if (!reach[k]) B[k] = 1;
-  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.queue = new Int32Array(N); NAV.touched = [];
+  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.touched = []; NAV.lastS = -1; NAV.gen = 1;
+  NAV.hd = new Int32Array(8 * N + 8); NAV.hn = new Int32Array(8 * N + 8);   // the flood's binary heap: at most one push per relaxed edge
+  NAV.tgt = new Int32Array(N); NAV.tgtGen = new Uint32Array(N);             // navTarget per start cell, valid for one flood (gen)
+  // nearest free cell of every blocked one, looked up once here instead of a 285-cell scan per zombie per frame
+  NAV.free = new Int32Array(N); for (let k = 0; k < N; k++) NAV.free[k] = B[k] ? navNearestFreeScan(k) : k;
   NAV.walk = []; for (let k = 0; k < N; k++) if (!B[k]) NAV.walk.push(k);
   NAV.ready = true;
   buildMinimap();
 }
-// breadth-first distances (in cells, 8-connected without corner cutting) from the player
-const _nb = [[1, 0, 10], [-1, 0, 10], [0, 1, 10], [0, -1, 10], [1, 1, 14], [1, -1, 14], [-1, 1, 14], [-1, -1, 14]];
+// shortest-path distances (in cells, 8-connected without corner cutting, octile costs 10 / 14) from the player.
+// Dijkstra with a binary heap settles every cell once; the old label-correcting FIFO re-expanded cells many times
+// and gave the same field. Cells at or past maxCost are never expanded, so the field is identical either way.
+const NB_DI = new Int32Array([1, -1, 0, 0, 1, 1, -1, -1]), NB_DJ = new Int32Array([0, 0, 1, -1, 1, -1, 1, -1]), NB_C = new Int32Array([10, 10, 10, 10, 14, 14, 14, 14]);
 function navUpdate(px, pz) {
-  const D = NAV.dist, B = NAV.block, W = NAV.w, H = NAV.h, Q = NAV.queue, N = Q.length;
-  const inQ = NAV.inQ || (NAV.inQ = new Uint8Array(N)), touched = NAV.touched;
-  for (let i = 0; i < touched.length; i++) { const k = touched[i]; D[k] = NAV_INF; inQ[k] = 0; }
-  touched.length = 0;
-  let s = navIdx(px, pz); if (s < 0) return; if (B[s]) s = navNearestFree(s); if (s < 0) return;
+  const D = NAV.dist, B = NAV.block, W = NAV.w, H = NAV.h, touched = NAV.touched;
+  let s = navIdx(px, pz); if (s >= 0 && B[s]) s = NAV.free[s];
+  if (s === NAV.lastS && s >= 0) return;   // same start cell as the last flood over a static grid: the field is unchanged
+  for (let i = 0; i < touched.length; i++) D[touched[i]] = NAV_INF;
+  touched.length = 0; NAV.lastS = s; NAV.gen++;
+  if (s < 0) return;
   const maxCost = Math.ceil(135 / NAV.cell) * 10;   // active district + spawn ring; constant work as the map grows
-  let qh = 0, qt = 0, cnt = 0; D[s] = 0; touched.push(s); Q[qt] = s; qt = (qt + 1) % N; cnt++; inQ[s] = 1;
-  while (cnt > 0) {   // label-correcting shortest paths with octile costs (10 / 14)
-    const k = Q[qh]; qh = (qh + 1) % N; cnt--; inQ[k] = 0;
-    const i = k % W, j = (k / W) | 0, dk = D[k];
-    if (dk >= maxCost) continue;
+  const hd = NAV.hd, hn = NAV.hn; let hs = 0;
+  D[s] = 0; touched.push(s); hd[0] = 0; hn[0] = s; hs = 1;
+  while (hs > 0) {
+    const dk = hd[0], k = hn[0];
+    // pop: move the last entry to the root and sift it down
+    hs--; if (hs > 0) { const ld = hd[hs], ln = hn[hs]; let i = 0; for (;;) { let c = 2 * i + 1; if (c >= hs) break; if (c + 1 < hs && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hd[i] = hd[c]; hn[i] = hn[c]; i = c; } hd[i] = ld; hn[i] = ln; }
+    if (dk !== D[k] || dk >= maxCost) continue;   // a stale entry (the cell was reached cheaper since), or past the cutoff
+    const i = k % W, j = (k / W) | 0;
     for (let n = 0; n < 8; n++) {
-      const a = i + _nb[n][0], b = j + _nb[n][1]; if (a < 0 || b < 0 || a >= W || b >= H) continue;
+      const a = i + NB_DI[n], b = j + NB_DJ[n]; if (a < 0 || b < 0 || a >= W || b >= H) continue;
       const m = b * W + a; if (B[m]) continue;
       if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue;
-      const nd = dk + _nb[n][2];
-      if (nd < D[m]) { if (D[m] === NAV_INF) touched.push(m); D[m] = nd; if (!inQ[m]) { Q[qt] = m; qt = (qt + 1) % N; cnt++; inQ[m] = 1; } }
+      const nd = dk + NB_C[n];
+      if (nd < D[m]) {
+        if (D[m] === NAV_INF) touched.push(m); D[m] = nd;
+        let c = hs++; while (c > 0) { const p = (c - 1) >> 1; if (hd[p] <= nd) break; hd[c] = hd[p]; hn[c] = hn[p]; c = p; } hd[c] = nd; hn[c] = m;   // push: sift up
+      }
     }
   }
 }
-function navNearestFree(k) {
+function navNearestFree(k) { return NAV.free[k]; }
+function navNearestFreeScan(k) {
   const W = NAV.w, i0 = k % W, j0 = (k / W) | 0;
   for (let r = 1; r < 6; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) { const a = i0 + di, b = j0 + dj; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (!NAV.block[m]) return m; }
   return -1;
 }
-function navDistAt(x, z) { const k = navIdx(x, z); if (k < 0) return 1e9; const d = NAV.dist[NAV.block[k] ? Math.max(0, navNearestFree(k)) : k]; return d === NAV_INF ? 1e9 : d / 10 * NAV.cell; }
-// steering target for a zombie: a point two cells down the distance field
+function navDistAt(x, z) { const k = navIdx(x, z); if (k < 0) return 1e9; const d = NAV.dist[Math.max(0, NAV.free[k])]; return d === NAV_INF ? 1e9 : d / 10 * NAV.cell; }
+// steering target for a zombie: a point two cells down the distance field. It depends only on the zombie's cell and
+// the current field, so each cell's answer is kept until the next flood (zombies share cells and stay in one for a while)
 const _nc = [0, 0];
 function navTarget(x, z, out) {
-  let k = navIdx(x, z); if (k < 0) return false;
-  if (NAV.block[k]) { k = navNearestFree(k); if (k < 0) return false; }
-  const W = NAV.w, D = NAV.dist, B = NAV.block;
-  for (let step = 0; step < 2; step++) {
-    const i = k % W, j = (k / W) | 0; let best = k, bd = D[k];
-    for (let n = 0; n < 8; n++) { const a = i + _nb[n][0], b = j + _nb[n][1]; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (B[m]) continue; if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue; if (D[m] < bd) { bd = D[m]; best = m; } }
-    if (best === k) break; k = best;
+  const k0 = navIdx(x, z); if (k0 < 0) return false;
+  const D = NAV.dist; let k;
+  if (NAV.tgtGen[k0] === NAV.gen) k = NAV.tgt[k0];
+  else {
+    k = NAV.free[k0];
+    if (k >= 0) {
+      const W = NAV.w, B = NAV.block;
+      for (let step = 0; step < 2; step++) {
+        const i = k % W, j = (k / W) | 0; let best = k, bd = D[k];
+        for (let n = 0; n < 8; n++) { const a = i + NB_DI[n], b = j + NB_DJ[n]; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (B[m]) continue; if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue; if (D[m] < bd) { bd = D[m]; best = m; } }
+        if (best === k) break; k = best;
+      }
+    }
+    NAV.tgt[k0] = k; NAV.tgtGen[k0] = NAV.gen;
   }
+  if (k < 0) return false;
   navCenter(k, out); return D[k] !== NAV_INF;
 }
 function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, WORLD_BOUNDS.x1), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
@@ -4465,18 +4504,24 @@ function drawMinimap(hx, W, H, time) {
   hx.save();
   hx.beginPath(); hx.arc(cx, cy, R, 0, TAU); hx.fillStyle = 'rgba(6,8,14,0.72)'; hx.fill(); hx.clip();
   hx.translate(cx, cy); hx.rotate(PLAYER.yaw); hx.scale(s / MINI.scale, s / MINI.scale);
-  hx.drawImage(MINI.cv, (NAV.x0 - PLAYER.x) * MINI.scale, (NAV.z0 - PLAYER.z) * MINI.scale);
+  { // only the part of the map that can show inside the ring (the clip hides the rest): a crop with a wide margin, not the whole city
+    const ms = MINI.scale, cv = MINI.cv, half = Math.ceil(R / 0.9) + 16, mx = (PLAYER.x - NAV.x0) * ms, mz = (PLAYER.z - NAV.z0) * ms;
+    const sx = Math.max(0, Math.floor(mx - half)), sz = Math.max(0, Math.floor(mz - half)), sw = Math.min(cv.width, Math.ceil(mx + half)) - sx, sh = Math.min(cv.height, Math.ceil(mz + half)) - sz;
+    if (sw > 0 && sh > 0) hx.drawImage(cv, sx, sz, sw, sh, (NAV.x0 - PLAYER.x) * ms + sx, (NAV.z0 - PLAYER.z) * ms + sz, sw, sh);
+  }
   hx.setTransform(1, 0, 0, 1, 0, 0); const dpr = Math.min(2, devicePixelRatio || 1); hx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cy_ = Math.cos(PLAYER.yaw), sy_ = Math.sin(PLAYER.yaw);
   const map = (x, z) => { const dx = (x - PLAYER.x) * s, dz = (z - PLAYER.z) * s; return [cx + dx * cy_ - dz * sy_, cy + dx * sy_ + dz * cy_]; };
   hx.beginPath(); hx.arc(cx, cy, R, 0, TAU); hx.clip();
+  const cull = R / s + 6;   // past this (in metres) a dot can't reach the ring, so it isn't drawn at all
   for (const sp of WORLD.supplies) {
+    if (Math.abs(sp.x - PLAYER.x) > cull || Math.abs(sp.z - PLAYER.z) > cull) continue;
     const [x, y] = map(sp.x, sp.z);
     if (sp.kind === 'terminal') { hx.fillStyle = GAME.intermission ? '#29e7ff' : 'rgba(41,231,255,0.45)'; hx.fillRect(x - 3.5, y - 3.5, 7, 7); }
     else { hx.fillStyle = sp.cd > 0 ? 'rgba(255,181,46,0.3)' : '#ffb52e'; hx.beginPath(); hx.moveTo(x, y - 4); hx.lineTo(x + 4, y); hx.lineTo(x, y + 4); hx.lineTo(x - 4, y); hx.fill(); }
   }
   for (const p of PICKUPS) { const [x, y] = map(p.x, p.z); hx.fillStyle = p.kind === 'health' ? '#6dff9a' : '#ffd23a'; hx.fillRect(x - 1.5, y - 1.5, 3, 3); }
-  for (const z of ZOMBIES) { if (z.dead) continue; const [x, y] = map(z.x, z.z); hx.fillStyle = z.type === 'boss' ? '#ff3df0' : z.type === 'brute' ? '#ff6b3d' : '#ff3040'; const r = z.type === 'boss' ? 4.5 : z.type === 'brute' ? 3 : 2.2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fill(); }
+  for (const z of ZOMBIES) { if (z.dead || Math.abs(z.x - PLAYER.x) > cull || Math.abs(z.z - PLAYER.z) > cull) continue; const [x, y] = map(z.x, z.z); hx.fillStyle = z.type === 'boss' ? '#ff3df0' : z.type === 'brute' ? '#ff6b3d' : '#ff3040'; const r = z.type === 'boss' ? 4.5 : z.type === 'brute' ? 3 : 2.2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fill(); }
   drawObjectiveMinimap(hx, map, cx, cy, R, time);
   hx.restore();
   // player + ring
@@ -4905,7 +4950,8 @@ function rebuildZombieGrid() {
   for (let u = 0; u < used.length; u++) used[u].length = 0;
   used.length = 0;
   if (map.size > 4096) map.clear();   // forget stale cells now and then
-  for (const z of ZOMBIES) { const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
+  // corpses stay out: every query skips the dead, and up to 26 of them would otherwise pad every cell they lie in
+  for (const z of ZOMBIES) { if (z.dead) continue; const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
 }
 function zombieCandidates(x0, x1, z0, z1) {
   const out = ZGRID.out; out.length = 0; const S = ZGRID.cell, map = ZGRID.map;
@@ -5077,7 +5123,8 @@ function updateDying(z, dt) {
   z.x += z.dv[0] * dt; z.z += z.dv[2] * dt; z.y += z.dv[1] * dt;
   const fl = z.floor || 0;
   if (z.y > fl + 0.001) z.dv[1] -= 12 * dt; else { z.y = Math.max(z.y, z.dieT > 3.4 ? z.y : fl); z.dv[1] = Math.max(0, z.dv[1]); const f = Math.max(0, 1 - 5 * dt); z.dv[0] *= f; z.dv[2] *= f; }
-  pushOutCircle(z, 0.28 * z.scale);
+  // a body that has come to rest, and that the last push left where it was, needs no push against the static world
+  if (!(z._pq && z.x === z._px && z.y === z._py && z.z === z._pz)) { const x0 = z.x, z0 = z.z; pushOutCircle(z, 0.28 * z.scale); z._px = z.x; z._py = z.y; z._pz = z.z; z._pq = z.x === x0 && z.z === z0; }
   // crumple: knees give first, then the body tips over
   if (z.crumpleMode && z.crumple < 1) { z.crumple = Math.min(1, z.crumple + dt * 2.6); if (z.crumple > 0.7 && z.pitchV === 0) z.pitchV = z.pitchSign * 0.6; }
   const lim = 1.5;
@@ -5110,7 +5157,11 @@ function updateZombies(dt, time) {
     updateReact(z, dt);
     z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt);
     // stand on low things they walk over (the Metro's island platform, steps, kerbs) instead of wading through them
-    if (z.state !== 'drop' && z.climbState === 'ground') { const fy = z.floor = groundAt(z.x, z.z, (z.dead ? z.floor || 0 : z.y) + 0.15, 0.2 * z.scale);
+    if (z.state !== 'drop' && z.climbState === 'ground') {
+      const yIn = (z.dead ? z.floor || 0 : z.y) + 0.15; let fy;
+      if (z.dead && z.x === z._gx && z.z === z._gz && yIn === z._gy) fy = z._gf;   // a body at rest over static ground: the last answer
+      else { fy = groundAt(z.x, z.z, yIn, 0.2 * z.scale); if (z.dead) { z._gx = z.x; z._gz = z.z; z._gy = yIn; z._gf = fy; } }
+      z.floor = fy;
       if (!z.dead) z.y = fy > z.y ? Math.min(fy, z.y + dt * 3) : Math.max(fy, z.y - dt * 5); }
     { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
       z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }
@@ -6128,7 +6179,7 @@ Object.assign(AUD, {
       this.hz = { gw, gh, gv, drip: 1 };
     }
     const H = this.hz, t = this.now();
-    H.gw.gain.setTargetAtTime(0.14 * metroK, t, 0.8); H.gh.gain.setTargetAtTime(0.05 * refK, t, 0.8); H.gv.gain.setTargetAtTime(0.018 * refK, t, 0.8);
+    paramTarget(H.gw.gain, 0.14 * metroK, t, 0.8); paramTarget(H.gh.gain, 0.05 * refK, t, 0.8); paramTarget(H.gv.gain, 0.018 * refK, t, 0.8);
     if (metroK > 0) { H.drip -= dt; if (H.drip <= 0) { H.drip = rand(0.2, 1.1); this.tone('sine', rand(1000, 1800), rand(500, 800), 0.08, 0.035, this.amb, t, 0.003); } }
   },
 });
@@ -6274,6 +6325,9 @@ function makeRig(z) {
     const mixer = new THREE.AnimationMixer(mesh);
     // the rig's local matrices are composed by poseZombieRig only (once per pose), not again on every scene render
     const nodes = []; mesh.traverse(o => { o.matrixAutoUpdate = false; nodes.push(o); });
+    // three recomputes a bone's Euler .rotation (a matrix, an asin and two atan2) on every quaternion write, and the mixer
+    // and the procedural layers write each bone's quaternion many times per pose; nothing ever reads a bone's .rotation
+    for (const b of bones) b.quaternion._onChange(noop);
     r = { key, mesh, mat, u: mat.userData.u, B, mixer, actions: {}, cur: null, nodes, poseN: 0, skelN: -1, mz, clips: mz ? mz.clips : ZRIG.clips };
     // three refreshes a skeleton (and re-uploads its bone texture) once per render call - reflection, world, bow pass...
     // The bones only move in poseZombieRig, so recompute them only when a new pose has been made since the last time.
@@ -6314,8 +6368,16 @@ function zWantClip(z) {
   return ZRIG.clips[z.idleClip] ? z.idleClip : 'idle';
 }
 
-const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
-function qEuler(x, y, z) { _e.set(x, y, z, 'YXZ'); return _q.setFromEuler(_e); }
+const _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), noop = () => {};
+// three's YXZ Euler-to-quaternion, with the trig skipped on an axis whose angle is zero (most of the procedural layers
+// turn one axis): cos(±0) is exactly 1 and sin(±0) is exactly ±0 = angle / 2, so every product below is the same bit
+// for bit as Quaternion.setFromEuler's, signed zeros included
+function qEuler(x, y, z) {
+  const c1 = x === 0 ? 1 : Math.cos(x / 2), s1 = x === 0 ? x / 2 : Math.sin(x / 2);
+  const c2 = y === 0 ? 1 : Math.cos(y / 2), s2 = y === 0 ? y / 2 : Math.sin(y / 2);
+  const c3 = z === 0 ? 1 : Math.cos(z / 2), s3 = z === 0 ? z / 2 : Math.sin(z / 2);
+  return _q.set(s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 - s1 * s2 * c3, c1 * c2 * c3 + s1 * s2 * s3);
+}
 function addRot(bone, x, y, z) { if (x || y || z) bone.quaternion.multiply(qEuler(x, y, z)); }
 function blendRot(bone, w, x, y, z) { qEuler(x, y, z); bone.quaternion.slerp(_q, w); }
 const _ZP_ALIVE = { rootRx: 0, rootRz: 0 };
@@ -6335,7 +6397,7 @@ function poseZombieRig(z, dt, time) {
   }
   const act = r.cur ? zAction(r, r.cur) : null, dur = act ? act.getClip().duration : 1;
   if (act) {
-    const timed = { attack: z.atkT, crawl_attack: z.atkT, slam: z.atkT, roar: z.type === 'boss' ? clamp(z.roarT / 1.4, 0, 1) : null }[r.cur];
+    const c = r.cur, timed = c === 'attack' || c === 'crawl_attack' || c === 'slam' ? z.atkT : c === 'roar' ? (z.type === 'boss' ? clamp(z.roarT / 1.4, 0, 1) : null) : undefined;
     if (timed !== undefined && timed !== null && z.state !== 'dying') { act.timeScale = 0; act.time = clamp(timed, 0, 0.999) * dur; }
     else if (z.state === 'dying') act.timeScale = 0;
     else if (r.cur === 'idle') act.timeScale = 1;
@@ -6527,7 +6589,8 @@ function drawZombieRig(z, time) {
 const R3 = { W: 0, H: 0, quality: -1, tick: 0 };
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
-function onThemeChanged() { ENV_DIRTY = true; }
+let SIGNS_DIRTY = true;   // the sign buffers are repacked only when a sign's visibility or the Look changes
+function onThemeChanged() { ENV_DIRTY = true; SIGNS_DIRTY = true; }
 
 /* ---------------- instanced draw batches (world + viewmodel) ---------------- */
 const BATCHES = [new Map(), new Map()];
@@ -6547,7 +6610,7 @@ function growBatch(b, need) {
   g.setAttribute('iTint', mk(4)); g.setAttribute('iEmit', mk(3)); g.setAttribute('iSkin', mk(3));
   const im = new THREE.InstancedMesh(g, b.vm ? MAT.vm : MAT.inst, cap);
   im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  im.frustumCulled = false; im.castShadow = !b.vm; im.receiveShadow = !b.vm;
+  im.frustumCulled = false; im.castShadow = !b.vm; im.receiveShadow = !b.vm; im.matrixAutoUpdate = false;   // identity, never moves
   if (b.vm) im.layers.set(LAYER_VM);
   if (b.im) { scene.remove(b.im); b.im.dispose(); }
   scene.add(im); b.im = im; b.cap = cap;
@@ -6616,14 +6679,17 @@ function buildSigns() {
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
-    mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs';
+    mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs'; mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     const b = { mesh, list: [] }; SIGN_BATCHES.push(b);
     for (const s of g.list) { const q = { s, b, layer: g.layer.get(s.tex), vis: false }; b.list.push(q); SIGNS.push(q); }
   }
 }
-// per frame: the visible signs of each batch, packed in their original order, with this frame's flicker
+// the visible signs of each batch, packed in their original order. Everything here is fixed between events (a sign's
+// placement, seed and mode, which ones are resident, the Look's sign level), so it only runs when one of those changed
 function syncSigns(time, T) {
+  if (!SIGNS_DIRTY) return;
+  SIGNS_DIRTY = false;
   for (const b of SIGN_BATCHES) {
     const m = b.mesh, g = m.geometry, M = m.instanceMatrix.array, C = g.attributes.iCol.array, S = g.attributes.iSign.array; let n = 0;
     for (const { s, layer, vis } of b.list) {   // dead city: some signs are out; the rest hold steady (the sputtering third read as flicker)
@@ -6634,7 +6700,7 @@ function syncSigns(time, T) {
       S[n * 3] = s.seed; S[n * 3 + 1] = s.mode; S[n * 3 + 2] = layer; n++;
     }
     m.count = n; m.visible = n > 0;
-    if (n) { m.instanceMatrix.needsUpdate = true; g.attributes.iCol.needsUpdate = true; g.attributes.iSign.needsUpdate = true; }
+    if (n) { upRange(m.instanceMatrix, n * 16); upRange(g.attributes.iCol, n * 3); upRange(g.attributes.iSign, n * 3); }
   }
 }
 const DECAL_POOL = [];
@@ -6642,26 +6708,30 @@ function buildDecalPool() {
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
     const mat = decalMaterialGPU(DECAL_TEX[v]);
-    const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
+    const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false; m.matrixAutoUpdate = false;
     scene.add(m); DECAL_POOL.push(m);
   }
 }
-let _decalCounts = null; const _decalM = new Float32Array(16);
+// A decal never moves (its matrix is built once in addDecal), so each pool's matrix buffer is re-uploaded only when
+// the decals in its slots change (one added, one gone, one crossing the 150 m cut), and the alpha buffer only while
+// one of them is still fading in or out. _decalPrev remembers which decal sat in each slot last frame.
+let _decalCounts = null, _decalDirtyM = null, _decalDirtyA = null; const _decalPrev = [];
 function syncDecals() {
-  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
-  const counts = _decalCounts; counts.fill(0);
+  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) { _decalCounts = new Uint16Array(DECAL_POOL.length); _decalDirtyM = new Uint8Array(DECAL_POOL.length); _decalDirtyA = new Uint8Array(DECAL_POOL.length); }
+  const counts = _decalCounts; counts.fill(0); _decalDirtyM.fill(0); _decalDirtyA.fill(0);
+  for (let v = _decalPrev.length; v < DECAL_POOL.length; v++) _decalPrev.push([]);
   for (const d of DECALS) {
     const dd2 = (d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2;
     if (dd2 > 150 * 150) continue;
-    const m = DECAL_POOL[d.v], i = counts[d.v]++;
+    const v = d.v, m = DECAL_POOL[v], i = counts[v]++, prev = _decalPrev[v];
     const fadeAt = DECAL_LIFE - 9;
-    const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
-    m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
-    m.geometry.attributes.iAlpha.array[i] = a * 0.92;
+    const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1) * 0.92;
+    if (prev[i] !== d) { prev[i] = d; m.instanceMatrix.array.set(d.m, i * 16); _decalDirtyM[v] = 1; }
+    const A = m.geometry.attributes.iAlpha.array; if (A[i] !== a) { A[i] = a; _decalDirtyA[v] = 1; }
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
-    const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
-    if (n) { m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true; }
+    const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0; _decalPrev[v].length = n;
+    if (n) { if (_decalDirtyM[v]) upRange(m.instanceMatrix, n * 16); if (_decalDirtyA[v]) upRange(m.geometry.attributes.iAlpha, n); }
     else if (R3.warming) {   // as for the batches: one invisible decal per pool, so the first blood on the street compiles nothing
       m.instanceMatrix.array.fill(0, 0, 16); m.geometry.attributes.iAlpha.array[0] = 0; m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true;
       m.count = 1; m.visible = true;
@@ -6671,7 +6741,7 @@ function syncDecals() {
 
 /* ---------------- particles + rain ---------------- */
 const partPoints = particlesGPU(PART.data), partBuf = partPoints.userData.buf, partGeo = partPoints.geometry, partMat = partPoints.material;
-partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
+partPoints.frustumCulled = false; partPoints.renderOrder = 10; partPoints.matrixAutoUpdate = false; scene.add(partPoints);
 
 const rainGeo = (function () {
   const p = new Float32Array(RAIN_N * 2 * 3), a = new Float32Array(RAIN_N * 2 * 2);
@@ -6679,10 +6749,10 @@ const rainGeo = (function () {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
 const rainMat = rainGPU(rainGeo);
-const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
+const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; rainLines.matrixAutoUpdate = false; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
 const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
-snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
+snowPts.frustumCulled = false; snowPts.renderOrder = 11; snowPts.matrixAutoUpdate = false; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -6720,7 +6790,7 @@ const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p
 // and pickups coming and going never push a room light out.
 const STAT_PL = 11, DYN_MIN = 2, STAT_FADE = 4, STAT_STICK = 0.6;
 const _statLit = []; let _statT = 0;
-const byFD = (a, b) => a.fd - b.fd;
+const byFD = (a, b) => a.fd - b.fd, byLD = (a, b) => a.ld - b.ld;
 function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
@@ -6733,10 +6803,10 @@ function updateLights3(cam) {
   _lampsNear.length = 0; _stat.length = 0;
   for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) {
     const d = d2c(l.p, cam);
-    if (l.kind === 'lamp') { if (d < 70 * 70) _lampsNear.push(l); }
+    if (l.kind === 'lamp') { if (d < 70 * 70) { l.ld = d; _lampsNear.push(l); } }
     else if (d < 55 * 55) { l.fd = l.fw > 0 ? d * STAT_STICK : d; l.ftick = R3.tick; _stat.push(l); }
   }
-  _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  _lampsNear.sort(byLD);   // by the d² just measured
   const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
     sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
@@ -7112,7 +7182,7 @@ async function loadMeshyCars() {
     batch.setColorAt(id, c.setRGB(s.paint[0], s.paint[1], s.paint[2]));
   }
   batch.computeBoundingSphere();
-  batch.name = 'meshy-cars'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+  batch.name = 'meshy-cars'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
   scene.add(batch); WORLD_MESHES.push(batch);
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
 }
@@ -7155,7 +7225,7 @@ async function loadMeshyTrees() {
       batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
     }
     batch.computeBoundingSphere();
-    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
     scene.add(batch); WORLD_MESHES.push(batch);
     updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
   } catch (e) { console.warn('tree load failed', e); }
@@ -7208,7 +7278,7 @@ async function loadMeshyProps() {
         batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
       }
       batch.computeBoundingSphere();
-      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
       scene.add(batch); WORLD_MESHES.push(batch);
     } catch (e) { console.warn('prop load failed', kind, e); }
   }));
@@ -7228,6 +7298,7 @@ function updateWorldStreaming(cam, force = false) {
   WORLD_STREAM.active = active;
   const sr = 260;
   for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
+  SIGNS_DIRTY = true;
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
 
@@ -7391,7 +7462,7 @@ function buildVolumes() {
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
-    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; mesh.matrixAutoUpdate = false; scene.add(mesh);
   }
 }
 
@@ -8679,7 +8750,8 @@ function frame(now) {
   try {
     if (!GAME.frozen) step(dt);
     // the Armory is an opaque full-screen board, and a lost GPU context can't draw: skip the 3D frame and the HUD
-    if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); }
+    // the canvas HUD measures its element before the DOM HUD writes its text, so a changed number never forces a synchronous layout mid-frame
+    if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); drawHUD2D(GAME.time); if (GAME.state !== 'title') hudFrame(); }
     FRAME_ERR.n = 0;
   } catch (e) {
     // one bad frame is survivable; three in a row means the game is wedged: stop and say so instead of freezing silently
@@ -8815,7 +8887,7 @@ window.NQ = {
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
   setTheme, THEMES,
-  renderOnce() { render(GAME.time); if (GAME.state !== 'title') hudFrame(); drawHUD2D(GAME.time); },
+  renderOnce() { render(GAME.time); drawHUD2D(GAME.time); if (GAME.state !== 'title') hudFrame(); },
   noLoop(b) { GAME.noLoop = b; },
   particles(dt = 0.001) { updateParticles(dt); },
   bowStartDraw, bowRelease, fireArrow, selectArrow, selectSlot, camBasis, PERF, ARMORY, LOADOUT, UPG, AQ, armoryBuy, armoryPick, armoryPickTab, armoryToggleEquip, armoryRender, updateQuiverHUD, upLv, RECQ, ARCS,

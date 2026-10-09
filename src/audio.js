@@ -1,6 +1,9 @@
 /* ============================================================
    Synth audio: SFX + ambient + music, all generated
    ============================================================ */
+// an ambient level is re-aimed every frame; an exponential approach restarted at its own current value toward the same
+// target is the same curve, so a target the param already has is not re-sent (each event is an insertion on the audio thread)
+function paramTarget(p, v, t, tc) { if (p._nqv === v) return; p._nqv = v; p.setTargetAtTime(v, t, tc); }
 function fillPink(d) {   // Paul Kellet's pink noise filter
   let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
   for (let i = 0; i < d.length; i++) {
@@ -66,7 +69,9 @@ const AUD = {
   setVolume(k, x) { this.vol[k] = clamp(+x, 0, 1); this.applyVol(); },
   // the player's ears: called every frame with the eye position and view yaw (forward is -z rotated by yaw, as for the camera)
   listen(x, y, z, yaw) {
-    if (!this.ctx) return; const L = this.ctx.listener; this.lis.x = x; this.lis.y = y; this.lis.z = z;
+    if (!this.ctx) return; const L = this.ctx.listener, l = this.lis;
+    if (l.x === x && l.y === y && l.z === z && l.yaw === yaw) return;   // standing still: nothing to tell the audio thread
+    l.x = x; l.y = y; l.z = z; l.yaw = yaw;
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
     if (L.positionX) { L.positionX.value = x; L.positionY.value = y; L.positionZ.value = z; L.forwardX.value = fx; L.forwardY.value = 0; L.forwardZ.value = fz; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
     else { L.setPosition(x, y, z); L.setOrientation(fx, 0, fz, 0, 1, 0); }
@@ -190,7 +195,7 @@ const AUD = {
       this.harb = { g, hl, horn: rand(6, 20), creak: rand(3, 9) };
     }
     const H = this.harb, t = this.now();
-    H.g.gain.setTargetAtTime(0.55 * k, t, 0.6);
+    paramTarget(H.g.gain, 0.55 * k, t, 0.6);
     if (k < 0.05) return;
     H.horn -= dt; H.creak -= dt;
     if (H.horn <= 0) { H.horn = rand(28, 55); for (const f of [82, 87.5, 164]) this.tone('sawtooth', f, f * 0.985, 2.6, 0.07 * k * (f > 100 ? 0.4 : 1), H.hl, t, 0.35); }
@@ -232,14 +237,14 @@ const AUD = {
     if (!this.ctx || !this.rainG) return; const t = this.now(), L = this.rainL;
     // slow, uneven swelling like gusts pushing sheets of rain past
     const swell = 0.86 + 0.14 * Math.sin(t * 0.31) * Math.sin(t * 0.083 + 1.3) + 0.06 * Math.sin(t * 1.7 + Math.sin(t * 0.21) * 3);
-    this.rainG.gain.setTargetAtTime((0.02 + 0.24 * rain) * swell * (1 + 0.25 * wind), t, 0.5);
+    paramTarget(this.rainG.gain, (0.02 + 0.24 * rain) * swell * (1 + 0.25 * wind), t, 0.5);
     // light rain is soft and dull with a few sharp drops; heavy rain is fuller, lower and brighter
-    L.wash.f.frequency.setTargetAtTime(1100 + 900 * rain, t, 1.5);
-    L.wash.g.gain.setTargetAtTime(L.wash.base * (0.6 + 0.6 * rain), t, 1.5);
-    L.hiss.g.gain.setTargetAtTime(L.hiss.base * (0.3 + 1.4 * rain * rain), t, 1.5);
-    L.body.g.gain.setTargetAtTime(L.body.base * rain * rain * 1.6, t, 1.5);
-    this.windG.gain.setTargetAtTime(0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
-    this.windF.frequency.setTargetAtTime(320 + 260 * wind + 120 * Math.sin(t * 0.4) + 90 * Math.sin(t * 1.3), t, 0.6);
+    paramTarget(L.wash.f.frequency, 1100 + 900 * rain, t, 1.5);
+    paramTarget(L.wash.g.gain, L.wash.base * (0.6 + 0.6 * rain), t, 1.5);
+    paramTarget(L.hiss.g.gain, L.hiss.base * (0.3 + 1.4 * rain * rain), t, 1.5);
+    paramTarget(L.body.g.gain, L.body.base * rain * rain * 1.6, t, 1.5);
+    paramTarget(this.windG.gain, 0.015 + 0.09 * wind + 0.05 * snow, t, 1.2);
+    paramTarget(this.windF.frequency, 320 + 260 * wind + 120 * Math.sin(t * 0.4) + 90 * Math.sin(t * 1.3), t, 0.6);
     if (rain < 0.03) { this._dropT = t; this._plinkT = t; return; }
     // random droplets (poisson-ish spacing, clustered by the swell)
     if (this._dropT < t - 0.3) this._dropT = t;
