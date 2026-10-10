@@ -804,6 +804,35 @@ function buildOcclusion() {
   }
   const tin = new THREE.DataTexture(inn, W, H, THREE.RedFormat, THREE.UnsignedByteType); tin.magFilter = tin.minFilter = THREE.NearestFilter; tin.needsUpdate = true;
   NQU.uIndoor.value = tin;
+  // fallen litter (gpu.js nqLitter): petals pile up under the blossom cards (red), leaves under the plain trees out to their
+  // drip line (green). Blurred into drifts that thin out past the canopy edge.
+  const pet = new Float32Array(W * H), leaf = new Float32Array(W * H), Bl = WORLD.blossoms;
+  for (let k = 0; k < Bl.length; k += 12) {
+    const i = Math.round((Bl[k] - X0) / C - 0.5), j = Math.round((Bl[k + 2] - Z0) / C - 0.5);
+    if (i >= 0 && i < W && j >= 0 && j < H) pet[j * W + i] += 1;
+  }
+  for (const t of WORLD.treeSpots) {
+    const R = 0.42 * t.h, ci = (t.x - X0) / C - 0.5, cj = (t.z - Z0) / C - 0.5, rc = R / C;
+    for (let j = Math.max(0, Math.floor(cj - rc)); j <= Math.min(H - 1, Math.ceil(cj + rc)); j++)
+      for (let i = Math.max(0, Math.floor(ci - rc)); i <= Math.min(W - 1, Math.ceil(ci + rc)); i++) {
+        const d2 = ((i - ci) ** 2 + (j - cj) ** 2) / (rc * rc); if (d2 < 1) leaf[j * W + i] = Math.max(leaf[j * W + i], 1 - d2);
+      }
+  }
+  const blur = (a, r, passes) => {
+    for (let pass = 0; pass < passes; pass++) {
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const x = i + d; if (x >= 0 && x < W) s += a[j * W + x]; } tmp[j * W + i] = s / (2 * r + 1); }
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const z = j + d; if (z >= 0 && z < H) s += tmp[z * W + i]; } a[j * W + i] = s / (2 * r + 1); }
+    }
+  };
+  blur(pet, 2, 3); blur(leaf, 1, 1);
+  let pmax = 0; for (let k = 0; k < W * H; k++) if (pet[k] > pmax) pmax = pet[k];
+  const lpx = new Uint8Array(W * H * 2);
+  for (let k = 0; k < W * H; k++) {
+    lpx[k * 2] = Math.round(Math.min(1, pmax > 0 ? pet[k] / (0.3 * pmax) : 0) * 255);
+    lpx[k * 2 + 1] = Math.round(Math.min(1, leaf[k] * 1.1) * 255);
+  }
+  const tl = new THREE.DataTexture(lpx, W, H, THREE.RGFormat, THREE.UnsignedByteType); tl.magFilter = tl.minFilter = THREE.LinearFilter; tl.needsUpdate = true;
+  NQU.uLitter.value = tl;
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ----------------
@@ -1082,6 +1111,27 @@ function render3(time, W, H, fov, cam) {
   GPU_PROF.tag = null;
   renderGPU(T, W, H, time);
 }
+/* ---- weather on the lens (gpu.js grade): water builds up while rain or snow reaches the camera, dries off under cover ----
+   Covered means indoors or under anything solid overhead (an awning, a bridge, a roof), checked a few times a second. Drops
+   land faster looking up into the rain; frost takes its time to grow and melts quickly once you're inside. */
+const LENS = { t: -1, chk: 0, cover: 0, wet: 0, run: 0, frost: 0 };
+function updateLens(T, time) {
+  const dt = LENS.t < 0 ? 0 : clamp(time - LENS.t, 0, 0.25); LENS.t = time;
+  const m = camera.matrixWorld.elements, x = m[12], y = m[13], z = m[14];
+  if ((LENS.chk -= dt) <= 0) {
+    LENS.chk = 0.25; let c = 0;
+    for (const q of WORLD.indoor) if (x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1 && y < q.y1) { c = 1; break; }
+    if (!c) for (const b of WORLD.boxes) if (b.y0 > y && b.y0 < y + 14 && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) { c = 1; break; }
+    LENS.cover = c;
+  }
+  const open = 1 - LENS.cover, rk = wxRainK() * (T.rain > 0.2 ? 1 : 0.6), sk = wxSnowK(), up = clamp(0.6 + Math.sin(PLAYER.pitch) * 0.8, 0.25, 1.3);
+  const ease = (cur, want, up_, down) => cur + (want - cur) * (1 - Math.exp(-dt / (want > cur ? up_ : down)));
+  LENS.wet = ease(LENS.wet, open * Math.min(1, rk * up + sk * 0.3), 3.5, LENS.cover ? 4 : 7);
+  LENS.run = ease(LENS.run, open * clamp((rk - 0.35) * 1.6, 0, 1), 6, 2.5);
+  LENS.frost = ease(LENS.frost, open * sk, 30, LENS.cover ? 7 : 18);
+  const U = GRADE_U;
+  U.uLensDrop.value = LENS.wet; U.uLensRun.value = LENS.run * Math.min(1, LENS.wet * 1.5); U.uLensFog.value = LENS.wet * 0.22; U.uLensFrost.value = LENS.frost;
+}
 /* ---- the frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ---- */
 const _clr = new THREE.Color();
 function renderGPU(T, W, H, time) {
@@ -1091,6 +1141,7 @@ function renderGPU(T, W, H, time) {
   const U = GRADE_U;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = 0.45;
+  updateLens(T, time);
   const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2; B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
   vmCamera.layers.set((VM_ITEMS.n > 0 && !DBG.noVM) || R3.warming ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;

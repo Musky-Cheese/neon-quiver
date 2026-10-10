@@ -21,9 +21,9 @@ NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4').setGroup(renderGroup); NQN.uTe
 const GPU_BLACK = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); GPU_BLACK.needsUpdate = true;
 const GPU_WHITE = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1); GPU_WHITE.needsUpdate = true;
 const GPU_ARR = new THREE.DataArrayTexture(new Uint8Array(4 * 8).fill(128), 1, 1, 8); GPU_ARR.needsUpdate = true;
-const TEXN = { occ: texture(GPU_WHITE), indoor: texture(GPU_BLACK), refl: texture(GPU_BLACK), texA: texture(GPU_ARR), texN: texture(GPU_ARR), texR: texture(GPU_ARR) };
+const TEXN = { occ: texture(GPU_WHITE), indoor: texture(GPU_BLACK), litter: texture(GPU_BLACK), refl: texture(GPU_BLACK), texA: texture(GPU_ARR), texN: texture(GPU_ARR), texR: texture(GPU_ARR) };
 function gpuSyncTextures() {
-  TEXN.occ.value = NQU.uOcc.value || GPU_WHITE; TEXN.indoor.value = NQU.uIndoor.value || GPU_BLACK;
+  TEXN.occ.value = NQU.uOcc.value || GPU_WHITE; TEXN.indoor.value = NQU.uIndoor.value || GPU_BLACK; TEXN.litter.value = NQU.uLitter.value || GPU_BLACK;
   TEXN.texA.value = NQU.uTexA.value || GPU_ARR; TEXN.texN.value = NQU.uTexN.value || GPU_ARR; TEXN.texR.value = NQU.uTexR.value || GPU_ARR;
 }
 // point lights for the glowing air (world position + range, colour x intensity): r3.js updateLights3 fills them
@@ -38,6 +38,37 @@ const vn = Fn(([p]) => {
   return mix(mix(h21(i), h21(i.add(vec2(1, 0))), f.x), mix(h21(i.add(vec2(0, 1))), h21(i.add(vec2(1, 1))), f.x), f.y);
 }).setLayout({ name: 'nqVN', type: 'float', inputs: [{ name: 'p', type: 'vec2' }] });
 const gmod = (x, y) => x.sub(floor(x.div(y)).mul(y));   // GLSL mod (WGSL % truncates toward zero)
+// Fallen litter under the trees: every petal or leaf drawn on its own, not noise blobs. Two offset layers of jittered cells,
+// at most one piece per cell, each turned and sized at random. A cherry petal is narrow at the stalk with a notched round
+// tip; a leaf is pointed at both ends with a darker midrib. Edges are antialiased by their pixel footprint, and once a
+// piece shrinks to a few pixels the layer fades to its average colour, so the ground never shimmers in the distance.
+// p: ground position in cells, dens: 0..1 how many cells hold a piece, leaf: 0 petals, 1 leaves. Returns colour + coverage.
+const nqLitter = Fn(([p, dens, leaf]) => {
+  const col = vec3(0).toVar(), cov = float(0).toVar();
+  const avg = mix(vec3(0.92, 0.55, 0.7), vec3(0.52, 0.3, 0.1), leaf);
+  for (let L = 0; L < 2; L++) {
+    const q = p.add(vec2(L * 0.37, L * 0.71)), id = floor(q), f = fract(q).sub(0.5);
+    const h1 = h21(id.add(L * 17.3)), h2 = h21(id.add(5.17 + L)), h3 = h21(id.add(9.71 + L * 3.1)), h4 = h21(id.add(3.3 + L * 7.7));
+    const on = stepT(h1, dens.mul(L === 0 ? 1 : 0.75));
+    const a = h2.mul(6.2831), cs = cos(a), sn = sin(a);
+    const d = f.sub(vec2(h3, h4).sub(0.5).mul(0.22));
+    const lp = vec2(d.x.mul(cs).add(d.y.mul(sn)), d.y.mul(cs).sub(d.x.mul(sn))).div(mix(0.24, 0.34, h3)).toVar();
+    const x = lp.x, ax = abs(lp.y), t = clampT(x.mul(0.5).add(0.5), 0, 1);
+    const sPet = max(ax.sub(sqrt(max(x.mul(x).oneMinus(), 0)).mul(t.mul(0.32).add(0.2))), x.sub(ax.mul(1.6)).sub(0.74));
+    const sLeaf = ax.sub(x.mul(x).oneMinus().mul(0.3));
+    const s = mix(sPet, sLeaf, leaf), aa = max(length(fwidth(lp)), 1e-4);
+    const m = smoothstep(aa, aa.negate(), s).mul(on);
+    // petals: white to deep pink, a few browning; leaves: olive, amber, rust and dead brown, with a darker midrib
+    const pc = mix(vec3(1, 0.74, 0.84), vec3(0.95, 0.36, 0.58), h4).mul(t.mul(0.25).add(0.75));
+    const pcA = mix(pc, vec3(0.42, 0.27, 0.22), stepT(0.86, h2).mul(0.65));
+    const lc0 = mix(vec3(0.42, 0.4, 0.12), vec3(0.8, 0.46, 0.1), smoothstep(0.2, 0.55, h4));
+    const lc = mix(lc0, vec3(0.62, 0.17, 0.07), smoothstep(0.6, 0.8, h4)).mul(mix(1, 0.6, stepT(0.82, h4))).mul(smoothstep(0, 0.05, ax).mul(0.3).add(0.7));
+    col.assign(mix(col, mix(pcA, lc, leaf), m)); cov.assign(max(cov, m));
+  }
+  const fp = fwidth(p), far = smoothstep(0.12, 0.35, max(fp.x, fp.y));
+  col.assign(mix(col, avg, far)); cov.assign(mix(cov, dens.mul(mix(0.32, 0.28, leaf)), far));
+  return vec4(col, cov);
+}).setLayout({ name: 'nqLitter', type: 'vec4', inputs: [{ name: 'p', type: 'vec2' }, { name: 'dens', type: 'float' }, { name: 'leaf', type: 'float' }] });
 // rain rings on standing water: two drops per 0.45 m cell, each an expanding, fading ring
 const nqRipple = Fn(([p, t]) => {
   const id = floor(p).toVar(), f = fract(p).sub(0.5).toVar(), h = float(0).toVar();
@@ -186,6 +217,7 @@ function nqSurface(material, builder) {
   const rough = NQP.rough, metal = NQP.metal, rimK = NQP.rimK, envK = NQP.envK, bumpH = NQP.bump, wetRefl = NQP.wetRefl, nqOcc = NQP.occ;
   rough.assign(0.72); metal.assign(0); rimK.assign(0); envK.assign(NQN.uEnvK); bumpH.assign(0); wetRefl.assign(0); nqOcc.assign(1);
   const nqTL = float(-1).toVar(), nqTS = float(0).toVar(), nqIn = float(0).toVar();
+  const lit = vec2(0).toVar();   // fallen litter density here: x cherry petals, y leaves (r3.js buildOcclusion bakes it)
   if (city) {   // baked occlusion: how much open sky this spot sees; inside a walk-in room it is dry and evenly lit
     const B = NQN.uOccB;
     If(B.z.greaterThan(0), () => {
@@ -194,6 +226,7 @@ function nqSurface(material, builder) {
       nqOcc.assign(mix(a, 1, stepT(0.5, N0.y).mul(stepT(1.2, W.y))));
       nqIn.assign(stepT(0.5, TEXN.indoor.sample(W.xz.add(N0.xz.mul(0.3)).sub(B.xy).mul(B.zw)).r).mul(stepT(W.y, 4.5)));
       nqOcc.assign(mix(nqOcc, 0.82, nqIn));
+      lit.assign(TEXN.litter.sample(W.xz.sub(B.xy).mul(B.zw)).rg);
     });
   }
   const wetK = NQN.uWet.mul(nqIn.oneMinus()).toVar(), wet1 = clampT(wetK, 0, 1);
@@ -202,6 +235,15 @@ function nqSurface(material, builder) {
   const streak = float(0).toVar();   // rain streaks down walls: only facades, corrugated, glass, car paint and cast concrete pay for them
   If(M(0.5, 1.5).or(M(7.5, 11.5)).or(M(15.5, 16.5)), () => { streak.assign(vn(vec2(fcW.x.mul(3.1), fcW.y.mul(0.08).sub(T.mul(0.02)))).mul(vn(vec2(fcW.x.mul(11.7), fcW.y.mul(0.3)))).mul(nqIn.oneMinus())); });
   const pud2 = (s, k, wide) => max(smoothstep(...wide, vn(W.xz.mul(s))), smoothstep(0.8, 0.5, nqOcc).mul(k));
+  // petals and leaves lying where the trees dropped them, in drifts; pb: a light scatter of petals everywhere (the gardens)
+  const litter = (pb = 0) => {
+    const pk = lit.x.add(pb), leafK = stepT(pk, lit.y.sub(1e-3)), dens = clampT(max(pk, lit.y).mul(smoothstep(0.15, 0.85, vn(W.xz.mul(0.45).add(vn(W.xz.mul(1.7)).mul(0.6)))).mul(1.1).add(0.25)), 0, 0.95);   // swept into drifts
+    If(dens.greaterThan(0.015).and(N0.y.greaterThan(0.5)), () => {
+      const lc = nqLitter(W.xz.mul(mix(10, 6, leafK)), dens, leafK).toVar();
+      base.assign(mix(base, lc.rgb, lc.a)); rough.assign(mix(rough, 0.62, lc.a)); wetRefl.mulAssign(lc.a.mul(-0.7).add(1)); bumpH.addAssign(lc.a.mul(0.002)); nqTS.mulAssign(lc.a.oneMinus());   // the photo detail stays on the ground beneath
+      emis.addAssign(lc.rgb.mul(lc.a).mul(leafK.oneMinus()).mul(NQN.uNeon.mul(0.06).add(0.03)));   // petals glow faintly, like the canopy
+    });
+  };
   If(M(0.5, 1.5).or(M(8.5, 9.5)), () => {   // facades with windows (concrete panels or brick)
     If(abs(N0.y).lessThan(0.5), () => {
       const fc = fcW, cell = fc.div(vec2(2.4, 3.3)), id = floor(cell).toVar(), f = fract(cell).toVar();
@@ -362,9 +404,6 @@ function nqSurface(material, builder) {
   }).ElseIf(M(16.5, 17.5), () => {    // moss lawn strewn with fallen blossom
     const n1 = vn(W.xz.mul(0.9)), n2 = vn(W.xz.mul(7.3)), n3 = vn(W.xz.mul(31));
     base.mulAssign(n1.mul(0.5).add(0.6).add(n2.mul(0.25)).sub(n3.mul(0.15)));
-    const pet = smoothstep(0.8, 0.9, vn(W.xz.mul(5.1).add(3.7))).mul(smoothstep(0.3, 0.6, vn(W.xz.mul(0.4).add(9.1))));
-    base.assign(mix(base, vec3(0.75, 0.32, 0.45), pet.mul(0.85)));
-    emis.addAssign(vec3(0.6, 0.18, 0.3).mul(pet).mul(0.08).mul(NQN.uNeon));
     bumpH.assign(n3.mul(0.004).add(n2.mul(0.006))); rough.assign(mix(0.9, 0.55, wet1.mul(0.6))); rimK.assign(0.2);
   }).ElseIf(M(18.5, 19.5), () => {    // overgrown lawn: patchy weeds, bare mud, wet sheen
     const n1 = vn(W.xz.mul(0.7)), n2 = vn(W.xz.mul(6.1)), n3 = vn(W.xz.mul(27));
@@ -484,6 +523,8 @@ function nqSurface(material, builder) {
     const sl = sin(W.y.mul(60).add(T.mul(8))).mul(0.35).add(0.65);
     emis.addAssign(base.mul(sl).mul(1.6)); base.assign(vec3(0));
   }).Else(() => { rimK.assign(1); });
+  // petals and leaves on whatever ground lies under the trees (lawns, moss, paths, tiles, road), never on water
+  if (city) If(W.y.lessThan(0.4).and(M(17.5, 18.5).not()).and(M(22.5, 23.5).not()).and(M(4.5, 5.5).not()), () => { litter(select(M(16.5, 17.5), float(0.06), float(0))); });
   const texN = NQP.texN, texK = NQP.texK; texN.assign(N0); texK.assign(0);
   if (city) {
     If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {   // High and Ultra: CC0 photo detail, triplanar
@@ -733,6 +774,8 @@ function glassMaterialGPU() {
 const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
   uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0),
   uStreak: uniform(0.45), uStreakThr: uniform(1.8), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
+// weather on the lens (r3.js updateLens): beads of water, drops running down, a damp film, frost creeping in from the edges
+Object.assign(GRADE_U, { uLensDrop: uniform(0), uLensRun: uniform(0), uLensFog: uniform(0), uLensFrost: uniform(0) });
 const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
@@ -778,7 +821,56 @@ function buildPostGPU(q) {
   for (const g of [st1, st2, st3]) for (const rt of [g._horizontalRT, g._verticalRT]) rt.texture.type = THREE.HalfFloatType;   // HDR: the hot cores must not clip at 1
   const stT = st3.getTextureNode(), st2T = st2.getTextureNode(), st1T = st1.getTextureNode();
   const grade = Fn(() => {
-    const u = screenUV, cc = u.sub(0.5), r2 = dot(cc, cc);
+    const u0 = screenUV, cc = u0.sub(0.5), r2 = dot(cc, cc);
+    // Water on the lens. Beads land, sit and slowly evaporate; in steady rain some grow heavy and run down the glass, leaving
+    // a trail of tiny beads. Each drop is a little lens: it shows the scene behind it upside down and shrunk, dark at the rim
+    // with a glint on top. In snow, frost grows in from the frame's edges and flakes melt into small beads. Worked out in
+    // screen units one frame tall (p), so drops keep their shape at any aspect; none of it runs when the lens is dry.
+    const lOff = vec2(0).toVar(), lM = float(0).toVar(), lSh = float(0).toVar(), lFr = float(0).toVar(), lClr = float(0).toVar();
+    If(U.uLensDrop.add(U.uLensFrost).greaterThan(0.002), () => {
+      const asp = U.uRes.x.div(U.uRes.y), p = vec2(u0.x.mul(asp), u0.y).toVar(), T = U.uTime;
+      const drop = (d, r, m) => {   // keep the nearest drop's refraction, rim and glint
+        If(m.greaterThan(lM), () => {
+          const n = d.div(max(r, 1e-4)), ln = length(n);
+          lOff.assign(d.mul(-4)); lM.assign(m);
+          lSh.assign(smoothstep(0.6, 1, ln).mul(-0.22).add(smoothstep(0.3, 0, length(n.sub(vec2(-0.3, -0.4)))).mul(0.5)).mul(m));
+        });
+      };
+      const ctr = smoothstep(0.01, 0.16, r2).mul(0.65).add(0.35);   // the middle of the frame stays clearer: you still have to aim
+      for (const [sc, k] of [[9, 1], [21, 1.1]]) {   // beads: two sizes, one per cell, each with its own life
+        const q = p.mul(sc).add(sc * 0.37), id = floor(q), f = fract(q).sub(0.5);
+        const h1 = h21(id), h2 = h21(id.add(3.7)), h3 = h21(id.add(7.3)), h4 = h21(id.add(11.1));
+        const ph = fract(T.mul(mix(0.03, 0.09, h4)).add(h2.mul(7.1)));
+        const pres = smoothstep(h3, h3.add(0.12), U.uLensDrop.mul(0.42 * k).mul(ctr));
+        const r = mix(0.14, 0.33, h4).mul(smoothstep(0, 0.04, ph)).mul(smoothstep(1, 0.72, ph)).mul(pres);
+        const d = f.sub(vec2(h1, h2).sub(0.5).mul(float(0.85).sub(r.mul(2)))).mul(vec2(1, 1.12));
+        const aa = fwidth(q.x).mul(1.5);
+        drop(d.div(sc), r.div(sc), smoothstep(r.add(aa), r.mul(0.7), length(d)).mul(stepT(0.02, r)));
+      }
+      If(U.uLensRun.greaterThan(0.01), () => {   // runners: one lane every ~0.14 of the frame height, a drop sliding down now and then
+        const cs = 7, lane = floor(p.x.mul(cs)), hc = h21(vec2(lane, 3.1)), on = stepT(hc, U.uLensRun.mul(0.45));
+        const ph = fract(T.mul(mix(0.07, 0.16, h21(vec2(lane, 8.3)))).add(hc.mul(9.7)));
+        const y0 = ph.mul(1.5).sub(0.25), wob = (y) => sin(y.mul(23).add(hc.mul(9))).mul(0.006).add(sin(y.mul(7).add(hc.mul(3))).mul(0.014));
+        const dx = p.x.sub(lane.add(0.5).div(cs)).sub(wob(p.y)), r = mix(0.016, 0.026, hc).mul(on);
+        const d = vec2(dx, p.y.sub(y0).mul(0.8));
+        drop(d, r, smoothstep(r.add(0.002), r.mul(0.8), length(d)).mul(stepT(0.001, r)));
+        const tt = y0.sub(p.y).div(0.32), inT = stepT(0, tt).mul(stepT(tt, 1)).mul(on);   // the trail it leaves above it
+        const ty = floor(p.y.mul(45)), tyc = ty.add(0.5).div(45), hb = h21(vec2(lane, ty));
+        const rt = float(0.0055).mul(tt.oneMinus()).mul(stepT(0.45, hb)).mul(inT);
+        const dt = vec2(p.x.sub(lane.add(0.5).div(cs)).sub(wob(tyc)), p.y.sub(tyc));
+        drop(dt, rt, smoothstep(rt.add(0.0015), rt.mul(0.75), length(dt)).mul(stepT(0.0005, rt)));
+        lClr.assign(smoothstep(0.012, 0.004, abs(dx)).mul(inT).mul(tt.oneMinus()));   // the run wipes the damp film behind it
+      });
+      If(U.uLensFrost.greaterThan(0.005), () => {   // frost: feathery crystals growing in from the edges, heaviest in the corners
+        const k = sqrt(u0.x.mul(u0.x.oneMinus()).mul(4).mul(u0.y.mul(u0.y.oneMinus()).mul(4)));   // 0 at the frame's edge, 1 in the middle: deepest in the corners
+        const cr = vn(p.mul(3.1)).mul(0.5).add(vn(p.mul(9.3)).mul(0.3)).add(vn(p.mul(27)).mul(0.2));
+        const field = k.add(cr.sub(0.5).mul(0.3)), fr = U.uLensFrost, edge = fr.mul(0.42);
+        lFr.assign(smoothstep(edge, edge.sub(0.07), field).mul(min(fr.mul(3), float(1))));
+        lOff.addAssign(vec2(vn(p.mul(30)), vn(p.mul(30).add(5.3))).sub(0.5).mul(0.003).mul(lFr));
+      });
+      lOff.assign(vec2(lOff.x.div(asp), lOff.y));
+    });
+    const u = u0.add(lOff).toVar();
     const ab = U.uDmg.mul(0.006).add(0.0015).add(U.uAberr).mul(r2).mul(4);
     const c = vec3(S(u.add(cc.mul(ab))).r, S(u).g, S(u.sub(cc.mul(ab))).b).toVar();
     {   // contrast-adaptive sharpen: pulls back the softness of MSAA + upscaling, eased off on already-contrasty edges
@@ -787,6 +879,31 @@ function buildPostGPU(q) {
       const amp = sqrt(clampT(min(mn, vec3(2).sub(mxv)).div(max(mxv, vec3(1e-4))), 0, 1)).mul(U.uSharp);
       c.assign(max(c.add(n.add(s).add(e).add(w).mul(amp.negate()).mul(0.25)).div(vec3(1).sub(amp)), vec3(0)));
     }
+    If(lM.add(lFr).add(U.uLensFog).greaterThan(0.002), () => {   // the lens's damp film and frost soften what's behind them; drops stay sharp
+      const fogK = clampT(U.uLensFog.mul(lM.oneMinus()).mul(lClr.oneMinus()).add(lFr.mul(0.85)), 0, 1);
+      If(fogK.greaterThan(0.002), () => {
+        const o = vec2(1).div(U.uRes).mul(mix(2.5, 5, lFr)), bl = vec3(0).toVar();
+        for (let k = 0; k < 8; k++) { const a = k * 0.785 + 0.39, rr = k % 2 ? 1 : 1.9; bl.addAssign(S(u.add(o.mul(vec2(Math.cos(a) * rr, Math.sin(a) * rr))))); }   // a soft disc, not a doubled image
+        bl.mulAssign(0.125);
+        c.assign(mix(c, bl, fogK));
+        If(lFr.greaterThan(0.001), () => {   // frost: pale ice that catches the light behind it, feathered with crystal ridges
+          const asp = U.uRes.x.div(U.uRes.y), p = vec2(u0.x.mul(asp), u0.y);
+          const facet = (q) => {   // ice crystals: cellular facets, each catching the light its own way, bright along the seams
+            const qi = floor(q).toVar(), qf = fract(q).toVar(), F1 = float(9).toVar(), F2 = float(9).toVar(), id = qi.toVar();
+            for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+              const o = vec2(i, j), lo = qi.add(o), dd = length(o.add(vec2(h21(lo), h21(lo.add(5.3)))).sub(qf)).toVar();
+              If(dd.lessThan(F1), () => { F2.assign(F1); F1.assign(dd); id.assign(lo); }).ElseIf(dd.lessThan(F2), () => { F2.assign(dd); });
+            }
+            return h21(id.mul(1.7)).mul(0.5).add(smoothstep(0.07, 0, F2.sub(F1)).mul(0.7));
+          };
+          const fea = facet(p.mul(26)).mul(0.6).add(facet(p.mul(71).add(3.3)).mul(0.4)).mul(smoothstep(0, 0.6, lFr));
+          const lum = dot(bl, vec3(0.3, 0.59, 0.11));
+          const ice = bl.mul(0.62).add(vec3(0.62, 0.7, 0.8).mul(lum.mul(0.55).add(0.05))).add(vec3(0.75, 0.82, 0.92).mul(fea).mul(lum.mul(0.5).add(0.025)));
+          c.assign(mix(c, ice, lFr.mul(0.85)));
+        });
+      });
+      c.mulAssign(lSh.add(1));
+    });
     If(U.uFocus.greaterThan(0.001), () => {   // aiming: the edges of the frame soften, the target stays crisp
       const k = U.uFocus.mul(smoothstep(0.02, 0.2, r2)), acc = c.toVar(), wsum = float(1).toVar();
       for (let i = 1; i <= 6; i++) { const t = i / 6, o = cc.mul(t * 0.014).mul(k), w = 1 - t * 0.5; acc.addAssign(S(u.sub(o)).mul(w).add(S(u.add(o.mul(0.5))).mul(w * 0.5))); wsum.addAssign(w * 1.5); }
