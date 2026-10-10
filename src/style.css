@@ -256,6 +256,15 @@ button, select, input { font-family: var(--f); }
 .sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
 #loading, #nogl, #nojs { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
 #nogl, #nojs { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
+/* boot progress: the fill eases toward each step's target over that step's expected length (a CSS transition, so it
+   creeps on while the main thread is busy compiling); the sweep is a transform animation, also off the main thread */
+.ld { display: grid; justify-items: center; gap: 14px; width: min(340px, 100%); }
+.ld-title { color: var(--ink); }
+.ld-track { position: relative; width: 100%; height: 3px; overflow: hidden; background: rgba(233, 236, 255, 0.1); }
+#ldFill { position: absolute; inset: 0; background: linear-gradient(90deg, var(--mag), var(--cyan)); box-shadow: 0 0 10px rgba(41, 231, 255, 0.5); transform-origin: left; transform: scaleX(0.03); transition: transform 1s cubic-bezier(0.25, 0.7, 0.3, 1); }
+.ld-sweep { position: absolute; top: 0; bottom: 0; left: 0; width: 30%; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent); transform: translateX(-100%); animation: ldSweep 1.6s linear infinite; will-change: transform; }
+@keyframes ldSweep { to { transform: translateX(340%); } }
+.ld-step { font-size: 11px; letter-spacing: 0.22em; color: var(--dim); }
 
 @media (max-width: 860px) {
   #scr-title { grid-template-columns: 1fr; align-content: start; background: rgba(7, 6, 15, 0.8); }

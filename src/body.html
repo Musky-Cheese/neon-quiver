@@ -144,7 +144,14 @@
     </div>
   </section>
 
-  <div id="loading">Unsealing Sector 7…</div>
+  <!-- boot (game.js) moves the bar and names each step; the sweep runs on the compositor, so it keeps moving while the page is busy -->
+  <div id="loading" role="status">
+    <div class="ld">
+      <div class="ld-title">Unsealing Sector 7…</div>
+      <div class="ld-track"><div id="ldFill"></div><div class="ld-sweep"></div></div>
+      <div id="ldStep" class="ld-step">Loading the game</div>
+    </div>
+  </div>
   <!-- crash / GPU-reset screen: plain script, so it still works if the game module never loads -->
   <div id="sysErr" role="alert" hidden>
     <div class="sys-panel">

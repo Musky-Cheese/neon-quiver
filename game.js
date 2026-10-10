@@ -9548,10 +9548,23 @@ function gpuDeviceLost(info) {
 const GPU = { name: '', soft: false, lost: false };
 
 /* ---------------- boot ---------------- */
+// the loading screen: name the step, and ease the bar toward `to` over roughly how long the step takes (measured on an
+// integrated laptop GPU, where boot is slowest). The steps between them run without yielding, so let one frame paint
+// the new label and start the transition first. A hidden tab skips the wait: nothing would paint, and rAF never fires there
+function bootStep(label, to, secs) {
+  $('ldStep').textContent = label;
+  const f = $('ldFill'); f.style.transitionDuration = secs + 's'; f.style.transform = 'scaleX(' + to + ')';
+  if (document.hidden) return Promise.resolve();
+  return new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 100); });
+}
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
   await Promise.all([loadModels(), loadAdArt()]); makeDecalTextures();
-  buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
+  await bootStep('Building the city', 0.16, 1.5);
+  buildCity(); buildWorldSpatialIndex(); buildNav();
+  await bootStep('Wiring the neon', 0.34, 4.5);
+  buildWorld3();
+  await bootStep('Loading models', 0.44, 1.5);
   await Promise.all([
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
     loadMeshyCars(),
@@ -9560,6 +9573,7 @@ async function boot() {
   ]);
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
   loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
+  await bootStep('Preparing graphics · a few seconds', 0.95, 8);
   gpuCheck();
   wireUI(); adsInit();
   // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
