@@ -973,7 +973,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, warmShaders, nqMaterial, backend: () => NQ_BACKEND, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
+  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, LENS, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

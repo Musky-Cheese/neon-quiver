@@ -1205,6 +1205,8 @@ function glassMaterialGPU() {
 const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: uniform(1), uAberr: uniform(0), uSharp: uniform(0.3), uSat: uniform(1), uGrade: uniform(new THREE.Vector3(1, 1, 1)),
   uLift: uniform(new THREE.Vector3()), uRes: uniform(new THREE.Vector2(1, 1)), uFocus: uniform(0),
   uStreak: uniform(0.45), uStreakThr: uniform(1.8), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
+// weather on the lens (r3.js updateLens): beads of water, drops running down, a damp film, frost creeping in from the edges
+Object.assign(GRADE_U, { uLensDrop: uniform(0), uLensRun: uniform(0), uLensFog: uniform(0), uLensFrost: uniform(0) });
 const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
@@ -1250,7 +1252,56 @@ function buildPostGPU(q) {
   for (const g of [st1, st2, st3]) for (const rt of [g._horizontalRT, g._verticalRT]) rt.texture.type = THREE.HalfFloatType;   // HDR: the hot cores must not clip at 1
   const stT = st3.getTextureNode(), st2T = st2.getTextureNode(), st1T = st1.getTextureNode();
   const grade = Fn(() => {
-    const u = screenUV, cc = u.sub(0.5), r2 = dot(cc, cc);
+    const u0 = screenUV, cc = u0.sub(0.5), r2 = dot(cc, cc);
+    // Water on the lens. Beads land, sit and slowly evaporate; in steady rain some grow heavy and run down the glass, leaving
+    // a trail of tiny beads. Each drop is a little lens: it shows the scene behind it upside down and shrunk, dark at the rim
+    // with a glint on top. In snow, frost grows in from the frame's edges and flakes melt into small beads. Worked out in
+    // screen units one frame tall (p), so drops keep their shape at any aspect; none of it runs when the lens is dry.
+    const lOff = vec2(0).toVar(), lM = float(0).toVar(), lSh = float(0).toVar(), lFr = float(0).toVar(), lClr = float(0).toVar();
+    If(U.uLensDrop.add(U.uLensFrost).greaterThan(0.002), () => {
+      const asp = U.uRes.x.div(U.uRes.y), p = vec2(u0.x.mul(asp), u0.y).toVar(), T = U.uTime;
+      const drop = (d, r, m) => {   // keep the nearest drop's refraction, rim and glint
+        If(m.greaterThan(lM), () => {
+          const n = d.div(max(r, 1e-4)), ln = length(n);
+          lOff.assign(d.mul(-4)); lM.assign(m);
+          lSh.assign(smoothstep(0.6, 1, ln).mul(-0.22).add(smoothstep(0.3, 0, length(n.sub(vec2(-0.3, -0.4)))).mul(0.5)).mul(m));
+        });
+      };
+      const ctr = smoothstep(0.01, 0.16, r2).mul(0.65).add(0.35);   // the middle of the frame stays clearer: you still have to aim
+      for (const [sc, k] of [[9, 1], [21, 1.1]]) {   // beads: two sizes, one per cell, each with its own life
+        const q = p.mul(sc).add(sc * 0.37), id = floor(q), f = fract(q).sub(0.5);
+        const h1 = h21(id), h2 = h21(id.add(3.7)), h3 = h21(id.add(7.3)), h4 = h21(id.add(11.1));
+        const ph = fract(T.mul(mix(0.03, 0.09, h4)).add(h2.mul(7.1)));
+        const pres = smoothstep(h3, h3.add(0.12), U.uLensDrop.mul(0.42 * k).mul(ctr));
+        const r = mix(0.14, 0.33, h4).mul(smoothstep(0, 0.04, ph)).mul(smoothstep(1, 0.72, ph)).mul(pres);
+        const d = f.sub(vec2(h1, h2).sub(0.5).mul(float(0.85).sub(r.mul(2)))).mul(vec2(1, 1.12));
+        const aa = fwidth(q.x).mul(1.5);
+        drop(d.div(sc), r.div(sc), smoothstep(r.add(aa), r.mul(0.7), length(d)).mul(stepT(0.02, r)));
+      }
+      If(U.uLensRun.greaterThan(0.01), () => {   // runners: one lane every ~0.14 of the frame height, a drop sliding down now and then
+        const cs = 7, lane = floor(p.x.mul(cs)), hc = h21(vec2(lane, 3.1)), on = stepT(hc, U.uLensRun.mul(0.45));
+        const ph = fract(T.mul(mix(0.07, 0.16, h21(vec2(lane, 8.3)))).add(hc.mul(9.7)));
+        const y0 = ph.mul(1.5).sub(0.25), wob = (y) => sin(y.mul(23).add(hc.mul(9))).mul(0.006).add(sin(y.mul(7).add(hc.mul(3))).mul(0.014));
+        const dx = p.x.sub(lane.add(0.5).div(cs)).sub(wob(p.y)), r = mix(0.016, 0.026, hc).mul(on);
+        const d = vec2(dx, p.y.sub(y0).mul(0.8));
+        drop(d, r, smoothstep(r.add(0.002), r.mul(0.8), length(d)).mul(stepT(0.001, r)));
+        const tt = y0.sub(p.y).div(0.32), inT = stepT(0, tt).mul(stepT(tt, 1)).mul(on);   // the trail it leaves above it
+        const ty = floor(p.y.mul(45)), tyc = ty.add(0.5).div(45), hb = h21(vec2(lane, ty));
+        const rt = float(0.0055).mul(tt.oneMinus()).mul(stepT(0.45, hb)).mul(inT);
+        const dt = vec2(p.x.sub(lane.add(0.5).div(cs)).sub(wob(tyc)), p.y.sub(tyc));
+        drop(dt, rt, smoothstep(rt.add(0.0015), rt.mul(0.75), length(dt)).mul(stepT(0.0005, rt)));
+        lClr.assign(smoothstep(0.012, 0.004, abs(dx)).mul(inT).mul(tt.oneMinus()));   // the run wipes the damp film behind it
+      });
+      If(U.uLensFrost.greaterThan(0.005), () => {   // frost: feathery crystals growing in from the edges, heaviest in the corners
+        const k = sqrt(u0.x.mul(u0.x.oneMinus()).mul(4).mul(u0.y.mul(u0.y.oneMinus()).mul(4)));   // 0 at the frame's edge, 1 in the middle: deepest in the corners
+        const cr = vn(p.mul(3.1)).mul(0.5).add(vn(p.mul(9.3)).mul(0.3)).add(vn(p.mul(27)).mul(0.2));
+        const field = k.add(cr.sub(0.5).mul(0.3)), fr = U.uLensFrost, edge = fr.mul(0.42);
+        lFr.assign(smoothstep(edge, edge.sub(0.07), field).mul(min(fr.mul(3), float(1))));
+        lOff.addAssign(vec2(vn(p.mul(30)), vn(p.mul(30).add(5.3))).sub(0.5).mul(0.003).mul(lFr));
+      });
+      lOff.assign(vec2(lOff.x.div(asp), lOff.y));
+    });
+    const u = u0.add(lOff).toVar();
     const ab = U.uDmg.mul(0.006).add(0.0015).add(U.uAberr).mul(r2).mul(4);
     const c = vec3(S(u.add(cc.mul(ab))).r, S(u).g, S(u.sub(cc.mul(ab))).b).toVar();
     {   // contrast-adaptive sharpen: pulls back the softness of MSAA + upscaling, eased off on already-contrasty edges
@@ -1259,6 +1310,31 @@ function buildPostGPU(q) {
       const amp = sqrt(clampT(min(mn, vec3(2).sub(mxv)).div(max(mxv, vec3(1e-4))), 0, 1)).mul(U.uSharp);
       c.assign(max(c.add(n.add(s).add(e).add(w).mul(amp.negate()).mul(0.25)).div(vec3(1).sub(amp)), vec3(0)));
     }
+    If(lM.add(lFr).add(U.uLensFog).greaterThan(0.002), () => {   // the lens's damp film and frost soften what's behind them; drops stay sharp
+      const fogK = clampT(U.uLensFog.mul(lM.oneMinus()).mul(lClr.oneMinus()).add(lFr.mul(0.85)), 0, 1);
+      If(fogK.greaterThan(0.002), () => {
+        const o = vec2(1).div(U.uRes).mul(mix(2.5, 5, lFr)), bl = vec3(0).toVar();
+        for (let k = 0; k < 8; k++) { const a = k * 0.785 + 0.39, rr = k % 2 ? 1 : 1.9; bl.addAssign(S(u.add(o.mul(vec2(Math.cos(a) * rr, Math.sin(a) * rr))))); }   // a soft disc, not a doubled image
+        bl.mulAssign(0.125);
+        c.assign(mix(c, bl, fogK));
+        If(lFr.greaterThan(0.001), () => {   // frost: pale ice that catches the light behind it, feathered with crystal ridges
+          const asp = U.uRes.x.div(U.uRes.y), p = vec2(u0.x.mul(asp), u0.y);
+          const facet = (q) => {   // ice crystals: cellular facets, each catching the light its own way, bright along the seams
+            const qi = floor(q).toVar(), qf = fract(q).toVar(), F1 = float(9).toVar(), F2 = float(9).toVar(), id = qi.toVar();
+            for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+              const o = vec2(i, j), lo = qi.add(o), dd = length(o.add(vec2(h21(lo), h21(lo.add(5.3)))).sub(qf)).toVar();
+              If(dd.lessThan(F1), () => { F2.assign(F1); F1.assign(dd); id.assign(lo); }).ElseIf(dd.lessThan(F2), () => { F2.assign(dd); });
+            }
+            return h21(id.mul(1.7)).mul(0.5).add(smoothstep(0.07, 0, F2.sub(F1)).mul(0.7));
+          };
+          const fea = facet(p.mul(26)).mul(0.6).add(facet(p.mul(71).add(3.3)).mul(0.4)).mul(smoothstep(0, 0.6, lFr));
+          const lum = dot(bl, vec3(0.3, 0.59, 0.11));
+          const ice = bl.mul(0.62).add(vec3(0.62, 0.7, 0.8).mul(lum.mul(0.55).add(0.05))).add(vec3(0.75, 0.82, 0.92).mul(fea).mul(lum.mul(0.5).add(0.025)));
+          c.assign(mix(c, ice, lFr.mul(0.85)));
+        });
+      });
+      c.mulAssign(lSh.add(1));
+    });
     If(U.uFocus.greaterThan(0.001), () => {   // aiming: the edges of the frame soften, the target stays crisp
       const k = U.uFocus.mul(smoothstep(0.02, 0.2, r2)), acc = c.toVar(), wsum = float(1).toVar();
       for (let i = 1; i <= 6; i++) { const t = i / 6, o = cc.mul(t * 0.014).mul(k), w = 1 - t * 0.5; acc.addAssign(S(u.sub(o)).mul(w).add(S(u.add(o.mul(0.5))).mul(w * 0.5))); wsum.addAssign(w * 1.5); }
@@ -7772,6 +7848,27 @@ function render3(time, W, H, fov, cam) {
   GPU_PROF.tag = null;
   renderGPU(T, W, H, time);
 }
+/* ---- weather on the lens (gpu.js grade): water builds up while rain or snow reaches the camera, dries off under cover ----
+   Covered means indoors or under anything solid overhead (an awning, a bridge, a roof), checked a few times a second. Drops
+   land faster looking up into the rain; frost takes its time to grow and melts quickly once you're inside. */
+const LENS = { t: -1, chk: 0, cover: 0, wet: 0, run: 0, frost: 0 };
+function updateLens(T, time) {
+  const dt = LENS.t < 0 ? 0 : clamp(time - LENS.t, 0, 0.25); LENS.t = time;
+  const m = camera.matrixWorld.elements, x = m[12], y = m[13], z = m[14];
+  if ((LENS.chk -= dt) <= 0) {
+    LENS.chk = 0.25; let c = 0;
+    for (const q of WORLD.indoor) if (x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1 && y < q.y1) { c = 1; break; }
+    if (!c) for (const b of WORLD.boxes) if (b.y0 > y && b.y0 < y + 14 && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) { c = 1; break; }
+    LENS.cover = c;
+  }
+  const open = 1 - LENS.cover, rk = wxRainK() * (T.rain > 0.2 ? 1 : 0.6), sk = wxSnowK(), up = clamp(0.6 + Math.sin(PLAYER.pitch) * 0.8, 0.25, 1.3);
+  const ease = (cur, want, up_, down) => cur + (want - cur) * (1 - Math.exp(-dt / (want > cur ? up_ : down)));
+  LENS.wet = ease(LENS.wet, open * Math.min(1, rk * up + sk * 0.3), 3.5, LENS.cover ? 4 : 7);
+  LENS.run = ease(LENS.run, open * clamp((rk - 0.35) * 1.6, 0, 1), 6, 2.5);
+  LENS.frost = ease(LENS.frost, open * sk, 30, LENS.cover ? 7 : 18);
+  const U = GRADE_U;
+  U.uLensDrop.value = LENS.wet; U.uLensRun.value = LENS.run * Math.min(1, LENS.wet * 1.5); U.uLensFog.value = LENS.wet * 0.22; U.uLensFrost.value = LENS.frost;
+}
 /* ---- the frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ---- */
 const _clr = new THREE.Color();
 function renderGPU(T, W, H, time) {
@@ -7781,6 +7878,7 @@ function renderGPU(T, W, H, time) {
   const U = GRADE_U;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = 0.45;
+  updateLens(T, time);
   const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2; B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
   vmCamera.layers.set((VM_ITEMS.n > 0 && !DBG.noVM) || R3.warming ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;
@@ -8988,7 +9086,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, warmShaders, nqMaterial, backend: () => NQ_BACKEND, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
+  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, LENS, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },
