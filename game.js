@@ -9428,14 +9428,14 @@ function frame(now) {
   if (SETTINGS.res !== 'auto') PERF.scale = 1;
   else if (!window.__NQ_CAPTURE && GAME.state === 'playing' && raw < 0.5) {
     PERF.acc += raw; PERF.n++;
-    if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.35) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
+    if (PERF.n >= 90) { const avg = PERF.acc / PERF.n; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); if (avg > 0.024 && PERF.scale > 0.25) PERF.scale *= 0.8; else if (avg < 0.012 && PERF.scale < 1) PERF.scale = Math.min(1, PERF.scale * 1.15); PERF.acc = 0; PERF.n = 0; }
     // fast path for genuinely slow machines: a third of a second where nearly every frame misses 30 fps steps the
     // resolution down right away instead of waiting out the 1.5 s window (a lone hitch never qualifies; scaling back
     // up still only happens through the slow window above, so fast frames render exactly as before)
     PERF.fAcc += raw; PERF.fN++; if (raw > 0.028) PERF.fSlow++;
     if (PERF.fN >= 20) {
       const avg = PERF.fAcc / PERF.fN;
-      if (PERF.fSlow >= 16 && avg > 0.034 && PERF.scale > 0.35) { PERF.scale *= 0.8; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); PERF.acc = 0; PERF.n = 0; }
+      if (PERF.fSlow >= 16 && avg > 0.034 && PERF.scale > 0.25) { PERF.scale *= 0.8; PERF.pressure = lerp(PERF.pressure, clamp((avg - 1 / 60) / 0.018, 0, 1), 0.5); PERF.acc = 0; PERF.n = 0; }
       PERF.fAcc = 0; PERF.fN = 0; PERF.fSlow = 0;
     }
   }
@@ -9470,13 +9470,14 @@ function setCamera(time) {
 }
 function render(time) {
   // resolution: up to native 4K (Ultra supersamples at 1.5x), times the Resolution setting: Auto scales the pixel
-  // count down when frames run slow and back up when they don't; a fixed percentage scales width and height
+  // count down when frames run slow and back up when they don't; a fixed percentage scales width and height.
+  // Auto scales this screen's own pixel count: scaling the 4K cap instead only ever bit on screens near 4K, so a slow
+  // laptop's 1-2 MP window never got a pixel fewer however far PERF.scale fell
   const q = SETTINGS.quality, auto = SETTINGS.res === 'auto';
-  const budget = 8.3e6 * (auto ? PERF.scale : 1);
   const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
   let dpr = Math.min(2, devicePixelRatio || 1); if (q >= 3) dpr = Math.min(2.25, dpr * 1.5);
-  if (cw * ch * dpr * dpr > budget) dpr = Math.sqrt(budget / (cw * ch));
-  if (!auto) dpr *= SETTINGS.res / 100;
+  if (cw * ch * dpr * dpr > 8.3e6) dpr = Math.sqrt(8.3e6 / (cw * ch));
+  dpr *= auto ? Math.sqrt(PERF.scale) : SETTINGS.res / 100;
   if (window.__NQ_CAPTURE) dpr = window.__NQ_CAPTURE_DPR || 1;
   const W = Math.max(1, Math.round(cw * dpr)), H = Math.max(1, Math.round(ch * dpr));
   mpi = 0; WORLD_ITEMS.n = 0; VM_ITEMS.n = 0;
