@@ -804,6 +804,35 @@ function buildOcclusion() {
   }
   const tin = new THREE.DataTexture(inn, W, H, THREE.RedFormat, THREE.UnsignedByteType); tin.magFilter = tin.minFilter = THREE.NearestFilter; tin.needsUpdate = true;
   NQU.uIndoor.value = tin;
+  // fallen litter (gpu.js nqLitter): petals pile up under the blossom cards (red), leaves under the plain trees out to their
+  // drip line (green). Blurred into drifts that thin out past the canopy edge.
+  const pet = new Float32Array(W * H), leaf = new Float32Array(W * H), Bl = WORLD.blossoms;
+  for (let k = 0; k < Bl.length; k += 12) {
+    const i = Math.round((Bl[k] - X0) / C - 0.5), j = Math.round((Bl[k + 2] - Z0) / C - 0.5);
+    if (i >= 0 && i < W && j >= 0 && j < H) pet[j * W + i] += 1;
+  }
+  for (const t of WORLD.treeSpots) {
+    const R = 0.42 * t.h, ci = (t.x - X0) / C - 0.5, cj = (t.z - Z0) / C - 0.5, rc = R / C;
+    for (let j = Math.max(0, Math.floor(cj - rc)); j <= Math.min(H - 1, Math.ceil(cj + rc)); j++)
+      for (let i = Math.max(0, Math.floor(ci - rc)); i <= Math.min(W - 1, Math.ceil(ci + rc)); i++) {
+        const d2 = ((i - ci) ** 2 + (j - cj) ** 2) / (rc * rc); if (d2 < 1) leaf[j * W + i] = Math.max(leaf[j * W + i], 1 - d2);
+      }
+  }
+  const blur = (a, r, passes) => {
+    for (let pass = 0; pass < passes; pass++) {
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const x = i + d; if (x >= 0 && x < W) s += a[j * W + x]; } tmp[j * W + i] = s / (2 * r + 1); }
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const z = j + d; if (z >= 0 && z < H) s += tmp[z * W + i]; } a[j * W + i] = s / (2 * r + 1); }
+    }
+  };
+  blur(pet, 2, 3); blur(leaf, 1, 1);
+  let pmax = 0; for (let k = 0; k < W * H; k++) if (pet[k] > pmax) pmax = pet[k];
+  const lpx = new Uint8Array(W * H * 2);
+  for (let k = 0; k < W * H; k++) {
+    lpx[k * 2] = Math.round(Math.min(1, pmax > 0 ? pet[k] / (0.3 * pmax) : 0) * 255);
+    lpx[k * 2 + 1] = Math.round(Math.min(1, leaf[k] * 1.1) * 255);
+  }
+  const tl = new THREE.DataTexture(lpx, W, H, THREE.RGFormat, THREE.UnsignedByteType); tl.magFilter = tl.minFilter = THREE.LinearFilter; tl.needsUpdate = true;
+  NQU.uLitter.value = tl;
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ----------------
