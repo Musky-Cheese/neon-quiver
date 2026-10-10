@@ -143,7 +143,7 @@ const NQU = {
   uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
   uReflOn: { value: 0 }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
-  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
+  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null }, uLitter: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
   uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
   uSnowCov: { value: 0 },   // weather.js: how snowed-over the city is
