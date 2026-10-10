@@ -2,6 +2,8 @@
 
 A first-person archery survival game that runs in the browser. Sector 7 is under quarantine: a rain-soaked cyberpunk city at night, with the plaza at its heart and districts all around it. Hold the bow, draw, release, and survive endless zombie waves that find you wherever you go.
 
+**▶ Play it now: [musky-cheese.github.io/neon-quiver](https://musky-cheese.github.io/neon-quiver/)** (desktop browser, keyboard and mouse)
+
 - **Rendered with three.js** (r186, vendored in `vendor/`, no CDN): physically based lighting, shadows from the street lamps, mirror-accurate reflections in the puddles with rain ripples, light cones in the rain, procedural brick, concrete, steel and asphalt detail, bloom, and real-time ambient occlusion on Ultra.
 - **Download:** about 1.7 MB compressed on a first visit (the page, the game, three.js's WebGPU build with its node post-processing, and the zombie rig). The textured zombie models and the surface textures (3.7 MB) stream in behind it.
 - **Rigged zombies:** one skinned mesh per infected, rigged and animated in Blender (`models/zombie.glb`, built by `tools/make_rig.py`). Walk, run, heavy, crawl, attack, slam and roar clips blend into hit reactions and physics-driven deaths.
