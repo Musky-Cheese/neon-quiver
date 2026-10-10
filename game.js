@@ -675,7 +675,11 @@ function nqSurface(material, builder) {
       emis.addAssign(lc.rgb.mul(lc.a).mul(leafK.oneMinus()).mul(NQN.uNeon.mul(0.06).add(0.03)));   // petals glow faintly, like the canopy
     });
   };
-  If(M(0.5, 1.5).or(M(8.5, 9.5)), () => {   // facades with windows (concrete panels or brick)
+  // Facades only come on the merged city geometry (untextured static), so zombies, the bow, instanced and textured models
+  // never compile this branch: it is the heaviest one, and every variant that carried it cost seconds at load.
+  const facadeOn = kind === 'static' && !hasMap && !D.NQ_TREE && !D.NQ_CARDS;
+  If(facadeOn ? M(0.5, 1.5).or(M(8.5, 9.5)) : float(0).greaterThan(1), () => {   // facades with windows (concrete panels or brick)
+    if (!facadeOn) return;
     If(abs(N0.y).lessThan(0.5), () => {
       const fc = fcW, cell = fc.div(vec2(2.4, 3.3)), id = floor(cell).toVar(), f = fract(cell).toVar();
       // Far windows span a few pixels, so hard window edges, mullions, blinds and the room parallax resolved to a different
@@ -684,13 +688,24 @@ function nqSurface(material, builder) {
       // up close nothing changes.
       const fw = fwidth(cell).toVar(), px = float(1).div(max(fw.x, fw.y).add(1e-5)).toVar(), det = smoothstep(5, 22, px).toVar();
       const edge = (e, v, w) => smoothstep(e.sub(w), e.add(w), v);
-      const win = edge(float(0.16), f.x, fw.x).mul(edge(float(0.84), f.x, fw.x).oneMinus()).mul(edge(float(0.22), f.y, fw.y)).mul(edge(float(0.78), f.y, fw.y).oneMinus()).toVar();
+      // Each building picks a facade style, carried in the tenths of its material id (city.js facadeStyle), so no new shader
+      // variant: 0 punched windows, 1 office curtain wall, 2 ribbon windows, 3 paired narrow windows, 4 tall slots between piers.
+      // The window opening per style, in cell units (style 3 splits the 2.4 m bay into two half-bays).
+      const brk = mat.greaterThan(8.5), sty = floor(mat.sub(select(brk, float(9), float(1))).mul(10).add(0.5)).toVar();
+      const S = (a, b, c, d, e) => select(sty.lessThan(0.5), float(a), select(sty.lessThan(1.5), float(b), select(sty.lessThan(2.5), float(c), select(sty.lessThan(3.5), float(d), float(e)))));
+      const twin = sty.greaterThan(2.5).and(sty.lessThan(3.5)), offc = sty.greaterThan(0.5).and(sty.lessThan(1.5)).and(brk.not());
+      const wx = select(twin, fract(f.x.mul(2)), f.x).toVar(), fwx = select(twin, fw.x.mul(2), fw.x).toVar();
+      const x0 = S(0.16, 0.04, -1, 0.22, 0.24).toVar(), x1 = S(0.84, 0.96, 2, 0.78, 0.76).toVar(), y0 = S(0.22, 0.12, 0.3, 0.16, 0.06).toVar(), y1 = S(0.78, 0.92, 0.74, 0.82, 0.94).toVar();
+      const rect = (ix, iy) => edge(x0.add(ix), wx, fwx).mul(edge(x1.sub(ix), wx, fwx).oneMinus()).mul(edge(y0.add(iy), f.y, fw.y)).mul(edge(y1.sub(iy), f.y, fw.y).oneMinus());
+      const win = rect(0, 0).toVar();
+      // the glass sits inside a frame a few centimetres wide; like the rest of the fine detail it fades out with distance
+      const glass = mix(win, rect(select(twin, float(0.04), float(0.022)), float(0.016)), det).toVar(), frame = win.sub(glass).toVar();
       // The building seed used to hash the raw normal. three derives the world normal from the view-space one through the
       // camera matrix, so it carried rounding noise that changed with every turn of the head, and the hash turned that
       // noise into a different set of lit windows each frame. Rounded, the normal's contribution is exact per facade.
       const bseed = h21(floor(W.xz.div(37)).add(floor(N0.xz.mul(3.1).add(0.5)))).toVar();
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
-      const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
+      const floorLit = stepT(select(offc, float(0.94), float(0.968)), h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
       const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
       const wc = select(seed.greaterThan(0.93), vec3(1.0, 0.25, 0.6), select(seed.greaterThan(0.84), vec3(0.25, 0.85, 1.0), vec3(1.0, 0.68, 0.38))).toVar();
       wc.assign(mix(wc, vec3(1.0, 0.66, 0.36).mul(h21(id.add(3.7)).mul(0.6).add(0.7)), NQN.uWinWarm));
@@ -698,14 +713,16 @@ function nqSurface(material, builder) {
       wc.assign(mix(wc, vec3(0.36, 0.6, 1.0).mul(vn(vec2(T.mul(4.7).add(seed.mul(40)), seed.mul(9))).mul(0.55).add(0.45)), tv));
       wc.assign(mix(wc, vec3(0.8, 0.9, 1.0), floorLit));
       // inside the glass: a room gradient, mullions, and some blinds half drawn
-      const mull = max(smoothstep(0, 0.012, abs(f.x.sub(0.5))).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(0.62))).oneMinus()).mul(det);
+      // (the ribbon windows also break at every bay; the narrow and slot windows have no centre mullion, only a transom)
+      const mxd = select(sty.lessThan(1.5), abs(f.x.sub(0.5)), select(sty.lessThan(2.5), min(abs(f.x.sub(0.5)), min(f.x, f.x.oneMinus())), float(1)));
+      const mull = max(smoothstep(0, 0.012, mxd).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(S(0.62, 0.84, -1, 0.66, 0.7)))).oneMinus()).mul(det);
       const drawn = stepT(h21(id.add(9.1)).mul(0.8).oneMinus(), f.y.oneMinus()), hasBlind = h21(id.add(5.3)).lessThan(0.35);   // how far the blind is pulled down
       const blind = select(hasBlind, mix(drawn.mul(0.5), stepT(0.5, fract(f.y.mul(18))).mul(drawn), det), float(0));   // 18 slats, or their average coverage when they can't be resolved
       const room = smoothstep(0.2, 0.8, f.y).mul(0.55).add(0.45).mul(h21(id.add(1.9)).mul(0.6).add(0.4)).toVar();
       If(lit.mul(win).greaterThan(0.5), () => {   // interior mapping: trace the view ray into a box room behind the glass
         const V = normalize(W.sub(cameraPosition));
         const d = vec3(select(abs(N0.x).greaterThan(0.5), V.z, V.x), V.y, max(dot(V, N0).negate(), 0.05)).toVar();
-        const rs = vec2(2.4, 3.3), p = f.mul(rs), dep = h21(id.add(2.3)).mul(1.6).add(2.2);
+        const rs = vec2(select(twin, float(1.2), float(2.4)), 3.3), p = vec2(wx, f.y).mul(rs), dep = h21(id.add(2.3)).mul(1.6).add(2.2);
         const tx = select(d.x.greaterThan(0), rs.x.sub(p.x), p.x.negate()).div(select(abs(d.x).lessThan(1e-4), float(1e-4), d.x));
         const ty = select(d.y.greaterThan(0), rs.y.sub(p.y), p.y.negate()).div(select(abs(d.y).lessThan(1e-4), float(1e-4), d.y));
         const tz = dep.div(d.z), t = min(min(tx, ty), tz).toVar();
@@ -719,30 +736,62 @@ function nqSurface(material, builder) {
         room.assign(mix(room, sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)), det));       // the plain gradient stands in where the room is too small to read
       });
       // lit windows hold steady (the random quarter-second blackouts read as flicker, not as a failing grid)
-      const wk = win.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
+      const wk = glass.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
       // Below ~3 px per window the lit cells are sub-pixel sparkle: every step moved the pixel grid onto different random
       // cells, so distant windows twinkled on and off. There the per-cell lights blend into the facade's mean window glow
       // (the lit share × window area × mean room brightness × mean colour), the way a mipmap would average them.
       const far = smoothstep(1.5, 3.5, px), pLit = clampT(bseed.mul(-0.1).add(0.82).oneMinus(), 0, 1).add(stepT(4.5, W.y).mul(0.03)).mul(stepT(1.2, W.y));
-      const avg = pLit.mul(0.17).mul(vec3(0.92, 0.66, 0.45));
+      const area = min(x1, 1).sub(max(x0, 0)).mul(y1.sub(y0)).div(0.3808);   // window share of the wall, relative to the punched grid's
+      const avg = pLit.mul(0.17).mul(area).mul(vec3(0.92, 0.66, 0.45));
       emis.addAssign(mix(avg, wk.mul(wc), far).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
-      const wall = vec3(0).toVar();
-      If(mat.greaterThan(8.5), () => {   // brick tenements
+      const wall = vec3(0).toVar(), spd = float(0).toVar();   // spd: the curtain wall's glazed spandrel panels
+      const fine = smoothstep(60, 160, px).toVar();             // centimetre detail (plank marks, tie holes, cracks): only right up close
+      If(brk, () => {   // brick tenements: a stone lintel over every opening and a stone sill under it
         const br = select(NQN.uTexOn.greaterThan(0.5), vec2(0.5, 0), nqBrick(fc));
         wall.assign(base.mul(br.x.mul(0.5).add(0.75)).mul(br.y.mul(-0.55).add(1))); bumpH.assign(br.y.mul(-0.012));
-      }).Else(() => {                     // concrete panels: seams every floor and bay, blotchy weathering
+        const jamb = edge(x0.sub(0.05), wx, fwx).mul(edge(x1.add(0.05), wx, fwx).oneMinus());
+        const lin = jamb.mul(edge(y1, f.y, fw.y).mul(edge(y1.add(0.07), f.y, fw.y).oneMinus()).add(edge(y0.sub(0.04), f.y, fw.y).mul(edge(y0, f.y, fw.y).oneMinus()))).mul(smoothstep(3, 8, px));
+        wall.assign(mix(wall, vec3(0.19, 0.18, 0.165).mul(vn(fc.mul(6)).mul(0.25).add(0.75)), lin)); bumpH.addAssign(lin.mul(0.012));
+      }).ElseIf(sty.lessThan(0.5), () => {   // precast panels: seams every floor and bay, blotchy weathering
         const seam = max(smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus(), smoothstep(0, 0.02, abs(f.x.sub(0.02))).oneMinus());
         const panel = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.25).add(0.8).add(vn(fc.mul(4.3)).mul(0.1));
         wall.assign(base.mul(panel).mul(seam.mul(-0.45).add(1))); bumpH.assign(seam.mul(-0.01));
+      }).ElseIf(sty.lessThan(1.5), () => {   // curtain wall: dark glazed spandrels between the floors, a joint at every mullion line
+        const seam = max(smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus(), smoothstep(0, 0.012, min(abs(f.x.sub(0.5)), min(f.x, f.x.oneMinus()))).oneMinus().mul(det));
+        const pane = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.2).add(0.8);
+        wall.assign(base.mul(vec3(0.55, 0.62, 0.75)).mul(pane).mul(seam.mul(-0.5).add(1))); bumpH.assign(seam.mul(-0.006)); spd.assign(1);
+      }).ElseIf(sty.lessThan(2.5), () => {   // ribbon windows: long smooth painted bands, one joint per floor
+        const seam = smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus();
+        const band = vn(fc.mul(vec2(0.25, 1.2)).add(bseed.mul(17))).mul(0.18).add(0.9).add(vn(fc.mul(5.1)).mul(0.06));
+        wall.assign(base.mul(band).mul(seam.mul(-0.4).add(1)).mul(1.08)); bumpH.assign(seam.mul(-0.008));
+      }).ElseIf(sty.lessThan(3.5), () => {   // render (stucco): fine grain, patches painted over in a lighter coat, hairline cracks
+        const grain = vn(fc.mul(11)).mul(0.14).add(0.86);
+        const patch = smoothstep(0.55, 0.62, vn(fc.mul(0.5).add(bseed.mul(23))));
+        const crack = smoothstep(0.012, 0, abs(vn(fc.mul(vec2(1.3, 0.8)).add(7.1)).sub(0.5))).mul(smoothstep(0.45, 0.7, vn(fc.mul(0.7)))).mul(fine);
+        wall.assign(base.mul(grain).mul(mix(1, 1.18, patch)).mul(crack.mul(-0.6).add(1)).mul(1.05)); bumpH.assign(grain.mul(0.004).sub(crack.mul(0.006)));
+      }).Else(() => {                        // board-formed concrete: plank marks, form-tie holes, piers standing proud between the slots
+        const pier = max(smoothstep(0.2, 0.17, f.x), smoothstep(0.8, 0.83, f.x));
+        const panel = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.25).add(0.8);
+        const board = smoothstep(0.86, 0.96, fract(fc.y.div(0.3))).mul(fine);
+        const tie = smoothstep(0.065, 0.045, length(fract(fc.div(vec2(0.6, 0.9))).sub(0.5))).mul(fine);
+        wall.assign(base.mul(panel).mul(mix(0.82, 1.12, pier)).mul(board.mul(-0.18).add(1)).mul(tie.mul(-0.5).add(1))); bumpH.assign(pier.mul(0.02).sub(board.mul(0.003)).sub(tie.mul(0.004)));
       });
-      // dirty water runs down from every sill; sheltered walls collect more soot
-      const sill = stepT(0.16, f.x).mul(stepT(f.x, 0.84)).mul(stepT(f.y, 0.22)).mul(smoothstep(0, 0.22, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
+      // dirty water runs down from every sill; sheltered walls collect more soot (less of it sticks to the glazed spandrels)
+      const sill = stepT(x0, wx).mul(stepT(wx, x1)).mul(stepT(f.y, y0)).mul(smoothstep(0, y0, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
       const grime = smoothstep(4, 0, fc.y).mul(0.35).add(streak.mul(0.5)).add(sill.mul(0.55)).add(nqOcc.oneMinus().mul(0.45));
-      wall.mulAssign(clampT(grime, 0, 1.4).mul(-0.5).add(1));
-      base.assign(mix(wall, vec3(0.015, 0.02, 0.04), win));
-      bumpH.subAssign(win.mul(0.03));
-      rough.assign(mix(mix(0.85, 0.45, streak.mul(wetK)), 0.08, win)); metal.assign(win.mul(0.2)); envK.assign(NQN.uEnvK.mul(mix(streak.add(0.6), 1.6, win)));
-      nqTL.assign(select(mat.greaterThan(8.5), float(2), float(1))); nqTS.assign(win.oneMinus().mul(0.9));
+      wall.mulAssign(clampT(grime, 0, 1.4).mul(spd.mul(-0.5).add(1)).mul(-0.5).add(1));
+      // dark glass: every pane a slightly different tint and polish, so the reflections break up pane by pane, and behind some
+      // of the dark ones a curtain is drawn; the frame round it is painted timber on the brick, dark metal elsewhere
+      const gh = h21(id.add(6.6)).toVar(), cur = select(h21(id.add(7.7)).lessThan(0.3), drawn, float(0)).mul(lit.oneMinus()).mul(det);
+      const gcol = mix(vec3(0.012, 0.018, 0.036), vec3(0.018, 0.028, 0.03), gh).mul(gh.mul(0.7).add(0.65));
+      // a dark pane still mirrors the glow over the city: a faint cool sheen, brighter toward the top, each pane at its own tilt
+      const sheen = smoothstep(y0, y1, f.y.add(wx.sub(0.5).mul(gh.sub(0.5)).mul(0.6))).mul(1.1).add(0.15).mul(gh.mul(0.8).add(0.4));
+      emis.addAssign(NQN.uFogCol.mul(sheen).mul(glass).mul(lit.oneMinus()).mul(cur.mul(-0.8).add(1)).mul(NQN.uEnvK).mul(0.55));
+      base.assign(mix(mix(wall, select(brk, vec3(0.13, 0.12, 0.105), vec3(0.075, 0.08, 0.09)), frame), mix(gcol, vec3(0.05, 0.04, 0.034).mul(gh.add(0.5)), cur.mul(0.7)), glass));
+      bumpH.subAssign(glass.mul(0.03).add(frame.mul(0.012)));
+      rough.assign(mix(mix(mix(mix(0.85, 0.45, streak.mul(wetK)), 0.3, spd), 0.4, frame), gh.mul(0.1).add(0.04), glass));
+      metal.assign(mix(mix(spd.mul(0.3), 0.45, frame), 0.2, glass)); envK.assign(NQN.uEnvK.mul(mix(mix(mix(streak.add(0.6), 1.4, spd), 1, frame), 1.6, glass)));
+      nqTL.assign(select(brk, float(2), float(1))); nqTS.assign(win.oneMinus().mul(mix(0.9, 0.3, spd)));
     }).ElseIf(mat.greaterThan(8.5), () => { base.mulAssign(0.8); });
   }).ElseIf(M(1.5, 2.5), () => {      // plaza tiles, wet
     const q = W.xz.div(4), gd = abs(fract(q.sub(0.5)).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
@@ -3515,7 +3564,7 @@ function buildCity() {
   const bagC = [[0.02, 0.02, 0.025], [0.03, 0.035, 0.04], [0.12, 0.1, 0.05]];
   let shopN = 0; const nextShop = () => SHOP_ORDER[shopN % SHOP_ORDER.length];
   // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
-  function shopBody(x0, x1, z0, z1, h, face, col, type) {
+  function shopBody(x0, x1, z0, z1, h, face, col, type, smat = 1) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = face[1] === 'z' ? x1 - x0 : z1 - z0, DF = face[1] === 'z' ? z1 - z0 : x1 - x0;
     const tx = face[1] === 'z' ? 1 : 0, tz = 1 - tx, nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const fx = nx ? (nx < 0 ? x0 : x1) : cx, fz = nz ? (nz < 0 ? z0 : z1) : cz;
@@ -3531,42 +3580,108 @@ function buildCity() {
     const glass = (a, dd, y, sa, sd, sy, c) => { const [x, z] = wp(a, dd); WORLD.glass.push({ m: M4.trs(M4.create(), x, y, z, 0, th, 0, sa, sy, sd), c }); };
     const halo = (a, dd, y, s, c) => { const [x, z] = wp(a, dd); WORLD.halos.push({ p: [x, y, z], s, c }); };
     { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
-    Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, 1); Sl(-span / 2, span / 2, 0, DF, RH, h);
-    Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, 1); Sl(-span / 2, span / 2, D, DF, 0, RH);
-    for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, 1); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
+    Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, smat); Sl(-span / 2, span / 2, 0, DF, RH, h);
+    Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, smat); Sl(-span / 2, span / 2, D, DF, 0, RH);
+    for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, smat); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
     propShopInterior({ g, Bl, BlP, Sl, W, D, RH, R: mulberry(1000 + shopN++ * 97), M: Mr, MS, wp, glass, halo,
       light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
   }
-  // real depth on the street face: stone sills and lintels on the painted window grid (2.4 m bays, 3.3 m floors, world-aligned
-  // exactly like the facade shader), a ledge every other floor and a cornice at the roofline. Lower floors only: that's what you see.
-  function facadeDetail(x0, x1, z0, z1, h, face, col, groundTop, sills) {
+  // real depth on the street face, following the building's facade style (the window openings the facade shader paints, on
+  // its 2.4 m bays and 3.3 m floors, world-aligned): stone sills and lintels round punched and paired windows, a continuous
+  // sill under ribbon windows, metal fins up a curtain wall, deep piers between slot windows; a ledge every other floor and a
+  // cornice at the roofline. The per-window pieces stop after the lower floors: that's what you see.
+  const FSTYLE = [[0.16, 0.84, 0.22, 0.78], [0.04, 0.96, 0.12, 0.92], [0, 1, 0.3, 0.74], [0.22, 0.78, 0.16, 0.82], [0.24, 0.76, 0.06, 0.94]];
+  function facadeDetail(x0, x1, z0, z1, h, face, col, groundTop, sills, sty = 0) {
     const alongX = face === '-z' || face === '+z', a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
     const plane = face === '-z' ? z0 : face === '+z' ? z1 : face === '-x' ? x0 : x1, out = face[0] === '-' ? -1 : 1;
     const stone = [col[0] * 1.25 + 0.035, col[1] * 1.25 + 0.035, col[2] * 1.25 + 0.035];
-    const bx = (along, y, oOut, sA, sy, sO, c = stone) => { const cc = plane + out * oOut; if (alongX) B(along, y, cc, sA, sy, sO, c, 0, 16); else B(cc, y, along, sO, sy, sA, c, 0, 16); };
-    const floors = Math.floor(h / 3.3), kMin = Math.max(0, Math.ceil((groundTop + 0.4) / 3.3 - 0.22)), kMax = Math.min(floors - 1, kMin + 4);
+    const bx = (along, y, oOut, sA, sy, sO, c = stone, mat = 16) => { const cc = plane + out * oOut; if (alongX) B(along, y, cc, sA, sy, sO, c, 0, mat); else B(cc, y, along, sO, sy, sA, c, 0, mat); };
+    const [wx0, wx1, wy0, wy1] = FSTYLE[sty], half = sty === 3, ww = (wx1 - wx0) * (half ? 1.2 : 2.4);
+    const floors = Math.floor(h / 3.3), kMin = Math.max(0, Math.ceil((groundTop + 0.4) / 3.3 - wy0)), kMax = Math.min(floors - 1, kMin + 4);
     for (let k = kMin; k <= kMax; k++) {
-      const ys = (k + 0.22) * 3.3, yl = (k + 0.78) * 3.3; if (yl + 0.3 > h - 1.2) break;
-      for (let id = Math.ceil(a0 / 2.4 + 0.02); (id + 1) * 2.4 <= a1 - 0.05; id++) {
-        const c = (id + 0.5) * 2.4;
-        if (sills) bx(c, ys - 0.06, 0.1, 1.86, 0.12, 0.2);
-        bx(c, yl + 0.08, 0.06, 1.78, 0.16, 0.12);
+      const ys = (k + wy0) * 3.3, yl = (k + wy1) * 3.3; if (yl + 0.3 > h - 1.2) break;
+      if (sty === 0 || sty === 3) for (let id = Math.ceil(a0 / 2.4 + 0.02); (id + 1) * 2.4 <= a1 - 0.05; id++) for (const c of half ? [(id + 0.25) * 2.4, (id + 0.75) * 2.4] : [(id + 0.5) * 2.4]) {
+        if (sills) bx(c, ys - 0.06, 0.1, ww + 0.23, 0.12, 0.2);
+        bx(c, yl + 0.08, 0.06, ww + 0.15, 0.16, 0.12);
       }
-      if ((k - kMin) % 2 === 1) bx((a0 + a1) / 2, (k + 1) * 3.3 + 0.02, 0.08, a1 - a0, 0.14, 0.16);
+      if (sty === 2) bx((a0 + a1) / 2, ys - 0.06, 0.12, a1 - a0, 0.12, 0.24);
+      if ((k - kMin) % 2 === 1 && sty !== 1 && sty !== 4) bx((a0 + a1) / 2, (k + 1) * 3.3 + 0.02, 0.08, a1 - a0, 0.14, 0.16);
+    }
+    if (sty === 1 || sty === 4) {   // full-height relief at every bay line, from above the shopfront to the cornice
+      const top = h - 0.8, y0 = groundTop + 0.3, fin = sty === 1, c = fin ? [0.1, 0.1, 0.115] : [col[0] * 1.12 + 0.01, col[1] * 1.12 + 0.01, col[2] * 1.12 + 0.01];
+      if (top - y0 > 3) for (let id = Math.ceil((a0 + 0.6) / 2.4); id * 2.4 <= a1 - 0.6; id++) bx(id * 2.4, (y0 + top) / 2, fin ? 0.09 : 0.16, fin ? 0.07 : 0.5, top - y0, fin ? 0.18 : 0.32, c, fin ? 4 : 16);
     }
     if (h > 8) bx((a0 + a1) / 2, h - 0.3, 0.2, a1 - a0 + 0.3, 0.45, 0.4);
+  }
+  // a parapet round a roof's edge
+  function roofRim(cx, cz, w, d, y, c = [0.05, 0.05, 0.06]) {
+    for (const s of [-1, 1]) { B(cx, y + 0.5, cz + s * (d / 2 - 0.15), w, 1, 0.3, c); B(cx + s * (w / 2 - 0.15), y + 0.5, cz, 0.3, 1, d - 0.6, c); }
+  }
+  // the skyline: what stands on a roof (y is the top of the roof cap). The old tenements carry a timber water tank on a steel
+  // stand; a tower gets a stepped crown, a slender spire, a crown of neon fins, a helipad, or a railing round its plant.
+  // RB is the building's own dice. Scenery only: nothing up here is solid.
+  const CROWN_NEON = [NEON.mag, NEON.cyan, NEON.amber, NEON.violet];
+  function roofTop(RB, cx, cz, w, d, y, col, tenement, smat) {
+    const rr = (a, b) => a + RB() * (b - a), Mt = M4.create(), STEEL = [0.07, 0.07, 0.08];
+    const beacon = (x, yy, z) => B(x, yy, z, 0.6, 0.6, 0.6, NEON.red, 3, 24);
+    if (tenement) {
+      if (RB() < 0.7) {
+        const tx = cx + rr(-w / 5, w / 5), tz = cz + rr(-d / 5, d / 5), R0 = rr(1.2, 1.6), th = rr(2.4, 3.2), legH = rr(1.4, 2.2), y0 = y + legH;
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(tx + sx * R0 * 0.62, y + legH / 2, tz + sz * R0 * 0.62, 0.14, legH, 0.14, STEEL, 0, 4);
+        B(tx, y0 - 0.06, tz, R0 * 1.75, 0.12, R0 * 1.75, STEEL, 0, 4);
+        g.cyl(M4.trs(Mt, tx, y0 + th / 2, tz, 0, 0, 0, R0 * 2, th, R0 * 2), [0.15, 0.1, 0.07], 0, 13, 16);                 // staves
+        for (const k of [0.2, 0.55, 0.88]) g.cyl(M4.trs(Mt, tx, y0 + th * k, tz, 0, 0, 0, R0 * 2.04, 0.07, R0 * 2.04), STEEL, 0, 4, 16, 0.5, 0.5, false);   // hoops
+        g.cyl(M4.trs(Mt, tx, y0 + th + 0.45, tz, 0, 0, 0, R0 * 2.12, 0.9, R0 * 2.12), [0.06, 0.06, 0.065], 0, 4, 16, 0.06, 0.5);   // conical lid
+      }
+      if (RB() < 0.5) roofRim(cx, cz, w, d, y - 0.6, [0.07, 0.065, 0.06]);
+      return;
+    }
+    const k = RB(), big = Math.min(w, d);
+    if (k < 0.22 && big > 9) {            // stepped crown: two or three shrinking storeys, a mast on top
+      let cw = w * 0.72, cd = d * 0.72, yy = y;
+      for (let i = 0, n = RB() < 0.5 ? 2 : 3; i < n; i++) { const sh = rr(3.3, 6.6); B(cx, yy + sh / 2, cz, cw, sh, cd, col, 0, smat); B(cx, yy + sh + 0.25, cz, cw + 0.2, 0.5, cd + 0.2, [0.05, 0.05, 0.06]); yy += sh + 0.5; cw *= 0.7; cd *= 0.7; }
+      if (RB() < 0.7) { const mh = rr(5, 12); B(cx, yy + mh / 2, cz, 0.3, mh, 0.3, [0.1, 0.1, 0.12], 0, 4); beacon(cx, yy + mh + 0.3, cz); }
+    } else if (k < 0.36 && big > 9) {     // a slender spire on a plinth
+      const sh = rr(14, 34), pr = big * 0.2;
+      B(cx, y + 1, cz, pr * 1.6, 2, pr * 1.6, [0.06, 0.06, 0.07], 0, 4);
+      g.cyl(M4.trs(Mt, cx, y + 2 + sh / 2, cz, 0, 0, 0, pr, sh, pr), [0.09, 0.09, 0.11], 0, 4, 8, 0.03, 0.5);
+      beacon(cx, y + 2 + sh + 0.3, cz);
+    } else if (k < 0.56) {                // a crown of neon fins along the roof edge
+      const c = CROWN_NEON[Math.floor(RB() * 4)], fh = rr(2.2, 4.5);
+      for (const s of [-1, 1]) {
+        for (let a = -w / 2 + 0.6; a <= w / 2 - 0.6; a += 2.4) B(cx + a, y + fh / 2, cz + s * (d / 2 - 0.2), 0.14, fh, 0.14, c, 1.5);
+        for (let a = -d / 2 + 0.6; a <= d / 2 - 0.6; a += 2.4) B(cx + s * (w / 2 - 0.2), y + fh / 2, cz + a, 0.14, fh, 0.14, c, 1.5);
+        B(cx, y + fh + 0.06, cz + s * (d / 2 - 0.2), w - 1, 0.12, 0.12, STEEL, 0, 4); B(cx + s * (w / 2 - 0.2), y + fh + 0.06, cz, 0.12, 0.12, d - 1, STEEL, 0, 4);
+      }
+    } else if (k < 0.7 && big > 14) {     // a helipad: a raised deck, its lit ring and corner lamps
+      const pw = Math.min(big - 3, 12);
+      B(cx, y + 0.9, cz, pw, 0.3, pw, [0.06, 0.06, 0.07], 0, 16);
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { B(cx + sx * pw * 0.35, y + 0.37, cz + sz * pw * 0.35, 0.3, 0.75, 0.3, STEEL, 0, 4); B(cx + sx * (pw / 2 - 0.2), y + 1.12, cz + sz * (pw / 2 - 0.2), 0.25, 0.15, 0.25, NEON.lime, 2.5); }
+      g.ring(M4.trs(Mt, cx, y + 1.07, cz, 0, 0, 0, pw * 0.36, 1, pw * 0.36), NEON.amber, 1.8, 0, 1, 0.03, 40, 4);
+    } else if (RB() < 0.6) {              // a railing round the roof plant
+      for (const s of [-1, 1]) for (const yy of [0.55, 1.05]) { B(cx, y + yy, cz + s * (d / 2 - 0.4), w - 0.8, 0.06, 0.06, STEEL, 0, 4); B(cx + s * (w / 2 - 0.4), y + yy, cz, 0.06, 0.06, d - 0.8, STEEL, 0, 4); }
+      for (const s of [-1, 1]) { for (let a = -w / 2 + 0.4; a <= w / 2 - 0.4; a += 1.6) B(cx + a, y + 0.55, cz + s * (d / 2 - 0.4), 0.06, 1.1, 0.06, STEEL, 0, 4);
+        for (let a = -d / 2 + 0.4; a <= d / 2 - 0.4; a += 1.6) B(cx + s * (w / 2 - 0.4), y + 0.55, cz + a, 0.06, 1.1, 0.06, STEEL, 0, 4); }
+    }
   }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0, h0 = h;
     const col = opt.col || facadeCols[Math.floor(R() * facadeCols.length)];
-    if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop);
-    else { B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1); solid(x0, x1, 0, h, z0, z1); }
-    // setback tier
-    if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, 1); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2); h += h2; }
-    // roof bits
-    B(cx, h + 0.6, cz, w, 1.2, d, [0.05, 0.05, 0.06]);
-    for (let i = 0; i < 3; i++) B(cx + r(-w / 3, w / 3), h + 1.8, cz + r(-d / 3, d / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
-    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
+    // the facade style and everything on the roof roll their own dice, seeded by the plot, so the rest of the city never moves
+    const RB = mulberry(Math.round(x0 * 131 + z0 * 977 + 7)), fm = opt.mat || 1;
+    const sty = opt.industrial || (fm !== 1 && fm !== 9) ? 0 : fm === 9 ? [0, 0, 0, 3, 3, 4][Math.floor(RB() * 6)] : opt.tenement ? [0, 2, 3, 3][Math.floor(RB() * 4)] : [0, 0, 1, 1, 2, 3, 4][Math.floor(RB() * 7)];
+    const smat = fm + sty * 0.1;
+    if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop, smat);
+    else { B(cx, h / 2, cz, w, h, d, col, 0, smat); solid(x0, x1, 0, h, z0, z1); }
+    // setback tier (the lower roof gets a parapet: the tier used to stand on it bare)
+    let tw = w, td = d;
+    if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, smat); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2);
+      roofRim(cx, cz, w, d, h); h += h2; tw = w * s; td = d * s; }
+    // roof bits: a cap the size of the top block (it used to be the whole plot, a slab hanging out over any setback), plant on it
+    B(cx, h + 0.6, cz, tw + 0.2, 1.2, td + 0.2, [0.05, 0.05, 0.06]);   // (just inside the neon trim a tier may carry, so the trim shows)
+    for (let i = 0; i < 3; i++) B(cx + r(-tw / 3, tw / 3), h + 1.8, cz + r(-td / 3, td / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
+    if (R() < 0.7) { const ax = cx + r(-tw / 4, tw / 4), az = cz + r(-td / 4, td / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
+    if (!opt.industrial) roofTop(RB, cx, cz, tw, td, h + 1.2, col, opt.tenement, smat);
     // facade orientation
     let fx, fz, ry, tx, tz, span; // facade point & normal toward plaza
     if (face === '-z') { fz = z0 - 0.02; fx = cx; ry = Math.PI; tx = 1; tz = 0; span = w; }
@@ -3575,7 +3690,7 @@ function buildCity() {
     else { fx = x1 + 0.02; fz = cz; ry = Math.PI / 2; tx = 0; tz = 1; span = d; }
     const nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const P = (along, y, out) => [fx + tx * along + nx * out, y, fz + tz * along + nz * out];
-    if (!opt.industrial) facadeDetail(x0, x1, z0, z1, h0, face, col, opt.tenement ? 3 : 6.7, !opt.tenement);
+    if (!opt.industrial) facadeDetail(x0, x1, z0, z1, h0, face, col, opt.tenement ? 3 : 6.7, !opt.tenement, sty);
     if (opt.industrial) {   // warehouse: roll-up shutters, a hazard strip and a caged work light, no shop signs
       const n = Math.max(1, Math.floor(span / 9));
       for (let i = 0; i < n; i++) { const a = (i - (n - 1) / 2) * (span / n); const p = P(a, 2.6, 0.06); B(p[0], 2.6, p[2], tx ? 4.2 : 0.12, 5.2, tz ? 4.2 : 0.12, [0.2, 0.19, 0.17], 0, 8);
@@ -3729,11 +3844,14 @@ function buildCity() {
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
     const col = facadeCols[Math.floor(R() * facadeCols.length)];
-    B(x, h / 2, z, w, h, d, col, 0, 1);
-    if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, 1); h += h2; }
-    if (R() < 0.5) { B(x, h + 0.5, z, w + 0.4, 0.5, d + 0.4, neonPick(), 1.6); }
-    if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); B(x - w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); }
+    const RB = mulberry(Math.round(x * 131 + z * 977 + 3)), smat = 1 + [0, 0, 1, 1, 2, 3, 4][Math.floor(RB() * 7)] * 0.1, h0 = h;
+    B(x, h / 2, z, w, h, d, col, 0, smat);
+    let tw = w, td = d;   // the top block's footprint: the roof trim and the crown sit on it, not on the whole plot
+    if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, smat); h += h2; tw = w * 0.6; td = d * 0.6; }
+    if (R() < 0.5) { B(x, h + 0.5, z, tw + 0.4, 0.5, td + 0.4, neonPick(), 1.6); }
+    if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h0 / 2, z + d / 2, 0.6, h0, 0.6, nc, 2); B(x - w / 2, h0 / 2, z + d / 2, 0.6, h0, 0.6, nc, 2); }
     if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4, 24);
+    else roofTop(RB, x, z, tw, td, h, col, false, smat);
     if (mx < 130) solid(x - w / 2, x + w / 2, 0, h, z - d / 2, z + d / 2);
   }
   // the Spire — megatower at the end of the north avenue

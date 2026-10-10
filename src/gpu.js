@@ -244,7 +244,11 @@ function nqSurface(material, builder) {
       emis.addAssign(lc.rgb.mul(lc.a).mul(leafK.oneMinus()).mul(NQN.uNeon.mul(0.06).add(0.03)));   // petals glow faintly, like the canopy
     });
   };
-  If(M(0.5, 1.5).or(M(8.5, 9.5)), () => {   // facades with windows (concrete panels or brick)
+  // Facades only come on the merged city geometry (untextured static), so zombies, the bow, instanced and textured models
+  // never compile this branch: it is the heaviest one, and every variant that carried it cost seconds at load.
+  const facadeOn = kind === 'static' && !hasMap && !D.NQ_TREE && !D.NQ_CARDS;
+  If(facadeOn ? M(0.5, 1.5).or(M(8.5, 9.5)) : float(0).greaterThan(1), () => {   // facades with windows (concrete panels or brick)
+    if (!facadeOn) return;
     If(abs(N0.y).lessThan(0.5), () => {
       const fc = fcW, cell = fc.div(vec2(2.4, 3.3)), id = floor(cell).toVar(), f = fract(cell).toVar();
       // Far windows span a few pixels, so hard window edges, mullions, blinds and the room parallax resolved to a different
@@ -253,13 +257,24 @@ function nqSurface(material, builder) {
       // up close nothing changes.
       const fw = fwidth(cell).toVar(), px = float(1).div(max(fw.x, fw.y).add(1e-5)).toVar(), det = smoothstep(5, 22, px).toVar();
       const edge = (e, v, w) => smoothstep(e.sub(w), e.add(w), v);
-      const win = edge(float(0.16), f.x, fw.x).mul(edge(float(0.84), f.x, fw.x).oneMinus()).mul(edge(float(0.22), f.y, fw.y)).mul(edge(float(0.78), f.y, fw.y).oneMinus()).toVar();
+      // Each building picks a facade style, carried in the tenths of its material id (city.js facadeStyle), so no new shader
+      // variant: 0 punched windows, 1 office curtain wall, 2 ribbon windows, 3 paired narrow windows, 4 tall slots between piers.
+      // The window opening per style, in cell units (style 3 splits the 2.4 m bay into two half-bays).
+      const brk = mat.greaterThan(8.5), sty = floor(mat.sub(select(brk, float(9), float(1))).mul(10).add(0.5)).toVar();
+      const S = (a, b, c, d, e) => select(sty.lessThan(0.5), float(a), select(sty.lessThan(1.5), float(b), select(sty.lessThan(2.5), float(c), select(sty.lessThan(3.5), float(d), float(e)))));
+      const twin = sty.greaterThan(2.5).and(sty.lessThan(3.5)), offc = sty.greaterThan(0.5).and(sty.lessThan(1.5)).and(brk.not());
+      const wx = select(twin, fract(f.x.mul(2)), f.x).toVar(), fwx = select(twin, fw.x.mul(2), fw.x).toVar();
+      const x0 = S(0.16, 0.04, -1, 0.22, 0.24).toVar(), x1 = S(0.84, 0.96, 2, 0.78, 0.76).toVar(), y0 = S(0.22, 0.12, 0.3, 0.16, 0.06).toVar(), y1 = S(0.78, 0.92, 0.74, 0.82, 0.94).toVar();
+      const rect = (ix, iy) => edge(x0.add(ix), wx, fwx).mul(edge(x1.sub(ix), wx, fwx).oneMinus()).mul(edge(y0.add(iy), f.y, fw.y)).mul(edge(y1.sub(iy), f.y, fw.y).oneMinus());
+      const win = rect(0, 0).toVar();
+      // the glass sits inside a frame a few centimetres wide; like the rest of the fine detail it fades out with distance
+      const glass = mix(win, rect(select(twin, float(0.04), float(0.022)), float(0.016)), det).toVar(), frame = win.sub(glass).toVar();
       // The building seed used to hash the raw normal. three derives the world normal from the view-space one through the
       // camera matrix, so it carried rounding noise that changed with every turn of the head, and the hash turned that
       // noise into a different set of lit windows each frame. Rounded, the normal's contribution is exact per facade.
       const bseed = h21(floor(W.xz.div(37)).add(floor(N0.xz.mul(3.1).add(0.5)))).toVar();
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
-      const floorLit = stepT(0.968, h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
+      const floorLit = stepT(select(offc, float(0.94), float(0.968)), h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
       const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
       const wc = select(seed.greaterThan(0.93), vec3(1.0, 0.25, 0.6), select(seed.greaterThan(0.84), vec3(0.25, 0.85, 1.0), vec3(1.0, 0.68, 0.38))).toVar();
       wc.assign(mix(wc, vec3(1.0, 0.66, 0.36).mul(h21(id.add(3.7)).mul(0.6).add(0.7)), NQN.uWinWarm));
@@ -267,14 +282,16 @@ function nqSurface(material, builder) {
       wc.assign(mix(wc, vec3(0.36, 0.6, 1.0).mul(vn(vec2(T.mul(4.7).add(seed.mul(40)), seed.mul(9))).mul(0.55).add(0.45)), tv));
       wc.assign(mix(wc, vec3(0.8, 0.9, 1.0), floorLit));
       // inside the glass: a room gradient, mullions, and some blinds half drawn
-      const mull = max(smoothstep(0, 0.012, abs(f.x.sub(0.5))).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(0.62))).oneMinus()).mul(det);
+      // (the ribbon windows also break at every bay; the narrow and slot windows have no centre mullion, only a transom)
+      const mxd = select(sty.lessThan(1.5), abs(f.x.sub(0.5)), select(sty.lessThan(2.5), min(abs(f.x.sub(0.5)), min(f.x, f.x.oneMinus())), float(1)));
+      const mull = max(smoothstep(0, 0.012, mxd).oneMinus(), smoothstep(0, 0.015, abs(f.y.sub(S(0.62, 0.84, -1, 0.66, 0.7)))).oneMinus()).mul(det);
       const drawn = stepT(h21(id.add(9.1)).mul(0.8).oneMinus(), f.y.oneMinus()), hasBlind = h21(id.add(5.3)).lessThan(0.35);   // how far the blind is pulled down
       const blind = select(hasBlind, mix(drawn.mul(0.5), stepT(0.5, fract(f.y.mul(18))).mul(drawn), det), float(0));   // 18 slats, or their average coverage when they can't be resolved
       const room = smoothstep(0.2, 0.8, f.y).mul(0.55).add(0.45).mul(h21(id.add(1.9)).mul(0.6).add(0.4)).toVar();
       If(lit.mul(win).greaterThan(0.5), () => {   // interior mapping: trace the view ray into a box room behind the glass
         const V = normalize(W.sub(cameraPosition));
         const d = vec3(select(abs(N0.x).greaterThan(0.5), V.z, V.x), V.y, max(dot(V, N0).negate(), 0.05)).toVar();
-        const rs = vec2(2.4, 3.3), p = f.mul(rs), dep = h21(id.add(2.3)).mul(1.6).add(2.2);
+        const rs = vec2(select(twin, float(1.2), float(2.4)), 3.3), p = vec2(wx, f.y).mul(rs), dep = h21(id.add(2.3)).mul(1.6).add(2.2);
         const tx = select(d.x.greaterThan(0), rs.x.sub(p.x), p.x.negate()).div(select(abs(d.x).lessThan(1e-4), float(1e-4), d.x));
         const ty = select(d.y.greaterThan(0), rs.y.sub(p.y), p.y.negate()).div(select(abs(d.y).lessThan(1e-4), float(1e-4), d.y));
         const tz = dep.div(d.z), t = min(min(tx, ty), tz).toVar();
@@ -288,30 +305,62 @@ function nqSurface(material, builder) {
         room.assign(mix(room, sh.mul(h21(id.add(1.9)).mul(0.45).add(0.55)), det));       // the plain gradient stands in where the room is too small to read
       });
       // lit windows hold steady (the random quarter-second blackouts read as flicker, not as a failing grid)
-      const wk = win.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
+      const wk = glass.mul(lit).mul(mull.mul(0.85).oneMinus()).mul(blind.mul(0.7).oneMinus()).mul(room);
       // Below ~3 px per window the lit cells are sub-pixel sparkle: every step moved the pixel grid onto different random
       // cells, so distant windows twinkled on and off. There the per-cell lights blend into the facade's mean window glow
       // (the lit share × window area × mean room brightness × mean colour), the way a mipmap would average them.
       const far = smoothstep(1.5, 3.5, px), pLit = clampT(bseed.mul(-0.1).add(0.82).oneMinus(), 0, 1).add(stepT(4.5, W.y).mul(0.03)).mul(stepT(1.2, W.y));
-      const avg = pLit.mul(0.17).mul(vec3(0.92, 0.66, 0.45));
+      const area = min(x1, 1).sub(max(x0, 0)).mul(y1.sub(y0)).div(0.3808);   // window share of the wall, relative to the punched grid's
+      const avg = pLit.mul(0.17).mul(area).mul(vec3(0.92, 0.66, 0.45));
       emis.addAssign(mix(avg, wk.mul(wc), far).mul(NQN.uWin).mul(select(mat.greaterThan(8.5), float(0.7), float(1))));
-      const wall = vec3(0).toVar();
-      If(mat.greaterThan(8.5), () => {   // brick tenements
+      const wall = vec3(0).toVar(), spd = float(0).toVar();   // spd: the curtain wall's glazed spandrel panels
+      const fine = smoothstep(60, 160, px).toVar();             // centimetre detail (plank marks, tie holes, cracks): only right up close
+      If(brk, () => {   // brick tenements: a stone lintel over every opening and a stone sill under it
         const br = select(NQN.uTexOn.greaterThan(0.5), vec2(0.5, 0), nqBrick(fc));
         wall.assign(base.mul(br.x.mul(0.5).add(0.75)).mul(br.y.mul(-0.55).add(1))); bumpH.assign(br.y.mul(-0.012));
-      }).Else(() => {                     // concrete panels: seams every floor and bay, blotchy weathering
+        const jamb = edge(x0.sub(0.05), wx, fwx).mul(edge(x1.add(0.05), wx, fwx).oneMinus());
+        const lin = jamb.mul(edge(y1, f.y, fw.y).mul(edge(y1.add(0.07), f.y, fw.y).oneMinus()).add(edge(y0.sub(0.04), f.y, fw.y).mul(edge(y0, f.y, fw.y).oneMinus()))).mul(smoothstep(3, 8, px));
+        wall.assign(mix(wall, vec3(0.19, 0.18, 0.165).mul(vn(fc.mul(6)).mul(0.25).add(0.75)), lin)); bumpH.addAssign(lin.mul(0.012));
+      }).ElseIf(sty.lessThan(0.5), () => {   // precast panels: seams every floor and bay, blotchy weathering
         const seam = max(smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus(), smoothstep(0, 0.02, abs(f.x.sub(0.02))).oneMinus());
         const panel = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.25).add(0.8).add(vn(fc.mul(4.3)).mul(0.1));
         wall.assign(base.mul(panel).mul(seam.mul(-0.45).add(1))); bumpH.assign(seam.mul(-0.01));
+      }).ElseIf(sty.lessThan(1.5), () => {   // curtain wall: dark glazed spandrels between the floors, a joint at every mullion line
+        const seam = max(smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus(), smoothstep(0, 0.012, min(abs(f.x.sub(0.5)), min(f.x, f.x.oneMinus()))).oneMinus().mul(det));
+        const pane = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.2).add(0.8);
+        wall.assign(base.mul(vec3(0.55, 0.62, 0.75)).mul(pane).mul(seam.mul(-0.5).add(1))); bumpH.assign(seam.mul(-0.006)); spd.assign(1);
+      }).ElseIf(sty.lessThan(2.5), () => {   // ribbon windows: long smooth painted bands, one joint per floor
+        const seam = smoothstep(0, 0.035, abs(f.y.sub(0.02))).oneMinus();
+        const band = vn(fc.mul(vec2(0.25, 1.2)).add(bseed.mul(17))).mul(0.18).add(0.9).add(vn(fc.mul(5.1)).mul(0.06));
+        wall.assign(base.mul(band).mul(seam.mul(-0.4).add(1)).mul(1.08)); bumpH.assign(seam.mul(-0.008));
+      }).ElseIf(sty.lessThan(3.5), () => {   // render (stucco): fine grain, patches painted over in a lighter coat, hairline cracks
+        const grain = vn(fc.mul(11)).mul(0.14).add(0.86);
+        const patch = smoothstep(0.55, 0.62, vn(fc.mul(0.5).add(bseed.mul(23))));
+        const crack = smoothstep(0.012, 0, abs(vn(fc.mul(vec2(1.3, 0.8)).add(7.1)).sub(0.5))).mul(smoothstep(0.45, 0.7, vn(fc.mul(0.7)))).mul(fine);
+        wall.assign(base.mul(grain).mul(mix(1, 1.18, patch)).mul(crack.mul(-0.6).add(1)).mul(1.05)); bumpH.assign(grain.mul(0.004).sub(crack.mul(0.006)));
+      }).Else(() => {                        // board-formed concrete: plank marks, form-tie holes, piers standing proud between the slots
+        const pier = max(smoothstep(0.2, 0.17, f.x), smoothstep(0.8, 0.83, f.x));
+        const panel = vn(fc.mul(vec2(0.9, 0.35)).add(bseed.mul(17))).mul(0.25).add(0.8);
+        const board = smoothstep(0.86, 0.96, fract(fc.y.div(0.3))).mul(fine);
+        const tie = smoothstep(0.065, 0.045, length(fract(fc.div(vec2(0.6, 0.9))).sub(0.5))).mul(fine);
+        wall.assign(base.mul(panel).mul(mix(0.82, 1.12, pier)).mul(board.mul(-0.18).add(1)).mul(tie.mul(-0.5).add(1))); bumpH.assign(pier.mul(0.02).sub(board.mul(0.003)).sub(tie.mul(0.004)));
       });
-      // dirty water runs down from every sill; sheltered walls collect more soot
-      const sill = stepT(0.16, f.x).mul(stepT(f.x, 0.84)).mul(stepT(f.y, 0.22)).mul(smoothstep(0, 0.22, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
+      // dirty water runs down from every sill; sheltered walls collect more soot (less of it sticks to the glazed spandrels)
+      const sill = stepT(x0, wx).mul(stepT(wx, x1)).mul(stepT(f.y, y0)).mul(smoothstep(0, y0, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
       const grime = smoothstep(4, 0, fc.y).mul(0.35).add(streak.mul(0.5)).add(sill.mul(0.55)).add(nqOcc.oneMinus().mul(0.45));
-      wall.mulAssign(clampT(grime, 0, 1.4).mul(-0.5).add(1));
-      base.assign(mix(wall, vec3(0.015, 0.02, 0.04), win));
-      bumpH.subAssign(win.mul(0.03));
-      rough.assign(mix(mix(0.85, 0.45, streak.mul(wetK)), 0.08, win)); metal.assign(win.mul(0.2)); envK.assign(NQN.uEnvK.mul(mix(streak.add(0.6), 1.6, win)));
-      nqTL.assign(select(mat.greaterThan(8.5), float(2), float(1))); nqTS.assign(win.oneMinus().mul(0.9));
+      wall.mulAssign(clampT(grime, 0, 1.4).mul(spd.mul(-0.5).add(1)).mul(-0.5).add(1));
+      // dark glass: every pane a slightly different tint and polish, so the reflections break up pane by pane, and behind some
+      // of the dark ones a curtain is drawn; the frame round it is painted timber on the brick, dark metal elsewhere
+      const gh = h21(id.add(6.6)).toVar(), cur = select(h21(id.add(7.7)).lessThan(0.3), drawn, float(0)).mul(lit.oneMinus()).mul(det);
+      const gcol = mix(vec3(0.012, 0.018, 0.036), vec3(0.018, 0.028, 0.03), gh).mul(gh.mul(0.7).add(0.65));
+      // a dark pane still mirrors the glow over the city: a faint cool sheen, brighter toward the top, each pane at its own tilt
+      const sheen = smoothstep(y0, y1, f.y.add(wx.sub(0.5).mul(gh.sub(0.5)).mul(0.6))).mul(1.1).add(0.15).mul(gh.mul(0.8).add(0.4));
+      emis.addAssign(NQN.uFogCol.mul(sheen).mul(glass).mul(lit.oneMinus()).mul(cur.mul(-0.8).add(1)).mul(NQN.uEnvK).mul(0.55));
+      base.assign(mix(mix(wall, select(brk, vec3(0.13, 0.12, 0.105), vec3(0.075, 0.08, 0.09)), frame), mix(gcol, vec3(0.05, 0.04, 0.034).mul(gh.add(0.5)), cur.mul(0.7)), glass));
+      bumpH.subAssign(glass.mul(0.03).add(frame.mul(0.012)));
+      rough.assign(mix(mix(mix(mix(0.85, 0.45, streak.mul(wetK)), 0.3, spd), 0.4, frame), gh.mul(0.1).add(0.04), glass));
+      metal.assign(mix(mix(spd.mul(0.3), 0.45, frame), 0.2, glass)); envK.assign(NQN.uEnvK.mul(mix(mix(mix(streak.add(0.6), 1.4, spd), 1, frame), 1.6, glass)));
+      nqTL.assign(select(brk, float(2), float(1))); nqTS.assign(win.oneMinus().mul(mix(0.9, 0.3, spd)));
     }).ElseIf(mat.greaterThan(8.5), () => { base.mulAssign(0.8); });
   }).ElseIf(M(1.5, 2.5), () => {      // plaza tiles, wet
     const q = W.xz.div(4), gd = abs(fract(q.sub(0.5)).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
