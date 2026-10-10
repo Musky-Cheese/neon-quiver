@@ -509,6 +509,25 @@ function nqSurface(material, builder) {
     base.mulAssign(wet1.mul(-0.3).add(1).mul(glow.mul(-0.4).add(1)));
     emis.assign(vec3(2.6, 1.55, 0.72).mul(glow).mul(fl).mul(NQN.uNeon));
     rough.assign(mix(mix(0.9, 0.48, wet1), 0.75, glow)); rimK.assign(0.2);
+  }).ElseIf(M(27.5, 28.5), () => {    // kawara roof tiles: round cover tiles over concave pans in overlapping courses, smoke-fired silver grey
+    // u runs along the eave (across the tile rows), v up the slope in courses; on near-vertical faces (the ridge's stacked
+    // noshi tiles) the courses close up to thin layers. The relief fades to its average where a tile is under ~4 px.
+    const sl = length(N0.xz).toVar(), tA = select(sl.greaterThan(0.08), N0.xz.div(max(sl, 1e-4)), vec2(0, 1));
+    const crs = mix(0.27, 0.085, smoothstep(0.85, 0.97, sl));
+    const u = dot(W.xz, vec2(tA.y.negate(), tA.x)).div(0.3).toVar(), v = W.y.div(max(sl, 0.25)).div(crs).toVar();
+    const det = smoothstep(0.32, 0.1, max(fwidth(u), fwidth(v))).toVar();
+    const p = abs(fract(u).sub(0.5)), q = p.div(0.22), pan = stepT(1, q).toVar();
+    const rr = float(0.5).sub(p).div(0.28);
+    const roll = select(q.lessThan(1), sqrt(max(q.mul(q).oneMinus(), 0)).mul(0.6), rr.mul(rr).oneMinus().mul(-0.4)).mul(det.mul(stepT(sl, 0.85)));
+    const fv = fract(v), lipSh = smoothstep(0.72, 1.0, fv).mul(det);   // the shadow each course's lip throws on the one below
+    const id = vec2(floor(u.add(select(pan.greaterThan(0.5), float(0.5), float(0)))), floor(v));
+    const toneT = mix(1, h21(id).mul(0.32).add(0.84), det);
+    const moss = smoothstep(0.62, 0.85, vn(W.xz.mul(0.8).add(W.y.mul(0.6)))).mul(pan.mul(0.6).add(0.4)).mul(smoothstep(0.85, 0.5, sl)).mul(0.55);
+    base.assign(mix(base.mul(toneT).mul(roll.mul(0.75).add(0.95)).mul(lipSh.mul(-0.3).add(1)), vec3(0.035, 0.045, 0.022), moss));
+    bumpH.assign(roll.mul(0.05).add(fv.oneMinus().mul(0.008).mul(det)));
+    const wp = wet1.mul(pan.mul(0.5).add(0.5));   // rain runs in the pans
+    base.mulAssign(wp.mul(-0.3).add(1));
+    rough.assign(mix(0.5, 0.16, wp)); metal.assign(0.18); envK.assign(NQN.uEnvK.mul(mix(1.1, 2.0, wet1))); rimK.assign(0.5);
   }).ElseIf(M(20.5, 22.5), () => {    // indoor floor tiles (22: checkerboard): grout, per-tile tone, polished but scuffed
     const q = W.xz.div(select(mat.greaterThan(21.5), float(0.33), float(0.6))), gd = abs(fract(q).sub(0.5)), fw = max(fwidth(q), vec2(1e-4));
     const grout = smoothstep(fw.x.mul(-1.2).add(0.482), 0.494, max(gd.x, gd.y));

@@ -652,7 +652,7 @@ async function loadMeshyTrees() {
    (models/prop_<kind>.glb from tools/meshy_prop.py: colour and normal maps, COLOR_0.r the mask) and one BatchedMesh per
    model, culled spot by spot. Bushes shade like the trees' leaves (mat 26, NQ_TREE: the mask marks the foliage over the
    stems), each a shade lighter or darker; lanterns are mat 27, the mask lighting their paper fire boxes. */
-const PROP_MAT = { kasuga: 27, yukimi: 27 };
+const PROP_MAT = { kasuga: 27, yukimi: 27, onigawara: 27, komainu: 27, tsukubai: 27 };
 async function loadMeshyProps() {
   const spots = WORLD.propSpots || [], have = typeof PROP_MODELS !== 'undefined' ? PROP_MODELS : [];
   const kinds = [...new Set(spots.map(s => s.kind))].filter(k => have.includes(k)); if (!kinds.length) return;
@@ -690,7 +690,7 @@ async function loadMeshyProps() {
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
       for (const s of list) {
         const id = batch.addInstance(gid);
-        m.compose(new THREE.Vector3(s.x, -0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+        m.compose(new THREE.Vector3(s.x, (s.y || 0) - 0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
         batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
       }
       batch.computeBoundingSphere();

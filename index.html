@@ -477,7 +477,7 @@ button, select, input { font-family: var(--f); }
    ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var GAME_JS = "game.js?v=9282c7bd70";   // build.py: 'game.js?v=…'
+  var GAME_JS = "game.js?v=6bc6a95f91";   // build.py: 'game.js?v=…'
   var q = new URLSearchParams(location.search), forced = q.get('gpu');
   var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 
