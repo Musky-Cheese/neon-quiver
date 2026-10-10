@@ -49,7 +49,19 @@ function signTexture(text, color, style, vertical) {
   }
   return canvasTex(cv);
 }
+// the game's own ad (ads/ key art) on a holo billboard: loaded before the city is built, one texture shared by every copy
+let AD_ART = null, AD_TEX = null;
+function loadAdArt() {
+  return new Promise(res => { const im = new Image(); im.onload = () => { AD_ART = im; res(); }; im.onerror = () => res(); im.src = 'ads/social-1200x628.jpg'; setTimeout(res, 4000); });
+}
 function billboardTexture(kind) {
+  if (kind === 4) {   // a bigger canvas (its own sign batch) so the tagline still reads at 30 m; falls back to the curfew board if the art never loaded
+    if (!AD_ART) return billboardTexture(3);
+    if (!AD_TEX) { const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512; const x = cv.getContext('2d');
+      const sw = AD_ART.width, sh = sw / 2; x.drawImage(AD_ART, 0, (AD_ART.height - sh) / 2, sw, sh, 0, 0, 1024, 512);   // 1.91:1 art, cropped to the board's 2:1
+      AD_TEX = canvasTex(cv); }
+    return AD_TEX;
+  }
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d');
   const F = (w, s) => `${w} ${s}px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`;
   x.textAlign = 'center'; x.textBaseline = 'middle';
@@ -264,7 +276,7 @@ function buildCity() {
     // holo billboard on some tall facades
     if (h > 45 && R() < 0.7) {
       const by = r(20, Math.min(h - 10, 34)), bw = Math.min(span * 0.8, 18); const bp = P(0, by, 0.4);
-      addSign(billboardTexture(bb++ % 4), bp[0], by, bp[2], ry, bw, bw / 2, [1.3, 1.3, 1.3], 1, true);
+      const kind = bb++ % 5; addSign(billboardTexture(kind), bp[0], by, bp[2], ry, bw, bw / 2, kind === 4 ? [1, 1, 1] : [1.3, 1.3, 1.3], 1, true);
     }
   }
   // north (+z) and south (-z) sides: span x [-64,-6] & [6,64]

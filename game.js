@@ -3110,7 +3110,19 @@ function signTexture(text, color, style, vertical) {
   }
   return canvasTex(cv);
 }
+// the game's own ad (ads/ key art) on a holo billboard: loaded before the city is built, one texture shared by every copy
+let AD_ART = null, AD_TEX = null;
+function loadAdArt() {
+  return new Promise(res => { const im = new Image(); im.onload = () => { AD_ART = im; res(); }; im.onerror = () => res(); im.src = 'ads/social-1200x628.jpg'; setTimeout(res, 4000); });
+}
 function billboardTexture(kind) {
+  if (kind === 4) {   // a bigger canvas (its own sign batch) so the tagline still reads at 30 m; falls back to the curfew board if the art never loaded
+    if (!AD_ART) return billboardTexture(3);
+    if (!AD_TEX) { const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512; const x = cv.getContext('2d');
+      const sw = AD_ART.width, sh = sw / 2; x.drawImage(AD_ART, 0, (AD_ART.height - sh) / 2, sw, sh, 0, 0, 1024, 512);   // 1.91:1 art, cropped to the board's 2:1
+      AD_TEX = canvasTex(cv); }
+    return AD_TEX;
+  }
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d');
   const F = (w, s) => `${w} ${s}px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`;
   x.textAlign = 'center'; x.textBaseline = 'middle';
@@ -3325,7 +3337,7 @@ function buildCity() {
     // holo billboard on some tall facades
     if (h > 45 && R() < 0.7) {
       const by = r(20, Math.min(h - 10, 34)), bw = Math.min(span * 0.8, 18); const bp = P(0, by, 0.4);
-      addSign(billboardTexture(bb++ % 4), bp[0], by, bp[2], ry, bw, bw / 2, [1.3, 1.3, 1.3], 1, true);
+      const kind = bb++ % 5; addSign(billboardTexture(kind), bp[0], by, bp[2], ry, bw, bw / 2, kind === 4 ? [1, 1, 1] : [1.3, 1.3, 1.3], 1, true);
     }
   }
   // north (+z) and south (-z) sides: span x [-64,-6] & [6,64]
@@ -3647,7 +3659,7 @@ function buildDistricts(C) {
   B(76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each NIGHT MARKET sign reads on its own side, not mirrored through the other
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(billboardTexture(2), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
+  addSign(billboardTexture(4), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1, 1, 1], 1, true);
   WORLD.supplies.push({ kind: 'terminal', x: 79, z: 25, ry: Math.PI / 2 + 0.3, d: 'market' }, { kind: 'cache', x: 134, z: -2, d: 'market' }, { kind: 'cache', x: 108, z: -27, d: 'market' });
 
 
@@ -8880,7 +8892,7 @@ const GPU = { name: '', soft: false, lost: false };
 /* ---------------- boot ---------------- */
 async function boot() {
   try { await Promise.race([Promise.all([document.fonts.load('700 40px "Quiver Cn"'), document.fonts.load('400 40px "Quiver Cn"')]), new Promise(r => setTimeout(r, 1500))]); } catch (e) { }
-  await loadModels(); makeDecalTextures();
+  await Promise.all([loadModels(), loadAdArt()]); makeDecalTextures();
   buildCity(); buildWorldSpatialIndex(); buildNav(); buildWorld3();
   await Promise.all([
     loadZombieRig(window.__NQ_RIG_URL || 'models/zombie.glb?v=' + (typeof RIG_VER === 'string' ? RIG_VER : '0')),
