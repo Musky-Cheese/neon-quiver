@@ -558,7 +558,8 @@ function nqSurface(material, builder) {
     base.mulAssign(wet1.mul(-0.3).add(1).mul(glow.mul(-0.4).add(1)));
     emis.assign(vec3(2.6, 1.55, 0.72).mul(glow).mul(fl).mul(NQN.uNeon));
     rough.assign(mix(mix(0.9, 0.48, wet1), 0.75, glow)); rimK.assign(0.2);
-  }).ElseIf(M(27.5, 28.5), () => {    // kawara roof tiles: round cover tiles over concave pans in overlapping courses, smoke-fired silver grey
+  }).ElseIf(facadeOn ? M(27.5, 28.5) : float(0).greaterThan(1), () => {    // kawara roof tiles: round cover tiles over concave pans in overlapping courses, smoke-fired silver grey
+    if (!facadeOn) return;   // static city geometry only: kept out of the zombie, viewmodel, instanced and textured variants
     // u runs along the eave (across the tile rows), v up the slope in courses; on near-vertical faces (the ridge's stacked
     // noshi tiles) the courses close up to thin layers. The relief fades to its average where a tile is under ~4 px.
     const sl = length(N0.xz).toVar(), tA = select(sl.greaterThan(0.08), N0.xz.div(max(sl, 1e-4)), vec2(0, 1));

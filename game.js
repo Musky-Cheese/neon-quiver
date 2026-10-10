@@ -989,7 +989,8 @@ function nqSurface(material, builder) {
     base.mulAssign(wet1.mul(-0.3).add(1).mul(glow.mul(-0.4).add(1)));
     emis.assign(vec3(2.6, 1.55, 0.72).mul(glow).mul(fl).mul(NQN.uNeon));
     rough.assign(mix(mix(0.9, 0.48, wet1), 0.75, glow)); rimK.assign(0.2);
-  }).ElseIf(M(27.5, 28.5), () => {    // kawara roof tiles: round cover tiles over concave pans in overlapping courses, smoke-fired silver grey
+  }).ElseIf(facadeOn ? M(27.5, 28.5) : float(0).greaterThan(1), () => {    // kawara roof tiles: round cover tiles over concave pans in overlapping courses, smoke-fired silver grey
+    if (!facadeOn) return;   // static city geometry only: kept out of the zombie, viewmodel, instanced and textured variants
     // u runs along the eave (across the tile rows), v up the slope in courses; on near-vertical faces (the ridge's stacked
     // noshi tiles) the courses close up to thin layers. The relief fades to its average where a tile is under ~4 px.
     const sl = length(N0.xz).toVar(), tA = select(sl.greaterThan(0.08), N0.xz.div(max(sl, 1e-4)), vec2(0, 1));
@@ -2124,7 +2125,7 @@ function jRoof(g, o) {
   if (Ds > 0) for (const sx of [-1, 1]) for (const sz of [-1, 1]) ridgeLine(seq(10, (s) => { const d = 0.12 + s * (Ds - 0.12); return [sx * (hx - d), sz * (hz - d), hLong(sx * (hx - d), sz * (hz - d))]; }), rw * 0.32);
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) ridgeLine(seq(10, (s) => { const z = sz * s * (hz - Ds - 0.15), x = sx * (xg - 0.22); return [x, z, hLong(x, z)]; }), rw * 0.28);
   // onigawara (Meshy): the demon-face tiles that cap each ridge end
-  if (o.oni !== false) {
+  if (o.oni === true) {   // off: no onigawara model ships
     const oh = o.oniH || rw * 1.9, put = (x, z, y, yaw, h) => { const [wx, wz] = W(x, z); propSpot('onigawara', wx, wz, yaw + ry, h, 0, 1, y); };
     for (const sx of [-1, 1]) put(sx * (xg + 0.02), 0, yr - 0.05, sx > 0 ? Math.PI / 2 : -Math.PI / 2, oh);
     if (Ds > 0) for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(sx * (hx - 0.3), sz * (hz - 0.3), hLong(sx * (hx - 0.3), sz * (hz - 0.3)) + 0.05, Math.atan2(sx, sz), oh * 0.55);
@@ -2222,8 +2223,6 @@ function propManor(g, x, z, solid) {
     WORLD.halos.push({ p: [x + lx, 4.0, z - 5.6], s: 1.8, c: [0.6, 0.14, 0.06] });
   }
   WORLD.lights.push({ p: [x, 3.2, z - 7], r: 14, c: [1.9, 1.2, 0.6], shop: true }, { p: [x - 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true }, { p: [x + 7, 3, z], r: 9, c: [1.4, 0.9, 0.45], shop: true });
-  // a stone water basin (tsukubai, Meshy) by the front corner of the veranda
-  propSpot('tsukubai', x - 11.6, z - 5.4, 0.6, 0.75); WORLD.circles.push({ x: x - 11.6, z: z - 5.4, r: 0.55, h: 0.7 });
 }
 
 // tsuiji-bei: a plastered compound wall on a cut-stone footing, dark posts through it, under its own little tiled roof
@@ -2258,8 +2257,6 @@ function propGate(g, x, z, w, solid) {
   g.rbox(pT(PM.a, x, 3.22, z - 0.12), 1.3, 0.55, 0.06, 0.02, [0.06, 0.04, 0.03], 0, 13, 1);                    // name board
   g.box(M4.trs(PM.a, x, 3.22, z - 0.155, 0, 0, 0, 1.18, 0.43, 0.01), [0.55, 0.42, 0.16], 0, 4);
   jRoof(g, { cx: x, cz: z, hx: w / 2 + 1.5, hz: 1.75, ye: 3.82, H: 1.05, a: 0.45, L: 0.28, E: 1.6, th: 0.16, ridge: 0.34, oniH: 0.55, discR: 0.14 });
-  // komainu (Meshy): the guardian pair either side of the way in, facing out
-  for (const s of [-1, 1]) { propSpot('komainu', x + s * (w / 2 + 1.0), z - 1.6, Math.PI + s * 0.25, 1.25); WORLD.circles.push({ x: x + s * (w / 2 + 1.0), z: z - 1.6, r: 0.55, h: 1.3 }); }
 }
 
 /* ============================================================
