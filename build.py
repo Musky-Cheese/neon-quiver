@@ -35,8 +35,20 @@ boot = S('boot.js').replace('/*__GAME__*/""', json.dumps('game.js?v=' + hashlib.
 body = S('body.html')
 title = '<title>Neon Quiver</title>'
 meta = '<meta name="description" content="Neon Quiver: a first-person archery survival game. Roam a quarantined cyberpunk city and hold off endless zombie waves, right in your browser.">'
+# link previews (Open Graph, X): crawlers only follow absolute URLs. The image is the 177 KB JPEG, not the 1.1 MB PNG.
+SITE = 'https://musky-cheese.github.io/neon-quiver/'
+OG_DESC = 'Draw. Release. Survive the horde. A first-person archer vs. zombies game in a rain-soaked cyberpunk city.'
+OG_IMG, OG_ALT = SITE + 'ads/social-1200x628.jpg', 'First-person view down a drawn bow at zombies crossing a rainy neon plaza, with the Neon Quiver logo'
+social = '\n'.join([
+    f'<link rel="canonical" href="{SITE}">',
+    '<meta property="og:type" content="website">', '<meta property="og:site_name" content="Neon Quiver">',
+    '<meta property="og:title" content="Neon Quiver">', f'<meta property="og:description" content="{OG_DESC}">', f'<meta property="og:url" content="{SITE}">',
+    f'<meta property="og:image" content="{OG_IMG}">', '<meta property="og:image:type" content="image/jpeg">',
+    '<meta property="og:image:width" content="1200">', '<meta property="og:image:height" content="628">', f'<meta property="og:image:alt" content="{OG_ALT}">',
+    '<meta name="twitter:card" content="summary_large_image">', '<meta name="twitter:title" content="Neon Quiver">',
+    f'<meta name="twitter:description" content="{OG_DESC}">', f'<meta name="twitter:image" content="{OG_IMG}">', f'<meta name="twitter:image:alt" content="{OG_ALT}">'])
 importmap = '<script type="importmap">{"imports":{"three":"./vendor/three.webgpu.js","three/webgpu":"./vendor/three.webgpu.js","three/tsl":"./vendor/three.tsl.js","three/addons/":"./vendor/addons/"}}</script>'
-head = f'<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n{title}\n{meta}\n{importmap}\n<link rel="modulepreload" href="vendor/three.webgpu.js">\n<link rel="modulepreload" href="vendor/three.core.js">\n<meta property="og:title" content="Neon Quiver">\n<meta property="og:description" content="Draw. Release. Survive the horde. A first-person archer vs. zombies game in a rain-soaked cyberpunk city.">\n<meta property="og:image" content="https://musky-cheese.github.io/neon-quiver/ads/social-1200x628.jpg">\n<meta name="twitter:card" content="summary_large_image">\n<meta name="theme-color" content="#07060f">\n<link rel="icon" type="image/png" href="favicon-64.png">\n<link rel="apple-touch-icon" href="icon-192.png">\n<style>\n{css}\n</style>'
+head = f'<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n{title}\n{meta}\n{importmap}\n<link rel="modulepreload" href="vendor/three.webgpu.js">\n<link rel="modulepreload" href="vendor/three.core.js">\n{social}\n<meta name="theme-color" content="#07060f">\n<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">\n<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">\n<link rel="apple-touch-icon" href="icon-192.png">\n<link rel="manifest" href="manifest.webmanifest">\n<style>\n{css}\n</style>'
 full = f'<!doctype html>\n<html lang="en">\n<head>\n{head}\n</head>\n<body>\n{body}\n<script>\n{boot}\n</script>\n</body>\n</html>\n'
 open(os.path.join(root, 'index.html'), 'w', encoding='utf-8', newline='\n').write(full)
 print('built index.html %d KB, game.js %d KB  (serve this folder: index.html + game.js + vendor/ + models/)' % (len(full) // 1024, len(js) // 1024))
