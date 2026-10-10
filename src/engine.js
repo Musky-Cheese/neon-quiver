@@ -32,6 +32,14 @@ const M4 = {
   },
   // T * Ry * Rx * Rz * S
   trs(m, tx, ty, tz, rx, ry, rz, sx, sy, sz) {
+    if (rx === 0 && rz === 0) {   // yaw only (most props, pickups, decals): the same expressions with cos 0 = 1 and sin 0 = 0 written in, bit for bit
+      const cy = Math.cos(ry), syr = Math.sin(ry);
+      m[0] = (cy + (syr * 0) * 0) * sx; m[1] = 0 * sx; m[2] = (-syr + (cy * 0) * 0) * sx; m[3] = 0;
+      m[4] = (-cy * 0 + syr * 0) * sy; m[5] = sy; m[6] = (syr * 0 + cy * 0) * sy; m[7] = 0;
+      m[8] = syr * sz; m[9] = (-0) * sz; m[10] = cy * sz; m[11] = 0;
+      m[12] = tx; m[13] = ty; m[14] = tz; m[15] = 1;
+      return m;
+    }
     const cx = Math.cos(rx), sxr = Math.sin(rx), cy = Math.cos(ry), syr = Math.sin(ry), cz = Math.cos(rz), szr = Math.sin(rz);
     m[0] = (cy * cz + syr * sxr * szr) * sx; m[1] = (cx * szr) * sx; m[2] = (-syr * cz + cy * sxr * szr) * sx; m[3] = 0;
     m[4] = (-cy * szr + syr * sxr * cz) * sy; m[5] = (cx * cz) * sy; m[6] = (syr * szr + cy * sxr * cz) * sy; m[7] = 0;
@@ -135,7 +143,7 @@ const NQU = {
   uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
   uReflOn: { value: 0 }, uRain: { value: 0.5 },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
-  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null },
+  uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null }, uLitter: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space
   uTexA: { value: null }, uTexN: { value: null }, uTexR: { value: null }, uTexOn: { value: 0 },
   uSnowCov: { value: 0 },   // weather.js: how snowed-over the city is

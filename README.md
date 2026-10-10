@@ -16,12 +16,15 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 
 ## Deploy
 
-**GitHub Pages**
-1. Create a new repository and push the contents of this folder (the `index.html` must be at the repository root).
-2. In the repo, open **Settings → Pages**, set **Source** to "Deploy from a branch", then choose `main` and `/ (root)`.
-3. The game goes live at `https://<you>.github.io/<repo>/` within a minute or two.
+The game is live at **https://musky-cheese.github.io/neon-quiver/**, served by GitHub Pages straight from `main` at the repository root (`.nojekyll` keeps Pages from running Jekyll over it). There is no build step on the server: `index.html` and `game.js` are committed.
 
-**Netlify / Vercel / Cloudflare Pages / itch.io:** drag this folder onto their "deploy" drop zone. For itch.io, zip the folder and upload it as an HTML game with `index.html` as the entry point.
+To publish a change:
+1. Run `python3 build.py` and commit the rebuilt `index.html` and `game.js` together with the `src/` change.
+2. Push (or merge) to `main`. Pages redeploys within a minute or two; its CDN caches files for 10 minutes, so give it that long before checking. `game.js` is loaded as `game.js?v=<hash>`, so players never get a stale build next to a new page.
+
+The link-preview tags (`og:*`, `twitter:*`, canonical) point at that URL. If the game moves, change `SITE` in `build.py` and rebuild.
+
+**Elsewhere (Netlify, Vercel, Cloudflare Pages, itch.io):** the folder is static, so upload it as is. For itch.io, zip it and upload it as an HTML game with `index.html` as the entry point. Only `index.html`, `game.js`, `manifest.webmanifest`, the icons, `vendor/`, `models/`, `textures/`, `fonts/` and `ads/social-1200x628.jpg` are needed at runtime; `src/`, `tools/`, `test/` and the rest of `ads/` can stay out of the zip.
 
 ## Controls
 
@@ -33,8 +36,12 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 | Right click | Let the string down without firing |
 | W A S D | Move · Shift sprint (limited by stamina) · Space jump · hold C to crouch |
 | 1 – 3 | The special arrows in your quiver's three slots; press the same key again (or `` ` ``) for standard arrows · mouse wheel cycles · X swaps to the last one |
-| E | Open the Armory at a terminal between waves · hold at a Supply Drop to crack it · N starts the next wave early |
-| P / Esc | Pause |
+| Q | Grappling hook: tap to fire, or hold to preview the anchor and what the fall will cost, then release · Q again while reeling cuts the rope |
+| E | Open the Armory at a terminal between waves · hold at a Supply Drop to crack it |
+| N | Start the next wave early (between waves) |
+| P / Esc | Pause (Esc in the Armory goes back to the street) |
+
+Keyboard and mouse only: on a phone or tablet the title screen says so.
 
 ## What's in the game
 
@@ -109,12 +116,10 @@ For developers: the slot registry, the unsold art and the loader live in `src/ad
 | `keyart-1920x1080.png` | Hero / YouTube / Steam-style capsule with logo and CTA |
 | `square-1080x1080.png` | Instagram / Facebook feed (boss ad) |
 | `story-1080x1920.png` | Stories / Reels / TikTok / Shorts |
-| `social-1200x628.png` (+ `.jpg`) | Link-preview / X / LinkedIn / Facebook link ads (also the `og:image`) |
+| `social-1200x628.png` (+ `.jpg`) | Link-preview / X / LinkedIn / Facebook link ads (the 177 KB `.jpg` is the page's `og:image`) |
 | `screenshot-horde-1920x1080.png`, `screenshot-boss-1920x1080.png` | Clean gameplay screenshots with the HUD, no ad copy |
 | `logo-stacked-transparent.png`, `logo-wordmark-transparent.png`, `logo-stacked-dark.png` | Logos |
 | `app-icon-1024.png` | Store and app icon (`icon-512.png`, `icon-192.png` and `favicon-64.png` sit at the root) |
-
-If you host the game somewhere with a real domain, change the `og:image` meta tag in `index.html` to an absolute URL (for example `https://you.github.io/neon-quiver/ads/social-1200x628.png`). Link previews need an absolute URL.
 
 ## Characters (built in Blender)
 
@@ -162,7 +167,9 @@ Balance numbers you will probably want to tune live near the top of their files:
 
 ## Credits
 
-- Code, art and audio were generated procedurally for this project.
+- Code, the city, the bow, the Blender-sculpted zombie rig (`models/zombie.glb`) and all audio (synthesized at runtime) were made for this project.
+- **3D models:** the textured zombies (`models/mz_*.glb`), cars (`car_sedan`, `car_van`), the plain tree (`tree.glb`) and the garden bushes and stone lanterns (`prop_*.glb`) were generated with [Meshy](https://www.meshy.ai) and processed with the scripts in `tools/`.
+- **Engine:** [three.js](https://threejs.org) r186 (WebGPURenderer, TSL and the GLTFLoader, BufferGeometryUtils, SkeletonUtils, SimplexNoise, bloom, GTAO, denoise and Gaussian blur addons), © 2010–2026 three.js authors, MIT License (`vendor/LICENSE-three.js.txt`).
 - The UI font is a subset of **TeX Gyre Heros Condensed** by GUST e-foundry, renamed "Quiver Cn" for embedding, and used under the GUST Font License.
 - The Armory uses Latin subsets of **Chakra Petch** (Cadson Demak) and **IBM Plex Mono** (IBM), both under the SIL Open Font License (`fonts/OFL-*.txt`).
 - Ultra surface textures: [Poly Haven](https://polyhaven.com) (CC0): asphalt_02, concrete_wall_008, red_brick_03, rusty_metal_02, corrugated_iron_02, concrete_pavers, plastered_wall_02, concrete_floor_worn_001. Re-fetch with `tools/fetch_textures.py`, pack with `tools/pack_textures.py`.

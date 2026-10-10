@@ -254,8 +254,8 @@ button, select, input { font-family: var(--f); }
 .sys-btn.ghost { background: transparent; color: #EEF1F8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
 .sys-btn.ghost:hover { background: rgba(56, 225, 242, 0.12); }
 .sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
-#loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
-#nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
+#loading, #nogl, #nojs { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
+#nogl, #nojs { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
 
 @media (max-width: 860px) {
   #scr-title { grid-template-columns: 1fr; align-content: start; background: rgba(7, 6, 15, 0.8); }

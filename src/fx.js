@@ -2,13 +2,13 @@
    Particles, dynamic lights, floating damage numbers
    ============================================================ */
 const MAXP = 5000;
-const PART = { n: 0, data: new Float32Array(MAXP * 8), p: [] };
+const PART = { n: 0, alive: 0, data: new Float32Array(MAXP * 8), p: [] };
 for (let i = 0; i < MAXP; i++) PART.p.push({ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, life: 0, max: 1, r: 1, g: 1, b: 1, a: 1, size: 0.1, grav: 0, drag: 0, grow: 0, alive: false });
 let _pi = 0;
 function emit(x, y, z, vx, vy, vz, life, col, size, grav = 0, drag = 0, grow = 0, a = 1) {
   const p = PART.p[_pi]; _pi = (_pi + 1) % MAXP;
   p.x = x; p.y = y; p.z = z; p.vx = vx; p.vy = vy; p.vz = vz; p.life = life; p.max = life; p.r = col[0]; p.g = col[1]; p.b = col[2]; p.a = a;
-  p.size = size; p.grav = grav; p.drag = drag; p.grow = grow; p.alive = true; p.blood = false;
+  p.size = size; p.grav = grav; p.drag = drag; p.grow = grow; if (!p.alive) { p.alive = true; PART.alive++; } p.blood = false;
   return p;
 }
 function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
@@ -18,14 +18,16 @@ function burst(x, y, z, n, col, speed, life, size, grav = 9, drag = 1, up = 0) {
   }
 }
 function updateParticles(dt) {
-  let n = 0; const d = PART.data;
-  for (const p of PART.p) {
+  let n = 0; const d = PART.data, P = PART.p, live = PART.alive; let seen = 0;
+  for (let i = 0; i < MAXP && seen < live; i++) {   // stop once every live particle has been seen: the pool is mostly dead slots
+    const p = P[i];
     if (!p.alive) continue;
-    p.life -= dt; if (p.life <= 0) { p.alive = false; continue; }
+    seen++;
+    p.life -= dt; if (p.life <= 0) { p.alive = false; PART.alive--; continue; }
     p.vy -= p.grav * dt; const k = Math.max(0, 1 - p.drag * dt); p.vx *= k; p.vy *= k; p.vz *= k;
     p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
     if (p.y < 0.03 && p.grav > 0) {
-      if (p.blood) { if (Math.random() < 0.3) addDecal(p.x, p.z, Math.abs(p.size) * rand(2.5, 5)); p.alive = false; continue; }
+      if (p.blood) { if (Math.random() < 0.3) addDecal(p.x, p.z, Math.abs(p.size) * rand(2.5, 5)); p.alive = false; PART.alive--; continue; }
       p.y = 0.03; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6;
     }
     p.size += p.grow * dt * Math.sign(p.size || 1);
@@ -69,7 +71,8 @@ const DECAL_LIFE = 110;   // blood pools linger a lot longer before they fade (w
 const DECAL_CAP = 150;    // and more of them can be on the ground at once (was 90)
 function addDecal(x, z, r) {
   if (Math.abs(x) > 60 || Math.abs(z) > 60) return;
-  DECALS.push({ x, z, r: clamp(r, 0.08, 1.4), rot: Math.random() * TAU, t: 0, v: Math.floor(Math.random() * 4) });
+  const rr = clamp(r, 0.08, 1.4), rot = Math.random() * TAU;
+  DECALS.push({ x, z, r: rr, rot, t: 0, v: Math.floor(Math.random() * 4), m: M4.trs(new Float32Array(16), x, 0.035, z, -Math.PI / 2, rot, 0, rr * 2, rr * 2, 1) });   // placed once, drawn from this matrix
   if (DECALS.length > DECAL_CAP) DECALS.shift();
 }
 function updateDecals(dt) { for (let i = DECALS.length - 1; i >= 0; i--) { const d = DECALS[i]; d.t += dt; if (d.t > DECAL_LIFE) DECALS.splice(i, 1); } }

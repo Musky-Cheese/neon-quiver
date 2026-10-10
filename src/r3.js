@@ -5,7 +5,8 @@
 const R3 = { W: 0, H: 0, quality: -1, tick: 0 };
 var ENV_DIRTY = true;
 scene.matrixAutoUpdate = false;   // the root stays at the origin: don't force a full-scene matrix refresh every render
-function onThemeChanged() { ENV_DIRTY = true; }
+let SIGNS_DIRTY = true;   // the sign buffers are repacked only when a sign's visibility or the Look changes
+function onThemeChanged() { ENV_DIRTY = true; SIGNS_DIRTY = true; }
 
 /* ---------------- instanced draw batches (world + viewmodel) ---------------- */
 const BATCHES = [new Map(), new Map()];
@@ -25,7 +26,7 @@ function growBatch(b, need) {
   g.setAttribute('iTint', mk(4)); g.setAttribute('iEmit', mk(3)); g.setAttribute('iSkin', mk(3));
   const im = new THREE.InstancedMesh(g, b.vm ? MAT.vm : MAT.inst, cap);
   im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  im.frustumCulled = false; im.castShadow = !b.vm; im.receiveShadow = !b.vm;
+  im.frustumCulled = false; im.castShadow = !b.vm; im.receiveShadow = !b.vm; im.matrixAutoUpdate = false;   // identity, never moves
   if (b.vm) im.layers.set(LAYER_VM);
   if (b.im) { scene.remove(b.im); b.im.dispose(); }
   scene.add(im); b.im = im; b.cap = cap;
@@ -94,7 +95,7 @@ function buildSigns() {
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
     col.setUsage(THREE.DynamicDrawUsage); sg.setUsage(THREE.DynamicDrawUsage); geo.setAttribute('iCol', col); geo.setAttribute('iSign', sg);
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
-    mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs';
+    mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs'; mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     const b = { mesh, list: [], arr, texs: g.texs }; SIGN_BATCHES.push(b);
     for (const s of g.list) { const q = { s, b, layer: g.layer.get(s.tex), vis: false }; b.list.push(q); SIGNS.push(q); }
@@ -102,8 +103,11 @@ function buildSigns() {
 }
 // a sign's canvas was redrawn after its batch was built: re-upload just that layer
 function signLayerRefresh(tex) { for (const b of SIGN_BATCHES) { const L = b.texs.indexOf(tex); if (L >= 0) signArrayLayer(b.arr, tex, L); } }
-// per frame: the visible signs of each batch, packed in their original order, with this frame's flicker
+// the visible signs of each batch, packed in their original order. Everything here is fixed between events (a sign's
+// placement, seed and mode, which ones are resident, the Look's sign level), so it only runs when one of those changed
 function syncSigns(time, T) {
+  if (!SIGNS_DIRTY) return;
+  SIGNS_DIRTY = false;
   for (const b of SIGN_BATCHES) {
     const m = b.mesh, g = m.geometry, M = m.instanceMatrix.array, C = g.attributes.iCol.array, S = g.attributes.iSign.array; let n = 0;
     for (const { s, layer, vis } of b.list) {   // dead city: some signs are out; the rest hold steady (the sputtering third read as flicker)
@@ -114,7 +118,7 @@ function syncSigns(time, T) {
       S[n * 3] = s.seed; S[n * 3 + 1] = s.mode; S[n * 3 + 2] = layer; n++;
     }
     m.count = n; m.visible = n > 0;
-    if (n) { m.instanceMatrix.needsUpdate = true; g.attributes.iCol.needsUpdate = true; g.attributes.iSign.needsUpdate = true; }
+    if (n) { upRange(m.instanceMatrix, n * 16); upRange(g.attributes.iCol, n * 3); upRange(g.attributes.iSign, n * 3); }
   }
 }
 const DECAL_POOL = [];
@@ -122,26 +126,30 @@ function buildDecalPool() {
   for (let v = 0; v < DECAL_TEX.length; v++) {
     const g = PLANE.clone(); const alpha = new THREE.InstancedBufferAttribute(new Float32Array(DECAL_CAP), 1); alpha.setUsage(THREE.DynamicDrawUsage); g.setAttribute('iAlpha', alpha);
     const mat = decalMaterialGPU(DECAL_TEX[v]);
-    const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false;
+    const m = new THREE.InstancedMesh(g, mat, DECAL_CAP); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.renderOrder = 2; m.receiveShadow = false; m.matrixAutoUpdate = false;
     scene.add(m); DECAL_POOL.push(m);
   }
 }
-let _decalCounts = null; const _decalM = new Float32Array(16);
+// A decal never moves (its matrix is built once in addDecal), so each pool's matrix buffer is re-uploaded only when
+// the decals in its slots change (one added, one gone, one crossing the 150 m cut), and the alpha buffer only while
+// one of them is still fading in or out. _decalPrev remembers which decal sat in each slot last frame.
+let _decalCounts = null, _decalDirtyM = null, _decalDirtyA = null; const _decalPrev = [];
 function syncDecals() {
-  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) _decalCounts = new Uint16Array(DECAL_POOL.length);
-  const counts = _decalCounts; counts.fill(0);
+  if (!_decalCounts || _decalCounts.length !== DECAL_POOL.length) { _decalCounts = new Uint16Array(DECAL_POOL.length); _decalDirtyM = new Uint8Array(DECAL_POOL.length); _decalDirtyA = new Uint8Array(DECAL_POOL.length); }
+  const counts = _decalCounts; counts.fill(0); _decalDirtyM.fill(0); _decalDirtyA.fill(0);
+  for (let v = _decalPrev.length; v < DECAL_POOL.length; v++) _decalPrev.push([]);
   for (const d of DECALS) {
     const dd2 = (d.x - PLAYER.x) ** 2 + (d.z - PLAYER.z) ** 2;
     if (dd2 > 150 * 150) continue;
-    const m = DECAL_POOL[d.v], i = counts[d.v]++;
+    const v = d.v, m = DECAL_POOL[v], i = counts[v]++, prev = _decalPrev[v];
     const fadeAt = DECAL_LIFE - 9;
-    const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1);
-    m.instanceMatrix.array.set(M4.trs(_decalM, d.x, 0.035, d.z, -Math.PI / 2, d.rot, 0, d.r * 2, d.r * 2, 1), i * 16);
-    m.geometry.attributes.iAlpha.array[i] = a * 0.92;
+    const a = Math.min(1, d.t * 6) * (d.t > fadeAt ? Math.max(0, 1 - (d.t - fadeAt) / 9) : 1) * 0.92;
+    if (prev[i] !== d) { prev[i] = d; m.instanceMatrix.array.set(d.m, i * 16); _decalDirtyM[v] = 1; }
+    const A = m.geometry.attributes.iAlpha.array; if (A[i] !== a) { A[i] = a; _decalDirtyA[v] = 1; }
   }
   for (let v = 0; v < DECAL_POOL.length; v++) {
-    const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0;
-    if (n) { m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true; }
+    const m = DECAL_POOL[v], n = counts[v]; m.count = n; m.visible = n > 0; _decalPrev[v].length = n;
+    if (n) { if (_decalDirtyM[v]) upRange(m.instanceMatrix, n * 16); if (_decalDirtyA[v]) upRange(m.geometry.attributes.iAlpha, n); }
     else if (R3.warming) {   // as for the batches: one invisible decal per pool, so the first blood on the street compiles nothing
       m.instanceMatrix.array.fill(0, 0, 16); m.geometry.attributes.iAlpha.array[0] = 0; m.instanceMatrix.needsUpdate = true; m.geometry.attributes.iAlpha.needsUpdate = true;
       m.count = 1; m.visible = true;
@@ -151,7 +159,7 @@ function syncDecals() {
 
 /* ---------------- particles + rain ---------------- */
 const partPoints = particlesGPU(PART.data), partBuf = partPoints.userData.buf, partGeo = partPoints.geometry, partMat = partPoints.material;
-partPoints.frustumCulled = false; partPoints.renderOrder = 10; scene.add(partPoints);
+partPoints.frustumCulled = false; partPoints.renderOrder = 10; partPoints.matrixAutoUpdate = false; scene.add(partPoints);
 
 const rainGeo = (function () {
   const p = new Float32Array(RAIN_N * 2 * 3), a = new Float32Array(RAIN_N * 2 * 2);
@@ -159,10 +167,10 @@ const rainGeo = (function () {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(p, 3)); g.setAttribute('aP2', new THREE.BufferAttribute(a, 2)); return g;
 })();
 const rainMat = rainGPU(rainGeo);
-const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; scene.add(rainLines);
+const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; rainLines.matrixAutoUpdate = false; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
 const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
-snowPts.frustumCulled = false; snowPts.renderOrder = 11; scene.add(snowPts);
+snowPts.frustumCulled = false; snowPts.renderOrder = 11; snowPts.matrixAutoUpdate = false; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
 const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, Math.PI); hemi.layers.enableAll(); scene.add(hemi);
@@ -200,7 +208,7 @@ const d2c = (p, cam) => (p[0] - cam[0]) * (p[0] - cam[0]) + (p[2] - cam[2]) * (p
 // and pickups coming and going never push a room light out.
 const STAT_PL = 11, DYN_MIN = 2, STAT_FADE = 4, STAT_STICK = 0.6;
 const _statLit = []; let _statT = 0;
-const byFD = (a, b) => a.fd - b.fd;
+const byFD = (a, b) => a.fd - b.fd, byLD = (a, b) => a.ld - b.ld;
 function updateLights3(cam) {
   const T = THEME;
   const fl = 1 + WX.flash * 7; hemi.color.setRGB(T.ambHi[0] * fl, T.ambHi[1] * fl, T.ambHi[2] * fl * 1.1); hemi.groundColor.setRGB(T.ambLo[0], T.ambLo[1], T.ambLo[2]);
@@ -213,10 +221,10 @@ function updateLights3(cam) {
   _lampsNear.length = 0; _stat.length = 0;
   for (const l of nearbyWorld('lights', cam[0], cam[2], 72)) {
     const d = d2c(l.p, cam);
-    if (l.kind === 'lamp') { if (d < 70 * 70) _lampsNear.push(l); }
+    if (l.kind === 'lamp') { if (d < 70 * 70) { l.ld = d; _lampsNear.push(l); } }
     else if (d < 55 * 55) { l.fd = l.fw > 0 ? d * STAT_STICK : d; l.ftick = R3.tick; _stat.push(l); }
   }
-  _lampsNear.sort((a, b) => d2c(a.p, cam) - d2c(b.p, cam));
+  _lampsNear.sort(byLD);   // by the d² just measured
   const sunCadence = SETTINGS.quality >= 3 ? 1 : PERF.pressure > 0.55 ? 3 : 2;
   if (SHADOW_CACHE.sunX !== ox || SHADOW_CACHE.sunZ !== oz || R3.tick - SHADOW_CACHE.frame >= sunCadence) {
     sun.shadow.needsUpdate = true; SHADOW_CACHE.sunX = ox; SHADOW_CACHE.sunZ = oz; SHADOW_CACHE.frame = R3.tick;
@@ -592,7 +600,7 @@ async function loadMeshyCars() {
     batch.setColorAt(id, c.setRGB(s.paint[0], s.paint[1], s.paint[2]));
   }
   batch.computeBoundingSphere();
-  batch.name = 'meshy-cars'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+  batch.name = 'meshy-cars'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
   scene.add(batch); WORLD_MESHES.push(batch);
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
 }
@@ -635,7 +643,7 @@ async function loadMeshyTrees() {
       batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
     }
     batch.computeBoundingSphere();
-    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+    batch.name = 'meshy-trees'; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
     scene.add(batch); WORLD_MESHES.push(batch);
     updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true); REFL_CACHE.valid = false;
   } catch (e) { console.warn('tree load failed', e); }
@@ -646,7 +654,7 @@ async function loadMeshyTrees() {
    (models/prop_<kind>.glb from tools/meshy_prop.py: colour and normal maps, COLOR_0.r the mask) and one BatchedMesh per
    model, culled spot by spot. Bushes shade like the trees' leaves (mat 26, NQ_TREE: the mask marks the foliage over the
    stems), each a shade lighter or darker; lanterns are mat 27, the mask lighting their paper fire boxes. */
-const PROP_MAT = { kasuga: 27, yukimi: 27 };
+const PROP_MAT = { kasuga: 27, yukimi: 27, onigawara: 27, komainu: 27, tsukubai: 27 };
 async function loadMeshyProps() {
   const spots = WORLD.propSpots || [], have = typeof PROP_MODELS !== 'undefined' ? PROP_MODELS : [];
   const kinds = [...new Set(spots.map(s => s.kind))].filter(k => have.includes(k)); if (!kinds.length) return;
@@ -684,11 +692,11 @@ async function loadMeshyProps() {
       const m = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
       for (const s of list) {
         const id = batch.addInstance(gid);
-        m.compose(new THREE.Vector3(s.x, -0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
+        m.compose(new THREE.Vector3(s.x, (s.y || 0) - 0.02, s.z), q.setFromAxisAngle(Y, s.ry), new THREE.Vector3(s.len ? s.len / xLen : s.h, s.h, s.h)); batch.setMatrixAt(id, m);
         batch.setColorAt(id, c.setRGB(s.tint, s.tint, s.tint));
       }
       batch.computeBoundingSphere();
-      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5;
+      batch.name = 'meshy-' + kind; batch.castShadow = true; batch.receiveShadow = true; batch.userData.streamRadius = 1e5; batch.matrixAutoUpdate = false;
       scene.add(batch); WORLD_MESHES.push(batch);
     } catch (e) { console.warn('prop load failed', kind, e); }
   }));
@@ -708,6 +716,7 @@ function updateWorldStreaming(cam, force = false) {
   WORLD_STREAM.active = active;
   const sr = 260;
   for (const q of SIGNS) { const e = q.s.m; q.vis = (e[12] - x) ** 2 + (e[14] - z) ** 2 < sr * sr; }
+  SIGNS_DIRTY = true;
   REFL_CACHE.valid = false;   // newly resident geometry must appear in the next mirror refresh
 }
 
@@ -797,6 +806,35 @@ function buildOcclusion() {
   }
   const tin = new THREE.DataTexture(inn, W, H, THREE.RedFormat, THREE.UnsignedByteType); tin.magFilter = tin.minFilter = THREE.NearestFilter; tin.needsUpdate = true;
   NQU.uIndoor.value = tin;
+  // fallen litter (gpu.js nqLitter): petals pile up under the blossom cards (red), leaves under the plain trees out to their
+  // drip line (green). Blurred into drifts that thin out past the canopy edge.
+  const pet = new Float32Array(W * H), leaf = new Float32Array(W * H), Bl = WORLD.blossoms;
+  for (let k = 0; k < Bl.length; k += 12) {
+    const i = Math.round((Bl[k] - X0) / C - 0.5), j = Math.round((Bl[k + 2] - Z0) / C - 0.5);
+    if (i >= 0 && i < W && j >= 0 && j < H) pet[j * W + i] += 1;
+  }
+  for (const t of WORLD.treeSpots) {
+    const R = 0.42 * t.h, ci = (t.x - X0) / C - 0.5, cj = (t.z - Z0) / C - 0.5, rc = R / C;
+    for (let j = Math.max(0, Math.floor(cj - rc)); j <= Math.min(H - 1, Math.ceil(cj + rc)); j++)
+      for (let i = Math.max(0, Math.floor(ci - rc)); i <= Math.min(W - 1, Math.ceil(ci + rc)); i++) {
+        const d2 = ((i - ci) ** 2 + (j - cj) ** 2) / (rc * rc); if (d2 < 1) leaf[j * W + i] = Math.max(leaf[j * W + i], 1 - d2);
+      }
+  }
+  const blur = (a, r, passes) => {
+    for (let pass = 0; pass < passes; pass++) {
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const x = i + d; if (x >= 0 && x < W) s += a[j * W + x]; } tmp[j * W + i] = s / (2 * r + 1); }
+      for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { let s = 0; for (let d = -r; d <= r; d++) { const z = j + d; if (z >= 0 && z < H) s += tmp[z * W + i]; } a[j * W + i] = s / (2 * r + 1); }
+    }
+  };
+  blur(pet, 2, 3); blur(leaf, 1, 1);
+  let pmax = 0; for (let k = 0; k < W * H; k++) if (pet[k] > pmax) pmax = pet[k];
+  const lpx = new Uint8Array(W * H * 2);
+  for (let k = 0; k < W * H; k++) {
+    lpx[k * 2] = Math.round(Math.min(1, pmax > 0 ? pet[k] / (0.3 * pmax) : 0) * 255);
+    lpx[k * 2 + 1] = Math.round(Math.min(1, leaf[k] * 1.1) * 255);
+  }
+  const tl = new THREE.DataTexture(lpx, W, H, THREE.RGFormat, THREE.UnsignedByteType); tl.magFilter = tl.minFilter = THREE.LinearFilter; tl.needsUpdate = true;
+  NQU.uLitter.value = tl;
 }
 
 /* ---------------- environment: one cube capture per district, swapped as you walk ----------------
@@ -871,7 +909,7 @@ function buildVolumes() {
     H.forEach((h, i) => { pos.set([h.p[0], h.p[1], h.p[2], h.s], i * 4); col.set(h.c, i * 3); x0 = Math.min(x0, h.p[0] - h.s); x1 = Math.max(x1, h.p[0] + h.s); y0 = Math.min(y0, h.p[1] - h.s); y1 = Math.max(y1, h.p[1] + h.s); z0 = Math.min(z0, h.p[2] - h.s); z1 = Math.max(z1, h.p[2] + h.s); });
     geo.setAttribute('hp', new THREE.InstancedBufferAttribute(pos, 4)); geo.setAttribute('hc', new THREE.InstancedBufferAttribute(col, 3)); geo.instanceCount = n;
     const center = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); geo.boundingSphere = new THREE.Sphere(center, Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2);
-    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; scene.add(mesh);
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = true; mesh.renderOrder = 9; mesh.matrixAutoUpdate = false; scene.add(mesh);
   }
 }
 
@@ -1075,6 +1113,27 @@ function render3(time, W, H, fov, cam) {
   GPU_PROF.tag = null;
   renderGPU(T, W, H, time);
 }
+/* ---- weather on the lens (gpu.js grade): water builds up while rain or snow reaches the camera, dries off under cover ----
+   Covered means indoors or under anything solid overhead (an awning, a bridge, a roof), checked a few times a second. Drops
+   land faster looking up into the rain; frost takes its time to grow and melts quickly once you're inside. */
+const LENS = { t: -1, chk: 0, cover: 0, wet: 0, run: 0, frost: 0 };
+function updateLens(T, time) {
+  const dt = LENS.t < 0 ? 0 : clamp(time - LENS.t, 0, 0.25); LENS.t = time;
+  const m = camera.matrixWorld.elements, x = m[12], y = m[13], z = m[14];
+  if ((LENS.chk -= dt) <= 0) {
+    LENS.chk = 0.25; let c = 0;
+    for (const q of WORLD.indoor) if (x > q.x0 && x < q.x1 && z > q.z0 && z < q.z1 && y < q.y1) { c = 1; break; }
+    if (!c) for (const b of WORLD.boxes) if (b.y0 > y && b.y0 < y + 14 && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) { c = 1; break; }
+    LENS.cover = c;
+  }
+  const open = 1 - LENS.cover, rk = wxRainK() * (T.rain > 0.2 ? 1 : 0.6), sk = wxSnowK(), up = clamp(0.6 + Math.sin(PLAYER.pitch) * 0.8, 0.25, 1.3);
+  const ease = (cur, want, up_, down) => cur + (want - cur) * (1 - Math.exp(-dt / (want > cur ? up_ : down)));
+  LENS.wet = ease(LENS.wet, open * Math.min(1, rk * up + sk * 0.3), 3.5, LENS.cover ? 4 : 7);
+  LENS.run = ease(LENS.run, open * clamp((rk - 0.35) * 1.6, 0, 1), 6, 2.5);
+  LENS.frost = ease(LENS.frost, open * sk, 30, LENS.cover ? 7 : 18);
+  const U = GRADE_U;
+  U.uLensDrop.value = LENS.wet; U.uLensRun.value = LENS.run * Math.min(1, LENS.wet * 1.5); U.uLensFog.value = LENS.wet * 0.22; U.uLensFrost.value = LENS.frost;
+}
 /* ---- the frame: wet-street mirror, then the RenderPipeline (gpu.js buildPostGPU) ---- */
 const _clr = new THREE.Color();
 function renderGPU(T, W, H, time) {
@@ -1084,6 +1143,7 @@ function renderGPU(T, W, H, time) {
   const U = GRADE_U;
   U.uTime.value = time; U.uDmg.value = PLAYER.dmgFlash; U.uLow.value = GAME.state === 'playing' || GAME.state === 'over' ? clamp(1 - PLAYER.hp / PLAYER.maxHp / 0.35, 0, 1) : 0;
   U.uExpo.value = T.expo * (1 + WX.flash * 0.9); U.uSat.value = T.sat; U.uGrade.value.set(...T.grade); U.uLift.value.set(...T.lift); U.uAberr.value = BOW.state === 'drawing' ? BOW.draw * 0.002 : 0; U.uFocus.value = GAME.state === 'playing' && BOW.state === 'drawing' ? easeOut(BOW.draw) : 0; U.uRes.value.set(W, H); U.uSharp.value = 0.45;
+  updateLens(T, time);
   const B = GPOST.bloom; B.strength.value = T.bloom * (T.bloomK || 0.32) * 1.2; B.threshold.value = T.thr; B.radius.value = T.bloomR || 0.3;
   vmCamera.layers.set((VM_ITEMS.n > 0 && !DBG.noVM) || R3.warming ? LAYER_VM : 30);
   scene.updateMatrixWorld(); scene.matrixWorldAutoUpdate = false;

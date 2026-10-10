@@ -49,7 +49,19 @@ function signTexture(text, color, style, vertical) {
   }
   return canvasTex(cv);
 }
+// the game's own ad (ads/ key art) on a holo billboard: loaded before the city is built, one texture shared by every copy
+let AD_ART = null, AD_TEX = null;
+function loadAdArt() {
+  return new Promise(res => { const im = new Image(); im.onload = () => { AD_ART = im; res(); }; im.onerror = () => res(); im.src = 'ads/social-1200x628.jpg'; setTimeout(res, 4000); });
+}
 function billboardTexture(kind) {
+  if (kind === 4) {   // a bigger canvas (its own sign batch) so the tagline still reads at 30 m; falls back to the curfew board if the art never loaded
+    if (!AD_ART) return billboardTexture(3);
+    if (!AD_TEX) { const cv = document.createElement('canvas'); cv.width = 1024; cv.height = 512; const x = cv.getContext('2d');
+      const sw = AD_ART.width, sh = sw / 2; x.drawImage(AD_ART, 0, (AD_ART.height - sh) / 2, sw, sh, 0, 0, 1024, 512);   // 1.91:1 art, cropped to the board's 2:1
+      AD_TEX = canvasTex(cv); }
+    return AD_TEX;
+  }
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 256; const x = cv.getContext('2d');
   const F = (w, s) => `${w} ${s}px "Quiver Cn", "TeX Gyre Heros Cn", "Arial Narrow", sans-serif`;
   x.textAlign = 'center'; x.textBaseline = 'middle';
@@ -112,7 +124,7 @@ function buildCity() {
   const bagC = [[0.02, 0.02, 0.025], [0.03, 0.035, 0.04], [0.12, 0.1, 0.05]];
   let shopN = 0; const nextShop = () => SHOP_ORDER[shopN % SHOP_ORDER.length];
   // a building with a walk-in ground-floor shop: the upper floors sit on a back block and two flanks around an open room
-  function shopBody(x0, x1, z0, z1, h, face, col, type) {
+  function shopBody(x0, x1, z0, z1, h, face, col, type, smat = 1) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, span = face[1] === 'z' ? x1 - x0 : z1 - z0, DF = face[1] === 'z' ? z1 - z0 : x1 - x0;
     const tx = face[1] === 'z' ? 1 : 0, tz = 1 - tx, nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const fx = nx ? (nx < 0 ? x0 : x1) : cx, fz = nz ? (nz < 0 ? z0 : z1) : cz;
@@ -128,42 +140,108 @@ function buildCity() {
     const glass = (a, dd, y, sa, sd, sy, c) => { const [x, z] = wp(a, dd); WORLD.glass.push({ m: M4.trs(M4.create(), x, y, z, 0, th, 0, sa, sy, sd), c }); };
     const halo = (a, dd, y, s, c) => { const [x, z] = wp(a, dd); WORLD.halos.push({ p: [x, y, z], s, c }); };
     { const [xa, za] = wp(-W / 2, 0.3), [xb, zb] = wp(W / 2, D); WORLD.indoor.push({ x0: Math.min(xa, xb), x1: Math.max(xa, xb), z0: Math.min(za, zb), z1: Math.max(za, zb), y1: RH }); }
-    Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, 1); Sl(-span / 2, span / 2, 0, DF, RH, h);
-    Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, 1); Sl(-span / 2, span / 2, D, DF, 0, RH);
-    for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, 1); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
+    Bl(0, DF / 2, (h + RH) / 2, span, DF, h - RH, col, 0, smat); Sl(-span / 2, span / 2, 0, DF, RH, h);
+    Bl(0, D + (DF - D) / 2, RH / 2, span, DF - D, RH, col, 0, smat); Sl(-span / 2, span / 2, D, DF, 0, RH);
+    for (const s of [-1, 1]) { Bl(s * (W / 2 + span / 2) / 2, D / 2, RH / 2, span / 2 - W / 2, D, RH, col, 0, smat); Sl(s * W / 2, s * span / 2, 0, D, 0, RH); }
     propShopInterior({ g, Bl, BlP, Sl, W, D, RH, R: mulberry(1000 + shopN++ * 97), M: Mr, MS, wp, glass, halo,
       light: (a, dd, y, r, c) => { const [x, z] = wp(a, dd); WORLD.lights.push({ p: [x, y, z], r, c, shop: true }); } }, type);
   }
-  // real depth on the street face: stone sills and lintels on the painted window grid (2.4 m bays, 3.3 m floors, world-aligned
-  // exactly like the facade shader), a ledge every other floor and a cornice at the roofline. Lower floors only: that's what you see.
-  function facadeDetail(x0, x1, z0, z1, h, face, col, groundTop, sills) {
+  // real depth on the street face, following the building's facade style (the window openings the facade shader paints, on
+  // its 2.4 m bays and 3.3 m floors, world-aligned): stone sills and lintels round punched and paired windows, a continuous
+  // sill under ribbon windows, metal fins up a curtain wall, deep piers between slot windows; a ledge every other floor and a
+  // cornice at the roofline. The per-window pieces stop after the lower floors: that's what you see.
+  const FSTYLE = [[0.16, 0.84, 0.22, 0.78], [0.04, 0.96, 0.12, 0.92], [0, 1, 0.3, 0.74], [0.22, 0.78, 0.16, 0.82], [0.24, 0.76, 0.06, 0.94]];
+  function facadeDetail(x0, x1, z0, z1, h, face, col, groundTop, sills, sty = 0) {
     const alongX = face === '-z' || face === '+z', a0 = alongX ? x0 : z0, a1 = alongX ? x1 : z1;
     const plane = face === '-z' ? z0 : face === '+z' ? z1 : face === '-x' ? x0 : x1, out = face[0] === '-' ? -1 : 1;
     const stone = [col[0] * 1.25 + 0.035, col[1] * 1.25 + 0.035, col[2] * 1.25 + 0.035];
-    const bx = (along, y, oOut, sA, sy, sO, c = stone) => { const cc = plane + out * oOut; if (alongX) B(along, y, cc, sA, sy, sO, c, 0, 16); else B(cc, y, along, sO, sy, sA, c, 0, 16); };
-    const floors = Math.floor(h / 3.3), kMin = Math.max(0, Math.ceil((groundTop + 0.4) / 3.3 - 0.22)), kMax = Math.min(floors - 1, kMin + 4);
+    const bx = (along, y, oOut, sA, sy, sO, c = stone, mat = 16) => { const cc = plane + out * oOut; if (alongX) B(along, y, cc, sA, sy, sO, c, 0, mat); else B(cc, y, along, sO, sy, sA, c, 0, mat); };
+    const [wx0, wx1, wy0, wy1] = FSTYLE[sty], half = sty === 3, ww = (wx1 - wx0) * (half ? 1.2 : 2.4);
+    const floors = Math.floor(h / 3.3), kMin = Math.max(0, Math.ceil((groundTop + 0.4) / 3.3 - wy0)), kMax = Math.min(floors - 1, kMin + 4);
     for (let k = kMin; k <= kMax; k++) {
-      const ys = (k + 0.22) * 3.3, yl = (k + 0.78) * 3.3; if (yl + 0.3 > h - 1.2) break;
-      for (let id = Math.ceil(a0 / 2.4 + 0.02); (id + 1) * 2.4 <= a1 - 0.05; id++) {
-        const c = (id + 0.5) * 2.4;
-        if (sills) bx(c, ys - 0.06, 0.1, 1.86, 0.12, 0.2);
-        bx(c, yl + 0.08, 0.06, 1.78, 0.16, 0.12);
+      const ys = (k + wy0) * 3.3, yl = (k + wy1) * 3.3; if (yl + 0.3 > h - 1.2) break;
+      if (sty === 0 || sty === 3) for (let id = Math.ceil(a0 / 2.4 + 0.02); (id + 1) * 2.4 <= a1 - 0.05; id++) for (const c of half ? [(id + 0.25) * 2.4, (id + 0.75) * 2.4] : [(id + 0.5) * 2.4]) {
+        if (sills) bx(c, ys - 0.06, 0.1, ww + 0.23, 0.12, 0.2);
+        bx(c, yl + 0.08, 0.06, ww + 0.15, 0.16, 0.12);
       }
-      if ((k - kMin) % 2 === 1) bx((a0 + a1) / 2, (k + 1) * 3.3 + 0.02, 0.08, a1 - a0, 0.14, 0.16);
+      if (sty === 2) bx((a0 + a1) / 2, ys - 0.06, 0.12, a1 - a0, 0.12, 0.24);
+      if ((k - kMin) % 2 === 1 && sty !== 1 && sty !== 4) bx((a0 + a1) / 2, (k + 1) * 3.3 + 0.02, 0.08, a1 - a0, 0.14, 0.16);
+    }
+    if (sty === 1 || sty === 4) {   // full-height relief at every bay line, from above the shopfront to the cornice
+      const top = h - 0.8, y0 = groundTop + 0.3, fin = sty === 1, c = fin ? [0.1, 0.1, 0.115] : [col[0] * 1.12 + 0.01, col[1] * 1.12 + 0.01, col[2] * 1.12 + 0.01];
+      if (top - y0 > 3) for (let id = Math.ceil((a0 + 0.6) / 2.4); id * 2.4 <= a1 - 0.6; id++) bx(id * 2.4, (y0 + top) / 2, fin ? 0.09 : 0.16, fin ? 0.07 : 0.5, top - y0, fin ? 0.18 : 0.32, c, fin ? 4 : 16);
     }
     if (h > 8) bx((a0 + a1) / 2, h - 0.3, 0.2, a1 - a0 + 0.3, 0.45, 0.4);
+  }
+  // a parapet round a roof's edge
+  function roofRim(cx, cz, w, d, y, c = [0.05, 0.05, 0.06]) {
+    for (const s of [-1, 1]) { B(cx, y + 0.5, cz + s * (d / 2 - 0.15), w, 1, 0.3, c); B(cx + s * (w / 2 - 0.15), y + 0.5, cz, 0.3, 1, d - 0.6, c); }
+  }
+  // the skyline: what stands on a roof (y is the top of the roof cap). The old tenements carry a timber water tank on a steel
+  // stand; a tower gets a stepped crown, a slender spire, a crown of neon fins, a helipad, or a railing round its plant.
+  // RB is the building's own dice. Scenery only: nothing up here is solid.
+  const CROWN_NEON = [NEON.mag, NEON.cyan, NEON.amber, NEON.violet];
+  function roofTop(RB, cx, cz, w, d, y, col, tenement, smat) {
+    const rr = (a, b) => a + RB() * (b - a), Mt = M4.create(), STEEL = [0.07, 0.07, 0.08];
+    const beacon = (x, yy, z) => B(x, yy, z, 0.6, 0.6, 0.6, NEON.red, 3, 24);
+    if (tenement) {
+      if (RB() < 0.7) {
+        const tx = cx + rr(-w / 5, w / 5), tz = cz + rr(-d / 5, d / 5), R0 = rr(1.2, 1.6), th = rr(2.4, 3.2), legH = rr(1.4, 2.2), y0 = y + legH;
+        for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(tx + sx * R0 * 0.62, y + legH / 2, tz + sz * R0 * 0.62, 0.14, legH, 0.14, STEEL, 0, 4);
+        B(tx, y0 - 0.06, tz, R0 * 1.75, 0.12, R0 * 1.75, STEEL, 0, 4);
+        g.cyl(M4.trs(Mt, tx, y0 + th / 2, tz, 0, 0, 0, R0 * 2, th, R0 * 2), [0.15, 0.1, 0.07], 0, 13, 16);                 // staves
+        for (const k of [0.2, 0.55, 0.88]) g.cyl(M4.trs(Mt, tx, y0 + th * k, tz, 0, 0, 0, R0 * 2.04, 0.07, R0 * 2.04), STEEL, 0, 4, 16, 0.5, 0.5, false);   // hoops
+        g.cyl(M4.trs(Mt, tx, y0 + th + 0.45, tz, 0, 0, 0, R0 * 2.12, 0.9, R0 * 2.12), [0.06, 0.06, 0.065], 0, 4, 16, 0.06, 0.5);   // conical lid
+      }
+      if (RB() < 0.5) roofRim(cx, cz, w, d, y - 0.6, [0.07, 0.065, 0.06]);
+      return;
+    }
+    const k = RB(), big = Math.min(w, d);
+    if (k < 0.22 && big > 9) {            // stepped crown: two or three shrinking storeys, a mast on top
+      let cw = w * 0.72, cd = d * 0.72, yy = y;
+      for (let i = 0, n = RB() < 0.5 ? 2 : 3; i < n; i++) { const sh = rr(3.3, 6.6); B(cx, yy + sh / 2, cz, cw, sh, cd, col, 0, smat); B(cx, yy + sh + 0.25, cz, cw + 0.2, 0.5, cd + 0.2, [0.05, 0.05, 0.06]); yy += sh + 0.5; cw *= 0.7; cd *= 0.7; }
+      if (RB() < 0.7) { const mh = rr(5, 12); B(cx, yy + mh / 2, cz, 0.3, mh, 0.3, [0.1, 0.1, 0.12], 0, 4); beacon(cx, yy + mh + 0.3, cz); }
+    } else if (k < 0.36 && big > 9) {     // a slender spire on a plinth
+      const sh = rr(14, 34), pr = big * 0.2;
+      B(cx, y + 1, cz, pr * 1.6, 2, pr * 1.6, [0.06, 0.06, 0.07], 0, 4);
+      g.cyl(M4.trs(Mt, cx, y + 2 + sh / 2, cz, 0, 0, 0, pr, sh, pr), [0.09, 0.09, 0.11], 0, 4, 8, 0.03, 0.5);
+      beacon(cx, y + 2 + sh + 0.3, cz);
+    } else if (k < 0.56) {                // a crown of neon fins along the roof edge
+      const c = CROWN_NEON[Math.floor(RB() * 4)], fh = rr(2.2, 4.5);
+      for (const s of [-1, 1]) {
+        for (let a = -w / 2 + 0.6; a <= w / 2 - 0.6; a += 2.4) B(cx + a, y + fh / 2, cz + s * (d / 2 - 0.2), 0.14, fh, 0.14, c, 1.5);
+        for (let a = -d / 2 + 0.6; a <= d / 2 - 0.6; a += 2.4) B(cx + s * (w / 2 - 0.2), y + fh / 2, cz + a, 0.14, fh, 0.14, c, 1.5);
+        B(cx, y + fh + 0.06, cz + s * (d / 2 - 0.2), w - 1, 0.12, 0.12, STEEL, 0, 4); B(cx + s * (w / 2 - 0.2), y + fh + 0.06, cz, 0.12, 0.12, d - 1, STEEL, 0, 4);
+      }
+    } else if (k < 0.7 && big > 14) {     // a helipad: a raised deck, its lit ring and corner lamps
+      const pw = Math.min(big - 3, 12);
+      B(cx, y + 0.9, cz, pw, 0.3, pw, [0.06, 0.06, 0.07], 0, 16);
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { B(cx + sx * pw * 0.35, y + 0.37, cz + sz * pw * 0.35, 0.3, 0.75, 0.3, STEEL, 0, 4); B(cx + sx * (pw / 2 - 0.2), y + 1.12, cz + sz * (pw / 2 - 0.2), 0.25, 0.15, 0.25, NEON.lime, 2.5); }
+      g.ring(M4.trs(Mt, cx, y + 1.07, cz, 0, 0, 0, pw * 0.36, 1, pw * 0.36), NEON.amber, 1.8, 0, 1, 0.03, 40, 4);
+    } else if (RB() < 0.6) {              // a railing round the roof plant
+      for (const s of [-1, 1]) for (const yy of [0.55, 1.05]) { B(cx, y + yy, cz + s * (d / 2 - 0.4), w - 0.8, 0.06, 0.06, STEEL, 0, 4); B(cx + s * (w / 2 - 0.4), y + yy, cz, 0.06, 0.06, d - 0.8, STEEL, 0, 4); }
+      for (const s of [-1, 1]) { for (let a = -w / 2 + 0.4; a <= w / 2 - 0.4; a += 1.6) B(cx + a, y + 0.55, cz + s * (d / 2 - 0.4), 0.06, 1.1, 0.06, STEEL, 0, 4);
+        for (let a = -d / 2 + 0.4; a <= d / 2 - 0.4; a += 1.6) B(cx + s * (w / 2 - 0.4), y + 0.55, cz + a, 0.06, 1.1, 0.06, STEEL, 0, 4); }
+    }
   }
   function building(x0, x1, z0, z1, h, face, opt = {}) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0, h0 = h;
     const col = opt.col || facadeCols[Math.floor(R() * facadeCols.length)];
-    if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop);
-    else { B(cx, h / 2, cz, w, h, d, col, 0, opt.mat || 1); solid(x0, x1, 0, h, z0, z1); }
-    // setback tier
-    if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, 1); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2); h += h2; }
-    // roof bits
-    B(cx, h + 0.6, cz, w, 1.2, d, [0.05, 0.05, 0.06]);
-    for (let i = 0; i < 3; i++) B(cx + r(-w / 3, w / 3), h + 1.8, cz + r(-d / 3, d / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
-    if (R() < 0.7) { const ax = cx + r(-w / 4, w / 4), az = cz + r(-d / 4, d / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
+    // the facade style and everything on the roof roll their own dice, seeded by the plot, so the rest of the city never moves
+    const RB = mulberry(Math.round(x0 * 131 + z0 * 977 + 7)), fm = opt.mat || 1;
+    const sty = opt.industrial || (fm !== 1 && fm !== 9) ? 0 : fm === 9 ? [0, 0, 0, 3, 3, 4][Math.floor(RB() * 6)] : opt.tenement ? [0, 2, 3, 3][Math.floor(RB() * 4)] : [0, 0, 1, 1, 2, 3, 4][Math.floor(RB() * 7)];
+    const smat = fm + sty * 0.1;
+    if (opt.shop) shopBody(x0, x1, z0, z1, h, face, col, opt.shop, smat);
+    else { B(cx, h / 2, cz, w, h, d, col, 0, smat); solid(x0, x1, 0, h, z0, z1); }
+    // setback tier (the lower roof gets a parapet: the tier used to stand on it bare)
+    let tw = w, td = d;
+    if (R() < 0.6) { const h2 = r(10, 40), s = r(0.55, 0.8); B(cx, h + h2 / 2, cz, w * s, h2, d * s, col, 0, smat); if (R() < 0.5) B(cx, h + h2 + 0.3, cz, w * s + 0.3, 0.3, d * s + 0.3, neonPick(), 1.2);
+      roofRim(cx, cz, w, d, h); h += h2; tw = w * s; td = d * s; }
+    // roof bits: a cap the size of the top block (it used to be the whole plot, a slab hanging out over any setback), plant on it
+    B(cx, h + 0.6, cz, tw + 0.2, 1.2, td + 0.2, [0.05, 0.05, 0.06]);   // (just inside the neon trim a tier may carry, so the trim shows)
+    for (let i = 0; i < 3; i++) B(cx + r(-tw / 3, tw / 3), h + 1.8, cz + r(-td / 3, td / 3), r(2, 4), r(1.5, 3), r(2, 4), [0.08, 0.08, 0.09], 0, 4);
+    if (R() < 0.7) { const ax = cx + r(-tw / 4, tw / 4), az = cz + r(-td / 4, td / 4), ah = r(8, 22); B(ax, h + ah / 2, az, 0.3, ah, 0.3, [0.1, 0.1, 0.12]); B(ax, h + ah + 0.3, az, 0.7, 0.7, 0.7, NEON.red, 3, 24); }
+    if (!opt.industrial) roofTop(RB, cx, cz, tw, td, h + 1.2, col, opt.tenement, smat);
     // facade orientation
     let fx, fz, ry, tx, tz, span; // facade point & normal toward plaza
     if (face === '-z') { fz = z0 - 0.02; fx = cx; ry = Math.PI; tx = 1; tz = 0; span = w; }
@@ -172,7 +250,7 @@ function buildCity() {
     else { fx = x1 + 0.02; fz = cz; ry = Math.PI / 2; tx = 0; tz = 1; span = d; }
     const nx = face === '-x' ? -1 : face === '+x' ? 1 : 0, nz = face === '-z' ? -1 : face === '+z' ? 1 : 0;
     const P = (along, y, out) => [fx + tx * along + nx * out, y, fz + tz * along + nz * out];
-    if (!opt.industrial) facadeDetail(x0, x1, z0, z1, h0, face, col, opt.tenement ? 3 : 6.7, !opt.tenement);
+    if (!opt.industrial) facadeDetail(x0, x1, z0, z1, h0, face, col, opt.tenement ? 3 : 6.7, !opt.tenement, sty);
     if (opt.industrial) {   // warehouse: roll-up shutters, a hazard strip and a caged work light, no shop signs
       const n = Math.max(1, Math.floor(span / 9));
       for (let i = 0; i < n; i++) { const a = (i - (n - 1) / 2) * (span / n); const p = P(a, 2.6, 0.06); B(p[0], 2.6, p[2], tx ? 4.2 : 0.12, 5.2, tz ? 4.2 : 0.12, [0.2, 0.19, 0.17], 0, 8);
@@ -184,8 +262,25 @@ function buildCity() {
       return;
     }
     if (opt.tenement) {     // alley walls: fire escapes, AC units, pipes, one lit doorway
-      const floors = Math.floor((h - 3) / 3.3);
-      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < Math.min(floors, 7); f++) { const p = P(a, f * 3.3 + 0.6, 0.7); B(p[0], p[1], p[2], tx ? 3.2 : 1.3, 0.08, tz ? 3.2 : 1.3, [0.07, 0.07, 0.08], 0, 4); const q = P(a, f * 3.3 + 1.1, 1.3); B(q[0], q[1], q[2], tx ? 3.2 : 0.05, 0.9, tz ? 3.2 : 0.05, [0.06, 0.06, 0.07], 0, 4); }
+      // fire escapes: a grated landing per floor on wall brackets, railings, a steep stair flight up to the next landing
+      // (switching back each floor), and the drop ladder hung up out of reach under the first. Scenery only: nothing to stand on.
+      const floors = Math.floor((h - 3) / 3.3), nF = Math.min(floors, 7), IRON = [0.07, 0.07, 0.08];
+      const Bf = (along, y, out, sA, sy, sO) => { const p = P(along, y, out); B(p[0], y, p[2], tx ? sA : sO, sy, tz ? sA : sO, IRON, 0, 4); };
+      const Lf = (a0, y0, o0, a1, y1, o1, w) => { const p = P(a0, y0, o0), q = P(a1, y1, o1); g.box(M4.align(M, p[0], p[1], p[2], q[0], q[1], q[2], w, w), IRON, 0, 4); };
+      for (const a of [-span * 0.25, span * 0.2]) for (let f = 1; f < nF; f++) {
+        const y = f * 3.3 + 0.6, dir = f % 2 ? 1 : -1;
+        Bf(a, y, 0.7, 3.2, 0.06, 1.3);                                                    // the deck
+        for (const ry of [0.5, 0.95]) Bf(a, y + ry, 1.33, 3.2, 0.04, 0.04);                // front rails
+        for (const s of [-1, 1]) { Bf(a + s * 1.6, y + 0.95, 0.7, 0.04, 0.04, 1.3); Lf(a + s * 1.35, y - 0.9, 0.04, a + s * 1.35, y - 0.03, 1.28, 0.05); }   // end rails, brackets
+        for (const s of [-1, 0, 1]) Bf(a + s * 1.6, y + 0.48, 1.33, 0.045, 0.95, 0.045);   // posts
+        if (f + 1 < nF) {                                                                  // the flight up, along the outer half of the deck
+          const a0 = a - dir * 1.15, a1 = a + dir * 1.15;
+          for (const o of [0.78, 1.24]) Lf(a0, y, o, a1, y + 3.3, o, 0.05);
+          for (let k = 1; k < 8; k++) Bf(lerp(a0, a1, k / 8), y + 3.3 * k / 8, 1.01, 0.24, 0.035, 0.44);
+          Lf(a0, y + 0.9, 1.26, a1, y + 4.2, 1.26, 0.035);
+        }
+        if (f === 1) { const la = a + dir * 1.25; for (const o of [0.84, 1.18]) Bf(la, y - 0.75, o, 0.045, 1.5, 0.045); for (let k = 0; k < 5; k++) Bf(la, y - 1.4 + k * 0.3, 1.01, 0.03, 0.03, 0.34); }
+      }
       for (let i = 0; i < 4; i++) { const p = P(r(-span / 2 + 1, span / 2 - 1), r(3, h - 2), 0.35); B(p[0], p[1], p[2], tx ? 0.9 : 0.7, 0.6, tz ? 0.9 : 0.7, [0.14, 0.14, 0.15], 0, 4); }
       const pp = P(span / 2 - 0.6, h / 2, 0.2); B(pp[0], pp[1], pp[2], 0.18, h, 0.18, [0.1, 0.09, 0.08], 0, 4);
       const dc = neonPick(), dp = P(r(-span / 4, span / 4), 1.3, 0.04); B(dp[0], 1.3, dp[2], tx ? 1.4 : 0.08, 2.4, tz ? 1.4 : 0.08, [dc[0] * 0.25 + 0.05, dc[1] * 0.25 + 0.05, dc[2] * 0.25 + 0.05], 0.8);
@@ -247,7 +342,7 @@ function buildCity() {
     // holo billboard on some tall facades
     if (h > 45 && R() < 0.7) {
       const by = r(20, Math.min(h - 10, 34)), bw = Math.min(span * 0.8, 18); const bp = P(0, by, 0.4);
-      addSign(billboardTexture(bb++ % 4), bp[0], by, bp[2], ry, bw, bw / 2, [1.3, 1.3, 1.3], 1, true);
+      const kind = bb++ % 5; addSign(billboardTexture(kind), bp[0], by, bp[2], ry, bw, bw / 2, kind === 4 ? [1, 1, 1] : [1.3, 1.3, 1.3], 1, true);
     }
   }
   // north (+z) and south (-z) sides: span x [-64,-6] & [6,64]
@@ -309,11 +404,14 @@ function buildCity() {
     const w = r(14, 26), d = r(14, 26);
     let h = r(35, 120) + (dist > 180 ? r(0, 140) : 0) + (R() < 0.06 ? r(120, 220) : 0);
     const col = facadeCols[Math.floor(R() * facadeCols.length)];
-    B(x, h / 2, z, w, h, d, col, 0, 1);
-    if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, 1); h += h2; }
-    if (R() < 0.5) { B(x, h + 0.5, z, w + 0.4, 0.5, d + 0.4, neonPick(), 1.6); }
-    if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); B(x - w / 2, h / 2, z + d / 2, 0.6, h, 0.6, nc, 2); }
+    const RB = mulberry(Math.round(x * 131 + z * 977 + 3)), smat = 1 + [0, 0, 1, 1, 2, 3, 4][Math.floor(RB() * 7)] * 0.1, h0 = h;
+    B(x, h / 2, z, w, h, d, col, 0, smat);
+    let tw = w, td = d;   // the top block's footprint: the roof trim and the crown sit on it, not on the whole plot
+    if (R() < 0.45) { const h2 = r(15, 60); B(x, h + h2 / 2, z, w * 0.6, h2, d * 0.6, col, 0, smat); h += h2; tw = w * 0.6; td = d * 0.6; }
+    if (R() < 0.5) { B(x, h + 0.5, z, tw + 0.4, 0.5, td + 0.4, neonPick(), 1.6); }
+    if (R() < 0.35) { const nc = neonPick(); B(x + w / 2, h0 / 2, z + d / 2, 0.6, h0, 0.6, nc, 2); B(x - w / 2, h0 / 2, z + d / 2, 0.6, h0, 0.6, nc, 2); }
     if (R() < 0.5) B(x, h + 6, z, 0.5, 12, 0.5, [0.1, 0.1, 0.1]), B(x, h + 12.4, z, 1.2, 1.2, 1.2, NEON.red, 4, 24);
+    else roofTop(RB, x, z, tw, td, h, col, false, smat);
     if (mx < 130) solid(x - w / 2, x + w / 2, 0, h, z - d / 2, z + d / 2);
   }
   // the Spire — megatower at the end of the north avenue

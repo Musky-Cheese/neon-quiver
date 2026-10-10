@@ -38,7 +38,8 @@ function rebuildZombieGrid() {
   for (let u = 0; u < used.length; u++) used[u].length = 0;
   used.length = 0;
   if (map.size > 4096) map.clear();   // forget stale cells now and then
-  for (const z of ZOMBIES) { const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
+  // corpses stay out: every query skips the dead, and up to 26 of them would otherwise pad every cell they lie in
+  for (const z of ZOMBIES) { if (z.dead) continue; const k = zCellKey(Math.floor(z.x / S), Math.floor(z.z / S)); let a = map.get(k); if (!a) map.set(k, a = []); if (!a.length) used.push(a); a.push(z); }
 }
 function zombieCandidates(x0, x1, z0, z1) {
   const out = ZGRID.out; out.length = 0; const S = ZGRID.cell, map = ZGRID.map;
@@ -210,7 +211,8 @@ function updateDying(z, dt) {
   z.x += z.dv[0] * dt; z.z += z.dv[2] * dt; z.y += z.dv[1] * dt;
   const fl = z.floor || 0;
   if (z.y > fl + 0.001) z.dv[1] -= 12 * dt; else { z.y = Math.max(z.y, z.dieT > 3.4 ? z.y : fl); z.dv[1] = Math.max(0, z.dv[1]); const f = Math.max(0, 1 - 5 * dt); z.dv[0] *= f; z.dv[2] *= f; }
-  pushOutCircle(z, 0.28 * z.scale);
+  // a body that has come to rest, and that the last push left where it was, needs no push against the static world
+  if (!(z._pq && z.x === z._px && z.y === z._py && z.z === z._pz)) { const x0 = z.x, z0 = z.z; pushOutCircle(z, 0.28 * z.scale); z._px = z.x; z._py = z.y; z._pz = z.z; z._pq = z.x === x0 && z.z === z0; }
   // crumple: knees give first, then the body tips over
   if (z.crumpleMode && z.crumple < 1) { z.crumple = Math.min(1, z.crumple + dt * 2.6); if (z.crumple > 0.7 && z.pitchV === 0) z.pitchV = z.pitchSign * 0.6; }
   const lim = 1.5;
@@ -243,7 +245,11 @@ function updateZombies(dt, time) {
     updateReact(z, dt);
     z.chill = Math.max(0, z.chill - dt); z.stun = Math.max(0, z.stun - dt); z.markT = Math.max(0, z.markT - dt);
     // stand on low things they walk over (the Metro's island platform, steps, kerbs) instead of wading through them
-    if (z.state !== 'drop' && z.climbState === 'ground') { const fy = z.floor = groundAt(z.x, z.z, (z.dead ? z.floor || 0 : z.y) + 0.15, 0.2 * z.scale);
+    if (z.state !== 'drop' && z.climbState === 'ground') {
+      const yIn = (z.dead ? z.floor || 0 : z.y) + 0.15; let fy;
+      if (z.dead && z.x === z._gx && z.z === z._gz && yIn === z._gy) fy = z._gf;   // a body at rest over static ground: the last answer
+      else { fy = groundAt(z.x, z.z, yIn, 0.2 * z.scale); if (z.dead) { z._gx = z.x; z._gz = z.z; z._gy = yIn; z._gf = fy; } }
+      z.floor = fy;
       if (!z.dead) z.y = fy > z.y ? Math.min(fy, z.y + dt * 3) : Math.max(fy, z.y - dt * 5); }
     { const wet = z.y < 0.05 && waterAt(z.x, z.z) > 0; z.wade = wet && !z.dead ? 0.7 : 1;   // wading slows them; the rig sinks to the knees (bodies slip under)
       z.sink = lerp(z.sink || 0, wet ? (z.dead ? 0.5 : z.crawl ? 0.08 : 0.3) : 0, Math.min(1, dt * (z.dead ? 0.6 : 5))); }

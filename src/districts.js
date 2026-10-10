@@ -173,7 +173,7 @@ function buildDistricts(C) {
   B(76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each NIGHT MARKET sign reads on its own side, not mirrored through the other
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 75.65, 8.2, 0, -Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
   addSign(signTexture('NIGHT MARKET', '#ff5a3c', 'font'), 76.35, 8.2, 0, Math.PI / 2, 9, 2.25, [1.4, 1.4, 1.4], 0, true);
-  addSign(billboardTexture(2), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1.2, 1.2, 1.2], 1, true);
+  addSign(billboardTexture(4), 137.6, 22, -20, -Math.PI / 2, 16, 8, [1, 1, 1], 1, true);
   WORLD.supplies.push({ kind: 'terminal', x: 79, z: 25, ry: Math.PI / 2 + 0.3, d: 'market' }, { kind: 'cache', x: 134, z: -2, d: 'market' }, { kind: 'cache', x: 108, z: -27, d: 'market' });
 
 
@@ -325,6 +325,13 @@ function buildDistricts(C) {
   cable(-110, 7, 1.5, -94, 7.5, -1.5, 1, true, [0.9, 0.2, 0.6]);
   for (const [x, z] of [[-113, -4], [-135, 22], [-90, 18], [-113, 30], [-128, -30]]) { B(x, 3.6, z, 0.18, 0.18, 0.9, [0.1, 0.1, 0.1], 0, 4); B(x, 3.5, z, 0.5, 0.1, 0.5, [1, 0.8, 0.55], 3.5); WORLD.halos.push({ p: [x, 3.45, z], s: 1.6, c: [0.6, 0.42, 0.22] }); WORLD.lights.push({ p: [x, 3.2, z], r: 11, c: [1.6, 1.1, 0.55], shop: true }); }
   lamp(-80, -20); lamp(-88, 22);
+  // entrance gantry where the avenue from the plaza comes out: a rusted girder, a string of bare bulbs, the name in neon
+  for (const az of [-6.5, 6.5]) { B(-76, 3.5, az, 0.5, 7, 0.5, [0.14, 0.08, 0.05], 0, 4); WORLD.circles.push({ x: -76, z: az, r: 0.35, h: 7 }); }
+  B(-76, 7.2, 0, 0.6, 0.5, 14.5, [0.14, 0.08, 0.05], 0, 4);
+  B(-76, 8.2, 0, 0.5, 2.7, 9.8, [0.03, 0.03, 0.035], 0, 4);   // backboard: each sign reads on its own side
+  for (const [txt, c, st, sx, ry, seed] of [['THE WARRENS', '#ff2e88', 'font', -75.65, Math.PI / 2, 31.5], ['SECTOR 7 PLAZA', '#29e7ff', 'seg', -76.35, -Math.PI / 2, 67.5]])   // fixed seeds (fraction >= 0.08, or the sign renders dead): addSign's roll would shift the layout dice
+    WORLD.signs.push({ tex: signTexture(txt, c, st), m: M4.trs(M4.create(), sx, 8.2, 0, 0, ry, 0, 9, 2.25, 1), col: [1.4, 1.4, 1.4], mode: 0, seed, add: true });
+  cable(-76, 6.9, -6.2, -76, 6.9, 6.2, 0.7, true, [1, 0.75, 0.4]);
   bench(-77, -13, '-x'); bench(-90.5, 10, '+x', 1.6);
   WORLD.supplies.push({ kind: 'terminal', x: -79, z: 26, ry: Math.PI / 2 + 0.6, d: 'warrens' }, { kind: 'cache', x: -135, z: -29, d: 'warrens' }, { kind: 'cache', x: -113, z: 29.4, d: 'warrens' });
 

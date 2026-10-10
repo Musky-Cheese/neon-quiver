@@ -49,3 +49,27 @@ Honest caveat: the cloud has no real GPU. SwiftShader runs both sides of every s
 1. Open the game with `?prof=1` on the URL, e.g. `https://musky-cheese.github.io/neon-quiver/?prof=1`.
 2. Play a wave in a few districts. The overlay shows GPU time per pass, CPU frame time, draw calls and triangles.
 3. For a before/after, compare against the old build at the commit before this work (`df39169`). If GPU time per frame is still high on Balanced, try Low. The auto-resolution now also reacts within about a third of a second.
+
+# CPU pass (9 Oct 2026)
+
+Step-side and render-side CPU work that leaves the picture untouched. Checked three ways: a seeded 90-step horde
+(arrows, a blast, blood, corpses, a moving player) gives a bit-identical state sequence before and after; the nav
+field and steering targets match the old flood cell for cell on every district; and fixed-camera frames of four
+districts (3D and HUD canvases) match to within the software renderer's own run-to-run noise.
+
+- **Rig posing:** bones no longer recompute their Euler `.rotation` on every quaternion write (nothing reads it);
+  single-axis procedural rotations skip the trig on the zero axes (same expressions, bit for bit).
+- **Nav:** the flood is Dijkstra with a binary heap (each cell settled once) and is skipped while the player stays in
+  the same cell; the nearest free cell of every blocked cell is a table; a cell's steering target is kept for one flood.
+- **Zombies:** corpses stay out of the spatial grid (every query skips them anyway); a body at rest reuses its ground
+  height and skips the wall push.
+- **Particles:** the update stops once every live particle has been seen instead of scanning all 5000 slots.
+- **Render side:** sign buffers are repacked only when visibility or the Look changes; decal matrices are built once
+  and uploaded only when a slot's decal changes (alpha only while fading); identity-transform scene objects skip the
+  per-frame matrix recompose; the lamp sort uses the distances already measured; yaw-only `M4.trs` skips four trig calls.
+- **HUD / audio:** the canvas HUD measures before the DOM HUD writes (no forced layout mid-frame); the minimap draws a
+  crop of the map, not the whole city; ambient AudioParams are re-aimed only when the target changes; the listener is
+  updated only when the player moved.
+
+Measured in the cloud (no GPU, so only `step` is meaningful): 44 bodies (32 alive, 12 corpses) with a moving player,
+`step()` went from about 0.8 ms to about 0.5 ms per frame.

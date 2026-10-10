@@ -79,51 +79,74 @@ function buildNav() {
   while (qh < qt) { const k = Q[qh++], i = k % NAV.w, j = (k / NAV.w) | 0;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= NAV.w || b >= NAV.h) continue; const n = b * NAV.w + a; if (!reach[n] && !B[n]) { reach[n] = 1; Q[qt++] = n; } } }
   for (let k = 0; k < N; k++) if (!reach[k]) B[k] = 1;
-  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.queue = new Int32Array(N); NAV.touched = [];
+  NAV.block = B; NAV.dist = new Uint16Array(N).fill(NAV_INF); NAV.touched = []; NAV.lastS = -1; NAV.gen = 1;
+  NAV.hd = new Int32Array(8 * N + 8); NAV.hn = new Int32Array(8 * N + 8);   // the flood's binary heap: at most one push per relaxed edge
+  NAV.tgt = new Int32Array(N); NAV.tgtGen = new Uint32Array(N);             // navTarget per start cell, valid for one flood (gen)
+  // nearest free cell of every blocked one, looked up once here instead of a 285-cell scan per zombie per frame
+  NAV.free = new Int32Array(N); for (let k = 0; k < N; k++) NAV.free[k] = B[k] ? navNearestFreeScan(k) : k;
   NAV.walk = []; for (let k = 0; k < N; k++) if (!B[k]) NAV.walk.push(k);
   NAV.ready = true;
   buildMinimap();
 }
-// breadth-first distances (in cells, 8-connected without corner cutting) from the player
-const _nb = [[1, 0, 10], [-1, 0, 10], [0, 1, 10], [0, -1, 10], [1, 1, 14], [1, -1, 14], [-1, 1, 14], [-1, -1, 14]];
+// shortest-path distances (in cells, 8-connected without corner cutting, octile costs 10 / 14) from the player.
+// Dijkstra with a binary heap settles every cell once; the old label-correcting FIFO re-expanded cells many times
+// and gave the same field. Cells at or past maxCost are never expanded, so the field is identical either way.
+const NB_DI = new Int32Array([1, -1, 0, 0, 1, 1, -1, -1]), NB_DJ = new Int32Array([0, 0, 1, -1, 1, -1, 1, -1]), NB_C = new Int32Array([10, 10, 10, 10, 14, 14, 14, 14]);
 function navUpdate(px, pz) {
-  const D = NAV.dist, B = NAV.block, W = NAV.w, H = NAV.h, Q = NAV.queue, N = Q.length;
-  const inQ = NAV.inQ || (NAV.inQ = new Uint8Array(N)), touched = NAV.touched;
-  for (let i = 0; i < touched.length; i++) { const k = touched[i]; D[k] = NAV_INF; inQ[k] = 0; }
-  touched.length = 0;
-  let s = navIdx(px, pz); if (s < 0) return; if (B[s]) s = navNearestFree(s); if (s < 0) return;
+  const D = NAV.dist, B = NAV.block, W = NAV.w, H = NAV.h, touched = NAV.touched;
+  let s = navIdx(px, pz); if (s >= 0 && B[s]) s = NAV.free[s];
+  if (s === NAV.lastS && s >= 0) return;   // same start cell as the last flood over a static grid: the field is unchanged
+  for (let i = 0; i < touched.length; i++) D[touched[i]] = NAV_INF;
+  touched.length = 0; NAV.lastS = s; NAV.gen++;
+  if (s < 0) return;
   const maxCost = Math.ceil(135 / NAV.cell) * 10;   // active district + spawn ring; constant work as the map grows
-  let qh = 0, qt = 0, cnt = 0; D[s] = 0; touched.push(s); Q[qt] = s; qt = (qt + 1) % N; cnt++; inQ[s] = 1;
-  while (cnt > 0) {   // label-correcting shortest paths with octile costs (10 / 14)
-    const k = Q[qh]; qh = (qh + 1) % N; cnt--; inQ[k] = 0;
-    const i = k % W, j = (k / W) | 0, dk = D[k];
-    if (dk >= maxCost) continue;
+  const hd = NAV.hd, hn = NAV.hn; let hs = 0;
+  D[s] = 0; touched.push(s); hd[0] = 0; hn[0] = s; hs = 1;
+  while (hs > 0) {
+    const dk = hd[0], k = hn[0];
+    // pop: move the last entry to the root and sift it down
+    hs--; if (hs > 0) { const ld = hd[hs], ln = hn[hs]; let i = 0; for (;;) { let c = 2 * i + 1; if (c >= hs) break; if (c + 1 < hs && hd[c + 1] < hd[c]) c++; if (hd[c] >= ld) break; hd[i] = hd[c]; hn[i] = hn[c]; i = c; } hd[i] = ld; hn[i] = ln; }
+    if (dk !== D[k] || dk >= maxCost) continue;   // a stale entry (the cell was reached cheaper since), or past the cutoff
+    const i = k % W, j = (k / W) | 0;
     for (let n = 0; n < 8; n++) {
-      const a = i + _nb[n][0], b = j + _nb[n][1]; if (a < 0 || b < 0 || a >= W || b >= H) continue;
+      const a = i + NB_DI[n], b = j + NB_DJ[n]; if (a < 0 || b < 0 || a >= W || b >= H) continue;
       const m = b * W + a; if (B[m]) continue;
       if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue;
-      const nd = dk + _nb[n][2];
-      if (nd < D[m]) { if (D[m] === NAV_INF) touched.push(m); D[m] = nd; if (!inQ[m]) { Q[qt] = m; qt = (qt + 1) % N; cnt++; inQ[m] = 1; } }
+      const nd = dk + NB_C[n];
+      if (nd < D[m]) {
+        if (D[m] === NAV_INF) touched.push(m); D[m] = nd;
+        let c = hs++; while (c > 0) { const p = (c - 1) >> 1; if (hd[p] <= nd) break; hd[c] = hd[p]; hn[c] = hn[p]; c = p; } hd[c] = nd; hn[c] = m;   // push: sift up
+      }
     }
   }
 }
-function navNearestFree(k) {
+function navNearestFree(k) { return NAV.free[k]; }
+function navNearestFreeScan(k) {
   const W = NAV.w, i0 = k % W, j0 = (k / W) | 0;
   for (let r = 1; r < 6; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) { const a = i0 + di, b = j0 + dj; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (!NAV.block[m]) return m; }
   return -1;
 }
-function navDistAt(x, z) { const k = navIdx(x, z); if (k < 0) return 1e9; const d = NAV.dist[NAV.block[k] ? Math.max(0, navNearestFree(k)) : k]; return d === NAV_INF ? 1e9 : d / 10 * NAV.cell; }
-// steering target for a zombie: a point two cells down the distance field
+function navDistAt(x, z) { const k = navIdx(x, z); if (k < 0) return 1e9; const d = NAV.dist[Math.max(0, NAV.free[k])]; return d === NAV_INF ? 1e9 : d / 10 * NAV.cell; }
+// steering target for a zombie: a point two cells down the distance field. It depends only on the zombie's cell and
+// the current field, so each cell's answer is kept until the next flood (zombies share cells and stay in one for a while)
 const _nc = [0, 0];
 function navTarget(x, z, out) {
-  let k = navIdx(x, z); if (k < 0) return false;
-  if (NAV.block[k]) { k = navNearestFree(k); if (k < 0) return false; }
-  const W = NAV.w, D = NAV.dist, B = NAV.block;
-  for (let step = 0; step < 2; step++) {
-    const i = k % W, j = (k / W) | 0; let best = k, bd = D[k];
-    for (let n = 0; n < 8; n++) { const a = i + _nb[n][0], b = j + _nb[n][1]; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (B[m]) continue; if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue; if (D[m] < bd) { bd = D[m]; best = m; } }
-    if (best === k) break; k = best;
+  const k0 = navIdx(x, z); if (k0 < 0) return false;
+  const D = NAV.dist; let k;
+  if (NAV.tgtGen[k0] === NAV.gen) k = NAV.tgt[k0];
+  else {
+    k = NAV.free[k0];
+    if (k >= 0) {
+      const W = NAV.w, B = NAV.block;
+      for (let step = 0; step < 2; step++) {
+        const i = k % W, j = (k / W) | 0; let best = k, bd = D[k];
+        for (let n = 0; n < 8; n++) { const a = i + NB_DI[n], b = j + NB_DJ[n]; if (a < 0 || b < 0 || a >= W || b >= NAV.h) continue; const m = b * W + a; if (B[m]) continue; if (n >= 4 && (B[j * W + a] || B[b * W + i])) continue; if (D[m] < bd) { bd = D[m]; best = m; } }
+        if (best === k) break; k = best;
+      }
+    }
+    NAV.tgt[k0] = k; NAV.tgtGen[k0] = NAV.gen;
   }
+  if (k < 0) return false;
   navCenter(k, out); return D[k] !== NAV_INF;
 }
 function navNearestPoint(x, z) { let k = navIdx(clamp(x, NAV.x0 + 1, WORLD_BOUNDS.x1), clamp(z, NAV.z0 + 1, WORLD_BOUNDS.z1)); if (k < 0 || NAV.block[k]) k = navNearestFree(k < 0 ? navIdx(0, 14) : k); if (k < 0) return [0, 14]; return navCenter(k, [0, 0]); }
@@ -255,18 +278,24 @@ function drawMinimap(hx, W, H, time) {
   hx.save();
   hx.beginPath(); hx.arc(cx, cy, R, 0, TAU); hx.fillStyle = 'rgba(6,8,14,0.72)'; hx.fill(); hx.clip();
   hx.translate(cx, cy); hx.rotate(PLAYER.yaw); hx.scale(s / MINI.scale, s / MINI.scale);
-  hx.drawImage(MINI.cv, (NAV.x0 - PLAYER.x) * MINI.scale, (NAV.z0 - PLAYER.z) * MINI.scale);
+  { // only the part of the map that can show inside the ring (the clip hides the rest): a crop with a wide margin, not the whole city
+    const ms = MINI.scale, cv = MINI.cv, half = Math.ceil(R / 0.9) + 16, mx = (PLAYER.x - NAV.x0) * ms, mz = (PLAYER.z - NAV.z0) * ms;
+    const sx = Math.max(0, Math.floor(mx - half)), sz = Math.max(0, Math.floor(mz - half)), sw = Math.min(cv.width, Math.ceil(mx + half)) - sx, sh = Math.min(cv.height, Math.ceil(mz + half)) - sz;
+    if (sw > 0 && sh > 0) hx.drawImage(cv, sx, sz, sw, sh, (NAV.x0 - PLAYER.x) * ms + sx, (NAV.z0 - PLAYER.z) * ms + sz, sw, sh);
+  }
   hx.setTransform(1, 0, 0, 1, 0, 0); const dpr = Math.min(2, devicePixelRatio || 1); hx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cy_ = Math.cos(PLAYER.yaw), sy_ = Math.sin(PLAYER.yaw);
   const map = (x, z) => { const dx = (x - PLAYER.x) * s, dz = (z - PLAYER.z) * s; return [cx + dx * cy_ - dz * sy_, cy + dx * sy_ + dz * cy_]; };
   hx.beginPath(); hx.arc(cx, cy, R, 0, TAU); hx.clip();
+  const cull = R / s + 6;   // past this (in metres) a dot can't reach the ring, so it isn't drawn at all
   for (const sp of WORLD.supplies) {
+    if (Math.abs(sp.x - PLAYER.x) > cull || Math.abs(sp.z - PLAYER.z) > cull) continue;
     const [x, y] = map(sp.x, sp.z);
     if (sp.kind === 'terminal') { hx.fillStyle = GAME.intermission ? '#29e7ff' : 'rgba(41,231,255,0.45)'; hx.fillRect(x - 3.5, y - 3.5, 7, 7); }
     else { hx.fillStyle = sp.cd > 0 ? 'rgba(255,181,46,0.3)' : '#ffb52e'; hx.beginPath(); hx.moveTo(x, y - 4); hx.lineTo(x + 4, y); hx.lineTo(x, y + 4); hx.lineTo(x - 4, y); hx.fill(); }
   }
   for (const p of PICKUPS) { const [x, y] = map(p.x, p.z); hx.fillStyle = p.kind === 'health' ? '#6dff9a' : '#ffd23a'; hx.fillRect(x - 1.5, y - 1.5, 3, 3); }
-  for (const z of ZOMBIES) { if (z.dead) continue; const [x, y] = map(z.x, z.z); hx.fillStyle = z.type === 'boss' ? '#ff3df0' : z.type === 'brute' ? '#ff6b3d' : '#ff3040'; const r = z.type === 'boss' ? 4.5 : z.type === 'brute' ? 3 : 2.2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fill(); }
+  for (const z of ZOMBIES) { if (z.dead || Math.abs(z.x - PLAYER.x) > cull || Math.abs(z.z - PLAYER.z) > cull) continue; const [x, y] = map(z.x, z.z); hx.fillStyle = z.type === 'boss' ? '#ff3df0' : z.type === 'brute' ? '#ff6b3d' : '#ff3040'; const r = z.type === 'boss' ? 4.5 : z.type === 'brute' ? 3 : 2.2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fill(); }
   drawObjectiveMinimap(hx, map, cx, cy, R, time);
   hx.restore();
   // player + ring

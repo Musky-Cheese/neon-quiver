@@ -8,13 +8,27 @@
 <script type="importmap">{"imports":{"three":"./vendor/three.webgpu.js","three/webgpu":"./vendor/three.webgpu.js","three/tsl":"./vendor/three.tsl.js","three/addons/":"./vendor/addons/"}}</script>
 <link rel="modulepreload" href="vendor/three.webgpu.js">
 <link rel="modulepreload" href="vendor/three.core.js">
+<link rel="canonical" href="https://musky-cheese.github.io/neon-quiver/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Neon Quiver">
 <meta property="og:title" content="Neon Quiver">
 <meta property="og:description" content="Draw. Release. Survive the horde. A first-person archer vs. zombies game in a rain-soaked cyberpunk city.">
+<meta property="og:url" content="https://musky-cheese.github.io/neon-quiver/">
 <meta property="og:image" content="https://musky-cheese.github.io/neon-quiver/ads/social-1200x628.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="628">
+<meta property="og:image:alt" content="First-person view down a drawn bow at zombies crossing a rainy neon plaza, with the Neon Quiver logo">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Neon Quiver">
+<meta name="twitter:description" content="Draw. Release. Survive the horde. A first-person archer vs. zombies game in a rain-soaked cyberpunk city.">
+<meta name="twitter:image" content="https://musky-cheese.github.io/neon-quiver/ads/social-1200x628.jpg">
+<meta name="twitter:image:alt" content="First-person view down a drawn bow at zombies crossing a rainy neon plaza, with the Neon Quiver logo">
 <meta name="theme-color" content="#07060f">
-<link rel="icon" type="image/png" href="favicon-64.png">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <style>
 @font-face{font-family:"Quiver Cn";font-weight:400;font-style:normal;font-display:block;src:url(fonts/heroscn-regular.woff) format("woff");}
 @font-face{font-family:"Quiver Cn";font-weight:700;font-style:normal;font-display:block;src:url(fonts/heroscn-bold.woff) format("woff");}
@@ -282,8 +296,8 @@ button, select, input { font-family: var(--f); }
 .sys-btn.ghost { background: transparent; color: #EEF1F8; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
 .sys-btn.ghost:hover { background: rgba(56, 225, 242, 0.12); }
 .sys-btn:hover { background: #6ae9f6; } .sys-btn:focus-visible { outline: 2px solid #EEF1F8; outline-offset: 3px; }
-#loading, #nogl { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
-#nogl { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
+#loading, #nogl, #nojs { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); font-size: 13px; letter-spacing: 0.3em; color: var(--dim); text-transform: uppercase; text-align: center; padding-inline: 16px; }
+#nogl, #nojs { color: var(--ink); letter-spacing: 0.08em; font-size: 16px; text-transform: none; }
 
 @media (max-width: 860px) {
   #scr-title { grid-template-columns: 1fr; align-content: start; background: rgba(7, 6, 15, 0.8); }
@@ -482,6 +496,7 @@ button, select, input { font-family: var(--f); }
   })();
   </script>
   <div id="swWarn" role="alert" hidden><div><b>Graphics acceleration is off.</b> Your browser is drawing the game on the CPU, so it will run slowly. Turn on <i>Use graphics acceleration when available</i> in your browser's settings (Chrome: Settings → System), restart the browser, and check <code>chrome://gpu</code>.</div><button id="swWarnX" class="btn ghost" type="button" aria-label="Dismiss">OK</button></div>
+  <noscript><div id="nojs">Neon Quiver needs JavaScript. Turn it on for this page, then reload.</div></noscript>
   <div id="nogl" hidden>Neon Quiver needs WebGPU or WebGL2. Try a current version of Chrome, Edge, Firefox or Safari on a desktop computer.</div>
 </div>
 
@@ -495,7 +510,7 @@ button, select, input { font-family: var(--f); }
    ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var GAME_JS = "game.js?v=d53d5fa570";   // build.py: 'game.js?v=…'
+  var GAME_JS = "game.js?v=182463380e";   // build.py: 'game.js?v=…'
   var q = new URLSearchParams(location.search), forced = q.get('gpu');
   var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 

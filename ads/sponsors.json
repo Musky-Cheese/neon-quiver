@@ -1,6 +1,1 @@
-{
-  "spawn": { "name": "Test Sponsor", "image": "ads/sponsors/TEMPLATE-1024x512.png" },
-  "terminal-hub": { "name": "Test Sponsor", "image": "ads/sponsors/TEMPLATE-1024x512.png" },
-  "armory": { "name": "Test Sponsor", "image": "ads/sponsors/TEMPLATE-1024x512.png", "url": "https://example.com/" },
-  "title-1": { "name": "Bad url", "image": "ads/sponsors/TEMPLATE-1024x512.png", "url": "javascript:alert(1)" }
-}
+{}

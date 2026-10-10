@@ -195,7 +195,7 @@ Object.assign(AUD, {
       this.hz = { gw, gh, gv, drip: 1 };
     }
     const H = this.hz, t = this.now();
-    H.gw.gain.setTargetAtTime(0.14 * metroK, t, 0.8); H.gh.gain.setTargetAtTime(0.05 * refK, t, 0.8); H.gv.gain.setTargetAtTime(0.018 * refK, t, 0.8);
+    paramTarget(H.gw.gain, 0.14 * metroK, t, 0.8); paramTarget(H.gh.gain, 0.05 * refK, t, 0.8); paramTarget(H.gv.gain, 0.018 * refK, t, 0.8);
     if (metroK > 0) { H.drip -= dt; if (H.drip <= 0) { H.drip = rand(0.2, 1.1); this.tone('sine', rand(1000, 1800), rand(500, 800), 0.08, 0.035, this.amb, t, 0.003); } }
   },
 });
