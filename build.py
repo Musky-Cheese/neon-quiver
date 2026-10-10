@@ -21,14 +21,13 @@ import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 '''
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
 TREE_VER = hashlib.sha1(open(os.path.join(root, 'models', 'tree.glb'), 'rb').read()).hexdigest()[:10] if os.path.exists(os.path.join(root, 'models', 'tree.glb')) else '0'
-CARS_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'models', f), 'rb').read() for f in ('car_sedan.glb', 'car_van.glb'))).hexdigest()[:10]
 PROP_FILES = sorted(f for f in os.listdir(os.path.join(root, 'models')) if f.startswith('prop_') and f.endswith('.glb'))
-PROPS_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'models', f), 'rb').read() for f in PROP_FILES)).hexdigest()[:10]
 MZ_FILES = sorted(f for f in os.listdir(os.path.join(root, 'models')) if f.startswith('mz_') and f.endswith('.glb'))
-MZ_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'models', f), 'rb').read() for f in MZ_FILES)).hexdigest()[:10]
+# one content hash per car, prop and zombie model: changing one model only busts the browser cache for that file
+MODEL_VER = {f[:-4]: hashlib.sha1(open(os.path.join(root, 'models', f), 'rb').read()).hexdigest()[:10] for f in ['car_sedan.glb', 'car_van.glb'] + PROP_FILES + MZ_FILES}
 TEX_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'textures', f), 'rb').read() for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg'))).hexdigest()[:10]
 SRC = ['models.js', 'engine.js', 'gpu.js', 'props.js', 'architecture.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'ads.js', 'game.js']
-CONSTS = 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const CARS_VER = "%s";   // Meshy car models cache key\n' % CARS_VER + 'const TREE_VER = "%s";   // Meshy tree model cache key\n' % TREE_VER + 'const PROPS_VER = "%s";  // Meshy bushes and lanterns cache key\n' % PROPS_VER + 'const PROP_MODELS = %s;\n' % json.dumps([f[5:-4] for f in PROP_FILES]) + 'const MZ_VER = "%s";     // Meshy zombie models cache key\n' % MZ_VER + 'const MZ_TYPES = %s;\n' % json.dumps([f[3:-4] for f in MZ_FILES]) + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER
+CONSTS = 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TREE_VER = "%s";   // Meshy tree model cache key\n' % TREE_VER + 'const MODEL_VER = %s;   // Meshy cars, props and zombies: cache key per file\n' % json.dumps(MODEL_VER) + 'const PROP_MODELS = %s;\n' % json.dumps([f[5:-4] for f in PROP_FILES]) + 'const MZ_TYPES = %s;\n' % json.dumps([f[3:-4] for f in MZ_FILES]) + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER
 js = IMPORTS + CONSTS + '\n'.join(S(f) for f in SRC)
 open(os.path.join(root, 'game.js'), 'w', encoding='utf-8', newline='\n').write(js)   # LF + UTF-8 on every OS, so a Windows build and a cloud build are byte-identical
 boot = S('boot.js').replace('/*__GAME__*/""', json.dumps('game.js?v=' + hashlib.sha1(js.encode()).hexdigest()[:10]))
