@@ -394,7 +394,10 @@ function buildDistricts(C) {
   WORLD.navBlocks.push({ x0: -150, x1: -32, z0: 166, z1: 240 }, { x0: 32, x1: 150, z0: 166, z1: 240 }, { x0: -150, x1: 150, z0: 227, z1: 240 });
   propTorii(G, 0, 77 + OZ);
   const gt = signTexture('SAKURA GARDENS', '#ff8fc8', 'font');
-  addSign(gt, 0, 4.45, 76.6 + OZ, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
+  G.rbox(pT(PM.a, 0, 4.45, 77 + OZ), 6.7, 1.8, 0.3, 0.03, [0.03, 0.03, 0.035], 0, 11, 1);   // backboard under the nuki: each sign reads on its own side, not mirrored through the other
+  addSign(gt, 0, 4.45, 76.8 + OZ, Math.PI, 6.4, 1.6, [1.4, 1.4, 1.4], 0, true);
+  // the way back out names the Suburbs; a fixed seed (fraction >= 0.08, or the sign renders dead) so addSign's roll doesn't shift the layout dice
+  WORLD.signs.push({ tex: signTexture('THE SUBURBS', '#29e7ff', 'font'), m: M4.trs(M4.create(), 0, 4.45, 77.2 + OZ, 0, 0, 0, 6.4, 1.6, 1), col: [1.3, 1.3, 1.3], mode: 0, seed: 43.5, add: true });
   propPath(G, R, [[0, 75 + OZ], [0, 90 + OZ], [0.6, 104 + OZ], [0, 118 + OZ], [0, 122.4 + OZ]], 2.2);
   const loop = []; for (let i = 0; i <= 28; i++) { const a = i / 28 * TAU; loop.push([-11 + Math.cos(a) * 12.5, 102 + OZ + Math.sin(a) * 9]); }
   propPath(G, R, loop, 1.3);
