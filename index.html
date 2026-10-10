@@ -135,6 +135,19 @@ button, select, input { font-family: var(--f); }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
 .keys kbd { font-family: var(--f); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 7px; border: 1px solid rgba(233, 236, 255, 0.3); border-bottom-width: 2px; color: var(--ink); white-space: nowrap; justify-self: start; }
 .arrows-legend { display: grid; gap: 7px; font-size: 14px; }
+.ad-card p { margin: 0; font-size: 14px; line-height: 1.35; color: var(--dim); }
+.ad-card .ad-spec { margin-top: 6px; font-size: 12px; letter-spacing: 0.04em; color: var(--ink); }
+.ad-card .ad-contact { margin-top: 6px; color: var(--ink); }
+.ad-card a { color: var(--cyan); text-decoration: none; border-bottom: 1px solid rgba(41, 231, 255, 0.4); }
+.ad-card a:hover, .ad-card a:focus-visible { border-bottom-color: var(--cyan); outline: none; }
+/* short screens: the advertiser card steps out beside Controls instead of stacking under Quiver, so the column
+   keeps the height it had (1366×768 has no room for a third card in it) */
+@media (max-height: 879px) and (min-width: 1300px) {
+  .t-side { grid-template-columns: 260px 360px; width: auto; align-items: end; }
+  .t-side > .card-p { grid-column: 2; }
+  .t-side > .ad-card { grid-column: 1; grid-row: 1 / span 2; align-self: end; }
+}
+@media (max-height: 879px) and (min-width: 861px) and (max-width: 1299px) { .ad-card .ad-pitch { display: none; } }
 .arrows-legend div { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
 .arrows-legend i { width: 10px; height: 10px; background: var(--c); box-shadow: 0 0 8px var(--c); display: block; transform: rotate(45deg) translateY(1px); }
 .arrows-legend span { color: var(--dim); }
@@ -183,6 +196,19 @@ button, select, input { font-family: var(--f); }
 .aq-tab.on { border-color: #38E1F2; background: rgb(17, 43, 55); color: #FFFFFF !important; }
 .aq-tabn { font-size: 18px; font-weight: 500; }
 .aq-hint { margin-top: auto; font-size: 15px; line-height: 1.5; color: #A3AAC2; }
+/* sponsor card (ads.js): the unsold pitch glows like a street sign; a sold card with a url is a link */
+.aq-spon { margin-top: auto; display: flex; flex-direction: column; gap: 8px; color: inherit; text-decoration: none; cursor: default; }
+.aq-spon + .aq-hint { margin-top: 0; }
+.aq-sponlbl { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; letter-spacing: 0.24em; color: #A3AAC2; }
+.aq-sponart { height: 120px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; overflow: hidden; border: 1px solid rgba(56, 225, 242, 0.55); background: linear-gradient(160deg, rgba(41, 231, 255, 0.16), rgba(120, 40, 255, 0.1)), #07080F; box-shadow: 0 0 22px rgba(56, 225, 242, 0.22), inset 0 0 18px rgba(56, 225, 242, 0.12); }
+.aq-sponart span { font-family: var(--f); font-weight: 700; line-height: 1; color: #E8FDFF; text-shadow: 0 0 6px #29E7FF, 0 0 16px rgba(41, 231, 255, 0.7); }
+.aq-sponart span:first-child { font-size: 26px; letter-spacing: 0.04em; }
+.aq-sponart span:nth-child(2) { font-size: 34px; letter-spacing: 0.06em; }
+.aq-sponart small { margin-top: 6px; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; letter-spacing: 0.08em; color: #A3AAC2; }
+.aq-sponart.img { padding: 0; background: #07080F; }
+.aq-sponart img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.aq-spon.live { cursor: pointer; }
+.aq-spon.live:hover .aq-sponart { border-color: #38E1F2; box-shadow: 0 0 28px rgba(56, 225, 242, 0.35); }
 .aq-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
 .aq-tabhead { display: flex; flex-direction: column; gap: 6px; }
 .aq-tabhead h2 { margin: 0; font-size: 32px; font-weight: 600; }
@@ -338,6 +364,12 @@ button, select, input { font-family: var(--f); }
           <div style="--c:#38e1f2"><i></i><p style="margin:0"><b>Armory</b><span>Clear a wave, spend scrap: unlock Piercer, Blast, Shock, Cryo, Splitter and Tracer arrows and carry up to three.</span></p></div>
         </div>
       </div>
+      <div class="card-p ad-card">
+        <h3>Advertise in Sector 7</h3>
+        <p class="ad-pitch">Billboard space is open. Your logo goes up over the plaza, beside every Armory terminal and on the Armory screen.</p>
+        <p class="ad-spec">1024×512 PNG or JPG · under 500 KB · logo inside the centre 896×384 · light art on dark or clear</p>
+        <p class="ad-contact" id="adContact" hidden></p>
+      </div>
     </div>
   </section>
 
@@ -384,6 +416,7 @@ button, select, input { font-family: var(--f); }
       <div class="aq-body">
         <nav class="aq-nav" aria-label="Shop categories">
           <div class="aq-tabs" id="aqTabs"></div>
+          <a class="aq-spon" id="aqSpon" aria-label="Sponsored slot"><div class="aq-sponlbl">SPONSORED</div><div class="aq-sponart"><span>PUT YOUR COMPANY</span><span>AD HERE</span></div></a>
           <div class="aq-hint">Esc · back to the street<br>E at a terminal · open again</div>
         </nav>
         <section class="aq-main">
@@ -462,7 +495,7 @@ button, select, input { font-family: var(--f); }
    ?gpu=webgl forces the WebGL2 backend (tests, and checking the fallback); ?gpu=webgpu skips the probe.
    ============================================================ */
 (function () {
-  var GAME_JS = "game.js?v=d7656e63f0";   // build.py: 'game.js?v=…'
+  var GAME_JS = "game.js?v=d53d5fa570";   // build.py: 'game.js?v=…'
   var q = new URLSearchParams(location.search), forced = q.get('gpu');
   var B = window.NQ_BOOT = { forceWebGL: false, why: '', backend: null };   // backend: set by engine.js once the renderer is up
 

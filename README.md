@@ -66,6 +66,42 @@ To rebuild after editing `src/`, run `python3 build.py`. It writes `index.html` 
 - **Look pass:** the infected get a soft camera-side fill and a two-tone neon rim so they read against the city, wet sheen on heads and shoulders in the rain, and brighter eyes. Towers have more life in their windows (office floors left on, blue TV rooms), mast beacons and car hazards blink on their own beat, clouds glow from the city below, working hover-car pods light the street, canopies sway with the weather and let light through their edges, and blossom petals ride the gusts. Art direction sheets for all of it live on the design canvas.
 - Add `?prof=1` to the URL for a performance overlay: the backend, GPU time per render pass from timestamp queries (shadows, wet-street mirror, env map, world, bow, AO prepass, GTAO, bloom, grade), CPU frame time, draw calls and triangles. It needs a browser that exposes timestamp queries; on the WebGL2 backend the passes inside the post pipeline are timed together under one entry.
 
+## Sponsor ad slots
+
+The game has 15 sponsor ad slots. Who fills each one comes from `ads/sponsors.json`, which is fetched after the game boots so it never delays loading. It ships with every slot empty. An unsold slot shows a neon "PUT YOUR COMPANY AD HERE" sign ("YOUR AD HERE" on the small terminal flyers). Open the game with `?ads=demo` to fill every slot with that message plus the slot id and the art size (1024×512), for sales-sheet screenshots. Screenshots of every slot are in `ads/slots/`.
+
+| Slot id | Where | Notes |
+|---|---|---|
+| `title-1` … `title-4` | Holo billboards on the plaza facades (north, east, west, east by the south corner) | Seen as the title screen's camera circles the plaza |
+| `spawn` | Holo billboard on the north facade, straight ahead when wave 1 starts | |
+| `terminal-hub`, `terminal-yard`, `terminal-market`, `terminal-docks`, `terminal-warrens`, `terminal-suburbs`, `terminal-garden`, `terminal-metro`, `terminal-refinery` | A 1.2 × 0.6 m lit flyer on an arm beside each Armory terminal | In view while the player stands at the terminal |
+| `armory` | "SPONSORED" card in the Armory screen's left menu | A link only when the manifest gives a `url` |
+
+**Art:** one size for every slot, so one image fits them all. Use 1024×512 px (2:1 landscape), PNG or JPG, under 500 KB. Keep the logo inside the centred safe area of 896×384 px. Light or bright art on a dark or transparent background reads best: in the city the slots are additive neon, so black shows as clear. The template is `ads/sponsors/TEMPLATE-1024x512.png` (safe area outlined). In the city the art is drawn into a 512×256 layer of the holo billboards' sign texture (the same 2:1 aspect). That keeps the slots in the batch the billboards already use, so they add no shader programs. The Armory card shows the image at full size.
+
+**Manifest:** `ads/sponsors.json` is keyed by slot id.
+
+```json
+{
+  "spawn": { "name": "Acme Energy", "image": "ads/sponsors/acme.png", "url": "https://example.com" },
+  "armory": { "name": "Acme Energy", "image": "ads/sponsors/acme.png", "url": "https://example.com" },
+  "title-1": {}
+}
+```
+
+`name` is the alt text and label. `image` is a path to the art (same-origin; another host must send CORS headers or the slot keeps its pitch). `url` is optional and only used by the Armory card: it opens in a new tab (`rel="noopener sponsored"`), and only `http`/`https` urls are accepted. An empty object or a missing key leaves the slot unsold.
+
+**To add a sponsor:**
+1. Put the 1024×512 image in `ads/sponsors/`.
+2. Add the slot ids it should fill to `ads/sponsors.json`, each with `name`, `image` and optionally `url`.
+3. Reload the game. No rebuild is needed: the manifest is read at run time.
+
+**Stats:** `NQ.ADS.stats` (in the browser console) holds the seconds each slot has been on screen this session (in view, in range and facing the camera; no occlusion test). It lives in memory only and nothing is sent anywhere.
+
+To advertise, DM [@fouadmoabi8](https://x.com/fouadmoabi8) on X (Twitter).
+
+For developers: the slot registry, the unsold art and the loader live in `src/ads.js` (`ADS.slots`, `AD_SIZE`, `ADS_CONTACT`).
+
 ## Ad and marketing assets (`ads/`)
 
 | File | Use |
@@ -115,6 +151,7 @@ The readable source is in `src/`:
 - `bow.js`: bow viewmodel and draw/release/reload animation
 - `zombies.js`: enemy types, AI and procedural animation
 - `armory.js`: the between-waves Armory: catalog and prices (`ARMORY`), what each level does (`UPG`), the quiver loadout and the screen itself
+- `ads.js`: sponsor ad slots: the slot registry, unsold art, manifest loader and the Armory card
 - `game.js`: player, arrows, arrow recovery, waves, HUD and the main loop
 - `audio.js`: synthesized sound effects, ambience and music, with reverb, 3D (HRTF) positioning and per-bus volume
 - `seg.js`: the 16-segment neon lettering
