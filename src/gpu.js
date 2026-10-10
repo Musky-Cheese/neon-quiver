@@ -714,17 +714,26 @@ const fogMix = (c, d) => mix(c, NQN.uFogCol, clampT(exp(fogD(d).negate()).oneMin
 function basicGPU(o) { const m = new THREE.MeshBasicNodeMaterial(o); m.fog = false; m.lights = false; return m; }
 const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
 // signs: one instanced draw per texture size and blend mode, their canvases as the layers of one texture array
+// rows bottom-up, as the GL upload (flipY) leaves them, so the sign shader's uv maths is unchanged
+function signLayerFill(d, t, L, cx) {
+  const w = cx.canvas.width, h = cx.canvas.height, row = w * 4;
+  cx.clearRect(0, 0, w, h); cx.drawImage(t.image, 0, 0); const src = cx.getImageData(0, 0, w, h).data;
+  for (let y = 0; y < h; y++) d.set(src.subarray(y * row, (y + 1) * row), (L * h + (h - 1 - y)) * row);
+}
 function signArrayGPU(texs) {
   const t0 = texs[0], w = t0.image.width, h = t0.image.height, row = w * 4, d = new Uint8Array(row * h * texs.length);
   const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d', { willReadFrequently: true });
-  texs.forEach((t, L) => {   // rows bottom-up, as the GL upload (flipY) leaves them, so the sign shader's uv maths is unchanged
-    cx.clearRect(0, 0, w, h); cx.drawImage(t.image, 0, 0); const src = cx.getImageData(0, 0, w, h).data;
-    for (let y = 0; y < h; y++) d.set(src.subarray(y * row, (y + 1) * row), (L * h + (h - 1 - y)) * row);
-  });
+  texs.forEach((t, L) => signLayerFill(d, t, L, cx));
   const arr = new THREE.DataArrayTexture(d, w, h, texs.length);
   Object.assign(arr, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType, colorSpace: t0.colorSpace, generateMipmaps: true, minFilter: t0.minFilter, magFilter: t0.magFilter,
     anisotropy: t0.anisotropy, wrapS: t0.wrapS, wrapT: t0.wrapT, premultiplyAlpha: t0.premultiplyAlpha });
   arr.needsUpdate = true; return arr;
+}
+// redraw one sign's layer from its canvas (ads.js: a sponsor's art landed after the batches were built)
+function signArrayLayer(arr, t, L) {
+  const cv = document.createElement('canvas'); cv.width = arr.image.width; cv.height = arr.image.height;
+  signLayerFill(arr.image.data, t, L, cv.getContext('2d', { willReadFrequently: true }));
+  arr.addLayerUpdate(L); arr.needsUpdate = true;
 }
 function signMaterialGPU(arr, add) {
   const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // additive signs weigh by alpha

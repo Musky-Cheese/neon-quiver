@@ -89,7 +89,7 @@ function buildSigns() {
   }
   for (const g of groups.values()) {
     const n = g.list.length;
-    const mat = signMaterialGPU(signArrayGPU(g.texs), g.add);
+    const arr = signArrayGPU(g.texs), mat = signMaterialGPU(arr, g.add);
     const geo = new THREE.BufferGeometry(); geo.index = PLANE.index;   // WebGPU reads an InstancedBufferGeometry's own instanceCount, not the mesh's count
     for (const k of ['position', 'normal', 'uv']) geo.setAttribute(k, PLANE.attributes[k]);
     const col = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3), sg = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
@@ -97,10 +97,12 @@ function buildSigns() {
     const mesh = new THREE.InstancedMesh(geo, mat, n); mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage); mesh.count = 0; mesh.visible = false;
     mesh.frustumCulled = false; mesh.renderOrder = g.add ? 5 : 0; mesh.name = g.add ? 'signsAdd' : 'signs'; mesh.matrixAutoUpdate = false;
     scene.add(mesh);
-    const b = { mesh, list: [] }; SIGN_BATCHES.push(b);
+    const b = { mesh, list: [], arr, texs: g.texs }; SIGN_BATCHES.push(b);
     for (const s of g.list) { const q = { s, b, layer: g.layer.get(s.tex), vis: false }; b.list.push(q); SIGNS.push(q); }
   }
 }
+// a sign's canvas was redrawn after its batch was built: re-upload just that layer
+function signLayerRefresh(tex) { for (const b of SIGN_BATCHES) { const L = b.texs.indexOf(tex); if (L >= 0) signArrayLayer(b.arr, tex, L); } }
 // the visible signs of each batch, packed in their original order. Everything here is fixed between events (a sign's
 // placement, seed and mode, which ones are resident, the Look's sign level), so it only runs when one of those changed
 function syncSigns(time, T) {

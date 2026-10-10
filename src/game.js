@@ -839,7 +839,7 @@ function frame(now) {
   if (GAME.noLoop) return;
   const c0 = performance.now();
   try {
-    if (!GAME.frozen) step(dt);
+    if (!GAME.frozen) { step(dt); adsTick(dt); }
     // the Armory is an opaque full-screen board, and a lost GPU context can't draw: skip the 3D frame and the HUD
     // the canvas HUD measures its element before the DOM HUD writes its text, so a changed number never forces a synchronous layout mid-frame
     if (GAME.state !== 'shop' && !GPU.lost) { render(GAME.time); drawHUD2D(GAME.time); if (GAME.state !== 'title') hudFrame(); }
@@ -958,7 +958,7 @@ async function boot() {
   await loadMeshyZombies(t => t.startsWith('walker'));   // after the rig: the Meshy breeds borrow its clips. Walkers first (the title crowd),
   loadMeshyZombies().then(() => { if (window.NQ_READY) warmMeshyZombies(); window.NQ_MZ_READY = true; });   // boot's warmShaders covers whatever landed before it   // the other breeds stream in behind; until theirs lands a body uses the sculpt
   gpuCheck();
-  wireUI();
+  wireUI(); adsInit();
   // the Armory's faces are only used on that screen: fetch them in the background so it never opens in a fallback font
   try { for (const f of ['400 20px "Chakra Petch"', '500 20px "Chakra Petch"', '600 20px "Chakra Petch"', '700 20px "Chakra Petch"', '400 20px "IBM Plex Mono"', '500 20px "IBM Plex Mono"', '600 20px "IBM Plex Mono"']) document.fonts.load(f).catch(() => { }); } catch (e) { }
   toTitle();
@@ -973,7 +973,7 @@ window.NQ = {
   DBG, GAME, THREE, scene, renderer, camera, vmCamera, WORLD_ITEMS, GPU, gpuCheck, R3, warmShaders, nqMaterial, backend: () => NQ_BACKEND, ZRIG, MZ, WORLD, NAV, PLAYER, BOW, ZOMBIES, PROJ, ZPROJ, PICKUPS, emit, burst, explode, flashLight, spawnZombie, setScreen, step, drawLogo, segText, HUDVIS, SETTINGS,
   play() { GAME.newGame(); },
   fire(t, power = 1) { BOW.type = t; fireArrow(power); },
-  OBJ, objStart, MUT, MUTS, mutRoll, AUD, HOOK, hookFire, hookAim, ULTRA, NQU, WX, LENS, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
+  OBJ, objStart, MUT, MUTS, mutRoll, AUD, ADS, HOOK, hookFire, hookAim, ULTRA, NQU, WX, LENS, HAZ, waterAt, districtAt, DISTRICTS, WORLD_BOUNDS,
   killTest(z, part, dir, hit, power, ex) { killZombie(z, part, dir, 0, hit, power, ex); },
   dmgTest(z, d, part, hit, dir) { return damageZombie(z, d, part, hit, dir, 0, 1); },
   decalCount() { return DECALS.length; },

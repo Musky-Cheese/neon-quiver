@@ -468,6 +468,7 @@ function buildCity() {
   // hub supply points
   WORLD.supplies.push({ kind: 'terminal', x: 9.5, z: 4.5, ry: -0.6, d: 'hub' }, { kind: 'cache', x: -33, z: 34, d: 'hub' }, { kind: 'cache', x: 34, z: -33, d: 'hub' });
   for (const sp of WORLD.supplies) supplyProp(g, sp);
+  adsBuildWorld(g);   // sponsor slots (ads.js): claim their billboards, hang a flyer by each terminal
 
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
