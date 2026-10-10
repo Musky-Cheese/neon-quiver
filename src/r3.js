@@ -575,16 +575,18 @@ function carParts(src, kind) {
 }
 async function loadMeshyCars() {
   const spots = WORLD.carSpots || []; if (!spots.length) return;
-  const loader = new GLTFLoader(), V = typeof CARS_VER === 'string' ? CARS_VER : '0', geos = {};
-  for (const kind of ['sedan', 'van']) {
-    if (!spots.some(s => s.kind === kind)) continue;
+  const loader = new GLTFLoader(), geos = {};
+  // both models download at once; geos is filled in a fixed order afterwards so the batch's layout never depends on which landed first
+  const kinds = ['sedan', 'van'].filter(kind => spots.some(s => s.kind === kind));
+  const built = await Promise.all(kinds.map(async (kind) => {
     try {
-      const gltf = await loader.loadAsync('models/car_' + kind + '.glb?v=' + V);
+      const gltf = await loader.loadAsync('models/car_' + kind + '.glb?v=' + (MODEL_VER['car_' + kind] || '0'));
       let src = null; gltf.scene.traverse(o => { if (!src && o.isMesh) src = o.geometry; });
       const geo = weldGeometry(carParts(src, kind)); geo.rotateY(-Math.PI / 2); geo.computeBoundingSphere();   // modelled along +x (front at -x); the game's cars run along z
-      geos[kind] = geo;
-    } catch (err) { console.warn('car load failed', kind, err); }
-  }
+      return geo;
+    } catch (err) { console.warn('car load failed', kind, err); return null; }
+  }));
+  kinds.forEach((kind, i) => { if (built[i]) geos[kind] = built[i]; });
   const list = spots.filter(s => geos[s.kind]); if (!list.length) return;
   // The 23 wrecks were one instanced draw per model whose bounding sphere spanned the whole city, so every pass (the world,
   // the mirror, each shadow map) drew all of them, about a million triangles, wherever the camera looked. In one BatchedMesh
@@ -658,10 +660,10 @@ const PROP_MAT = { kasuga: 27, yukimi: 27, onigawara: 27, komainu: 27, tsukubai:
 async function loadMeshyProps() {
   const spots = WORLD.propSpots || [], have = typeof PROP_MODELS !== 'undefined' ? PROP_MODELS : [];
   const kinds = [...new Set(spots.map(s => s.kind))].filter(k => have.includes(k)); if (!kinds.length) return;
-  const loader = new GLTFLoader(), V = typeof PROPS_VER === 'string' ? PROPS_VER : '0';
+  const loader = new GLTFLoader();
   await Promise.all(kinds.map(async (kind) => {
     try {
-      const gltf = await loader.loadAsync('models/prop_' + kind + '.glb?v=' + V);
+      const gltf = await loader.loadAsync('models/prop_' + kind + '.glb?v=' + (MODEL_VER['prop_' + kind] || '0'));
       let srcMesh = null; gltf.scene.traverse(o => { if (!srcMesh && o.isMesh) srcMesh = o; });
       if (!srcMesh || !srcMesh.geometry.attributes.position) throw new Error('missing geometry');
       gltf.scene.updateMatrixWorld(true);

@@ -82,7 +82,7 @@ async function loadMeshyZombies(pick) {   // pick(name) -> bool: load a subset (
   const list = MZ_TYPES.filter(t => !MZ[t] && (!pick || pick(t)));
   await Promise.all(list.map(async (t) => {
     try {
-      const g = await new GLTFLoader().loadAsync('models/mz_' + t + '.glb?v=' + MZ_VER);
+      const g = await new GLTFLoader().loadAsync('models/mz_' + t + '.glb?v=' + (MODEL_VER['mz_' + t] || '0'));
       let sm = null; g.scene.updateMatrixWorld(true); g.scene.traverse(o => { if (o.isSkinnedMesh && !sm) sm = o; });
       if (!sm) return;
       const geo = sm.geometry;
