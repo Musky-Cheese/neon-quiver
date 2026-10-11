@@ -5,6 +5,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 const RIG_VER = "78bcf6844f";   // content hash: a new model always busts the browser cache
 const TREE_VER = "0eb1f64b0a";   // Meshy tree model cache key
 const MODEL_VER = {"car_sedan": "dc8aed416d", "car_van": "e794bfa008", "prop_azalea": "f622c6edac", "prop_boxwood": "3272119542", "prop_hedge": "4dc2ffd068", "prop_hydrangea": "7fb55fd7df", "prop_kasuga": "49c88cfd9e", "prop_shrub": "7d13b5fb80", "prop_yukimi": "433bac220e", "mz_alpha": "ce7220ddfa", "mz_boss": "47a7f36b05", "mz_brute": "2202d60382", "mz_climber": "206c02545a", "mz_runner": "c7477bcdb0", "mz_screamer": "c550d143df", "mz_spitter": "e415ddca04", "mz_walker": "f8ebba4c98", "mz_walker_dock": "4428692586", "mz_walker_vendor": "d385fde1e5"};   // Meshy cars, props and zombies: cache key per file
@@ -177,6 +178,7 @@ const TEX_LAYERS = ['asphalt', 'concrete', 'brick', 'rust', 'corrugated', 'paver
    Skinned zombies carry     color = (ao, cloth, blood, glow) and a per-vertex part id that indexes per-zombie uniform arrays. */
 const ZPARTS = 10;
 /* ---------------- Geometry builder ---------------- */
+let GEO_EMIT = null;   // while buildCity runs: every glowing box (world matrix, colour x emission), the neon that lights the street
 // vertex layout: pos3 nor3 col3 mat2 => 11 floats
 class Geo {
   constructor() { this.v = []; this.i = []; this.n = 0; }
@@ -199,6 +201,7 @@ class Geo {
   }
   // unit box centered at origin (size 1) transformed by m
   box(m, c, e = 0, mat = 0, skipBottom = false) {
+    if (GEO_EMIT && m && e >= 0.8) GEO_EMIT.push({ m: m.slice(), c: [c[0] * e, c[1] * e, c[2] * e], mat });   // glowing: r3.js buildNeonLights lights the street with it
     const h = 0.5;
     this.quad(m, [h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h], [1, 0, 0], c, e, mat);
     this.quad(m, [-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h], [-1, 0, 0], c, e, mat);
@@ -439,7 +442,7 @@ async function loadModels() {
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
   cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
-  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup, velocity } = THREE.TSL;
 
 /* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry at every render call ---- */
 const NQN = {};
@@ -1116,7 +1119,7 @@ function skyMaterialGPU(U) {
   // the dome sits at the far plane (depth just under 1, where the buffer is still clear), so with the depth test on it only
   // shades the pixels no geometry covers; the result is the same picture as drawing it first and painting the city over it
   m.vertexNode = Fn(() => { const c = cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(positionLocal, 1)).toVar(); return vec4(c.xy, c.w.mul(0.9999998), c.w); })();
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar(), h = d.y, T = NQN.uTime, glow = R(U.uGlow, 'color'), disc = R(U.uDiscCol, 'color');
     const c = mix(NQN.uFogCol.mul(1.25), R(U.uMid, 'color'), smoothstep(0, 0.18, h)).toVar();
     c.assign(mix(c, R(U.uZen, 'color'), smoothstep(0.15, 0.7, h)));
@@ -1141,7 +1144,7 @@ function coneMaterialGPU(U) {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
   m.fog = false;
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const W = positionWorld, Nn = normalWorldGeometry, d = length(W.sub(cameraPosition));
     const facing = pow(abs(dot(Nn, normalize(cameraPosition.sub(W)))), 1.6);
     const h = clampT(uv().y, 0, 1);   // MSAA samples can land just outside the triangle: pow() of a negative is NaN
@@ -1158,6 +1161,14 @@ function coneMaterialGPU(U) {
    Fog for these: 1 - exp(-d * density), at 80% strength. */
 const fogD = (d) => d.mul(NQN.uFogDen);
 const fogMix = (c, d) => mix(c, NQN.uFogCol, clampT(exp(fogD(d).negate()).oneMinus().mul(0.8), 0, 1));
+// The effect materials set outputNode, not fragmentNode: the same pixels, but it goes through three's MRT path, so in the
+// Ultra world pass (TAA) they also fill the motion and reactive targets (a fragmentNode writes only the first target).
+// Such a material's own lighting and environment are never shown (its outputNode replaces them), so it builds none: left in,
+// the scene's env map was compiled into every one of them, half-declared, and the pipelines failed.
+for (const C of [THREE.NodeMaterial, THREE.MeshBasicNodeMaterial]) {
+  const env = C.prototype.setupEnvironment;
+  C.prototype.setupEnvironment = function (builder) { return this.outputNode !== null ? null : env.call(this, builder); };
+}
 function basicGPU(o) { const m = new THREE.MeshBasicNodeMaterial(o); m.fog = false; m.lights = false; return m; }
 const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
 // signs: one instanced draw per texture size and blend mode, their canvases as the layers of one texture array
@@ -1185,7 +1196,7 @@ function signArrayLayer(arr, t, L) {
 function signMaterialGPU(arr, add) {
   const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // additive signs weigh by alpha
   m.uA = uniform(1);
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const S = attribute('iSign', 'vec3'), col = attribute('iCol', 'vec3'), T = NQN.uTime, u = uv().toVar(), flick = float(1).toVar();
     If(S.y.greaterThan(0.5), () => {   // holo billboards: torn scanlines and a fast shimmer
       const row = floor(u.y.oneMinus().mul(24)), g = stepT(0.93, h21(vec2(row, floor(T.mul(6)).add(S.x))));
@@ -1199,7 +1210,7 @@ function signMaterialGPU(arr, add) {
 }
 function decalMaterialGPU(tex) {
   const m = basicGPU({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  m.fragmentNode = Fn(() => { const t = texture(tex, uv()); return vec4(fogMix(t.rgb, length(positionWorld.sub(cameraPosition))), t.a.mul(attribute('iAlpha', 'float'))); })();
+  m.outputNode = Fn(() => { const t = texture(tex, uv()); return vec4(fogMix(t.rgb, length(positionWorld.sub(cameraPosition))), t.a.mul(attribute('iAlpha', 'float'))); })();
   return m;
 }
 // screen-facing quads standing in for GL points (WebGPU points are always one pixel): corner -> clip-space offset in pixels
@@ -1215,13 +1226,13 @@ function particlesGPU(data) {
   m.uH = uniform(500);
   const ps = attribute('psize', 'float');
   m.vertexNode = Fn(() => { const mv = modelViewMatrix.mul(vec4(attribute('ppos', 'vec3'), 1)); return spriteClip(mv, clampT(abs(ps).mul(m.uH).div(max(mv.z.negate(), 0.05)), 1, 256)); })();
-  m.fragmentNode = Fn(() => {
+  m.fragmentNode = taaReactive(Fn(() => {
     const C = varying(attribute('pcol', 'vec4')), blend = varying(ps.lessThan(0).select(float(1), float(0))), d = length(attribute('position', 'vec3').xy).mul(0.5);
     const out = vec4(0).toVar();
     If(blend.greaterThan(0.5), () => { const s = smoothstep(0.5, 0.3, d).mul(C.a); out.assign(vec4(C.rgb.mul(s), s)); })
       .Else(() => { const a = smoothstep(0.5, 0, d); out.assign(vec4(C.rgb.mul(a.mul(a)).mul(C.a), 0)); });
     return out;
-  })();
+  })(), 8);   // TAA: sparks and blood fly too fast for the history
   m.uniforms = { uH: m.uH };   // r3.js sets it through .uniforms, like the other effect materials
   const mesh = new THREE.Mesh(g, m); mesh.userData.buf = buf; return mesh;
 }
@@ -1239,7 +1250,7 @@ function rainGPU(geo) {
   const K = stepT(rnd, dens).mul(fract(rnd.mul(13.7)).mul(0.8).add(0.45)).mul(indoorAt(x, z, y).oneMinus());
   const wind = U.uWind.mul(0.32).add(0.08).add(sin(T.mul(1.3).add(P.y.mul(0.21))).mul(0.12)), len = fract(rnd.mul(5.3)).mul(0.9).add(0.55).mul(0.9);
   m.positionNode = vec3(x.add(a2.y.mul(wind).mul(len).mul(2)), y.add(a2.y.mul(len)), z.add(a2.y.mul(0.05)));
-  m.fragmentNode = vec4(U.uRainCol.mul(U.uAlpha).mul(varying(a2.y).mul(0.7).add(0.3)).mul(varying(K)), 0);
+  m.fragmentNode = taaReactive(vec4(U.uRainCol.mul(U.uAlpha).mul(varying(a2.y).mul(0.7).add(0.3)).mul(varying(K)), 0), 30);   // TAA: streaks too thin and fast for the history: fully reactive
   m.uniforms = U; return m;
 }
 // snow: one soft flake per drop that swirls and rides the wind (instanced quads over the drops' first vertices)
@@ -1263,7 +1274,7 @@ function snowGPU(rainGeo, n) {
     const px = K.greaterThan(0).select(clampT(U.uPx.mul(fract(rnd.mul(5.3)).mul(0.07).add(0.07)).div(max(mv.z.negate(), 0.1)).mul(1000), 1.5, U.uPx.mul(16)), float(0));
     return spriteClip(mv, px);
   })();
-  m.fragmentNode = Fn(() => { const d = length(attribute('position', 'vec3').xy).mul(0.5); return vec4(U.uCol.mul(smoothstep(0.5, 0.12, d).mul(varying(K)).mul(U.uAlpha)), 0); })();
+  m.fragmentNode = taaReactive(Fn(() => { const d = length(attribute('position', 'vec3').xy).mul(0.5); return vec4(U.uCol.mul(smoothstep(0.5, 0.12, d).mul(varying(K)).mul(U.uAlpha)), 0); })(), 12);   // TAA: flakes drift too fast
   m.uniforms = U; return new THREE.Mesh(g, m);
 }
 // halos round bulbs: camera-facing quads pushed toward the eye, faded with distance and fog
@@ -1271,7 +1282,7 @@ function haloMaterialGPU(VU) {
   const m = basicGPU({ transparent: true, depthWrite: false, ...ADD });
   const hp = attribute('hp', 'vec4'), hc = attribute('hc', 'vec3'), c = cameraViewMatrix.mul(vec4(hp.xyz, 1)), vD = varying(c.z.negate());
   m.vertexNode = cameraProjectionMatrix.mul(vec4(c.xy.add(attribute('position', 'vec3').xy.mul(hp.w)), c.z.add(hp.w.mul(0.4)), c.w));
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const r = length(uv().sub(0.5)).mul(2), a = exp(r.mul(r).mul(-5)).mul(r.oneMinus()).mul(smoothstep(0.3, 2.5, vD));
     const col = varying(hc.x.lessThan(0).select(reference('value', 'color', VU.uLamp).mul(0.35), hc));
     return vec4(col.mul(max(a, 0)).mul(0.35).mul(reference('value', 'float', VU.uVolK)).mul(exp(fogD(vD).mul(-0.4))), 0);
@@ -1281,7 +1292,7 @@ function haloMaterialGPU(VU) {
 // shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down
 function glassMaterialGPU() {
   const m = basicGPU({ transparent: true, depthWrite: false });
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const W = positionWorld, V = normalize(cameraPosition.sub(W)), N = normalize(normalWorldGeometry), ndv = abs(dot(N, V)), T = NQN.uTime, R = NQN.uRain;
     const fr = pow(ndv.oneMinus(), 5).mul(0.96).add(0.04), fc = select(abs(N.x).greaterThan(0.5), W.zy, W.xy);
     const beads = smoothstep(0.8, 0.95, vn(fc.mul(vec2(26, 14)))).mul(R.mul(0.6).add(0.3));
@@ -1302,13 +1313,39 @@ const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: 
   uStreak: uniform(0.45), uStreakThr: uniform(1.8), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
 // weather on the lens (r3.js updateLens): beads of water, drops running down, a damp film, frost creeping in from the edges
 Object.assign(GRADE_U, { uLensDrop: uniform(0), uLensRun: uniform(0), uLensFog: uniform(0), uLensFrost: uniform(0) });
-const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
+const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null, taa: null, san: null };
+// Temporal AA (Ultra): the world pass drops its 4x MSAA and instead draws every frame from a slightly different sub-pixel
+// offset; three's TRAA (vendor/addons, patched for a reactive mask) blends each pixel with its history, found again by the
+// pixel's motion. Every edge, every window grid, every wet highlight and every shader-made detail gets a few dozen samples
+// instead of four, and stops crawling when you move. The bow keeps its own MSAA pass, laid over afterwards, razor sharp.
+// ?aa=msaa keeps Ultra on MSAA (for comparing).
+let TAA_OFF = false; try { TAA_OFF = new URLSearchParams(location.search).get('aa') === 'msaa'; } catch (e) { }
+// What each material writes into the world pass's motion and reactive targets, decided once per material at build time:
+// solid surfaces write their motion; a blended one writes nothing to it (zero with zero alpha, which every blend mode in
+// the game leaves untouched), so rain, glass, halos and signs keep the motion of the surface behind them. Moving things
+// with no depth of their own (rain, snow, sparks: taaReactive) mark the reactive mask instead, by how bright they
+// are, so TAA takes them from the current frame and they neither smear nor fade.
+const taaVelocity = Fn((_, b) => (b.material && b.material.transparent) ? vec4(0) : vec4(velocity, 0, 1))();
+// They write all three targets themselves (fragmentNode as an MRT; rain and snow never draw in the mirror or the env cube,
+// and the MSAA world pass simply has no targets for the other two). Not outputNode: their vertex-stage indoor lookup
+// leaks a half-declared texture into the fragment stage on that path and the pipeline fails.
+function taaReactive(c, k) {
+  return mrt({ output: c, velocity: vec4(0), reactive: vec4(vec3(clampT(max(dot(c.rgb, vec3(0.3, 0.59, 0.11)), c.a.mul(0.25)).mul(k), 0, 1)), 1) });
+}
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
-  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
-  const samples = 4;
-  const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
+  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb', 'taa', 'san']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
+  const useTAA = q >= 3 && !TAA_OFF && !GPOST.noTAA;   // (GPOST.noTAA + GPOST.key = -1 swaps at runtime, for A/B)
+  const world = pass(scene, camera, { samples: useTAA ? 0 : 4 }), vmP = pass(scene, vmCamera, { samples: 4 });
   world.name = 'world'; vmP.name = 'bow';
+  if (useTAA) {
+    const m = mrt({ output, velocity: taaVelocity, reactive: vec4(0) });
+    m.setBlendMode('velocity', new THREE.BlendMode(THREE.MaterialBlending));
+    const add = new THREE.BlendMode(THREE.CustomBlending); Object.assign(add, { blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
+    m.setBlendMode('reactive', add); m.setClearColor('velocity', 0x000000, 0); m.setClearColor('reactive', 0x000000, 0);
+    world.setMRT(m);
+    world.getTexture('reactive').type = THREE.UnsignedByteType;
+  }
   vmP.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));   // transparent wherever the bow isn't, whoever triggers the pass
   let col = world.getTextureNode('output').rgb;
   let aoN = null, pre = null;
@@ -1323,6 +1360,19 @@ function buildPostGPU(q) {
     const aoT = denoise(aoN.getTextureNode(), pd, pn, camera);
     aoT.lumaPhi.value = 10; aoT.depthPhi.value = 2; aoT.normalPhi.value = 3; aoT.radius.value = 6;
     col = col.mul(mix(1, aoT.r, 0.85));
+  }
+  let taaN = null, san = null;
+  if (useTAA) {   // the history must never take in a NaN or Inf pixel (it would stay forever), nor a sun-hot glint
+    const lit = col;   // (the Fn runs at build time, when col is already the TAA output: take it now)
+    san = convertToTexture(Fn(() => {
+      const c = lit.toVar(), ok = c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4));
+      const v = select(ok, c, vec3(0)), m = max(max(v.r, v.g), v.b);
+      return vec4(v.mul(min(float(1), float(24).div(max(m, 1e-4)))), 1);
+    })());
+    san.name = 'taaInput';
+    taaN = traa(san, world.getTextureNode('depth'), world.getTextureNode('velocity'), camera);
+    taaN.reactiveNode = world.getTextureNode('reactive');
+    col = taaN.getTextureNode().rgb;
   }
   const vm = vmP.getTextureNode('output');
   col = mix(col, vm.rgb, clampT(vm.a, 0, 1));
@@ -1466,7 +1516,7 @@ function buildPostGPU(q) {
   });
   const pipe = new THREE.RenderPipeline(renderer, grade());
   pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma
-  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q });
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q, taa: taaN, san });
 }
 
 /* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------
@@ -1495,6 +1545,161 @@ function gpuProfPoll() {
     GPU_PROF.ok = true;
   }).catch(() => { }).finally(() => { GPU_PROF.busy = false; });
 }
+
+/* ============================================================
+   Clustered lighting (WebGPU): every point light in reach, not just the nearest sixteen
+   Forward+ clustered shading after three r186's ClusteredLightsNode (examples/jsm/tsl/lighting), changed for this game:
+   - the cluster grid is a fixed 48 x 27 x 24 in screen fractions, not pixel tiles, so one grid serves every target the
+     scene draws into (the MSAA world pass, the bow, the puddle mirror, the 128 px env cube faces) and the material shaders
+     never change when the target size does (a pixel grid rebuilt its shader on every size change: a compile per pass);
+   - depth slices run from 0.3 m to 300 m (the camera's 0.03 m near plane wasted a third of them on the first metre);
+   - each cluster lists its nearest lights first, so a crowded far cluster drops distant lights, never close ones;
+   - a light with userData.src (the neon, r3.js buildNeonLights) is a small glowing body of that radius, lit with
+     1 / (d^2 + src^2): bright along the wall it hangs on, without the hot point a bare 1 / d^2 burns into the bricks.
+     Every other light keeps three's usual falloff, so the lamps, shops and flashes look exactly as they did.
+   Lights with intensity 0 are skipped, so a pool can be parked by zeroing it, without changing the scene's light list
+   (which would rebuild every material). Shadow-casting lights stay on three's own path.
+   ============================================================ */
+const CL = { NX: 48, NY: 27, NZ: 24, PER: 96, MAX: 1024, ZN: 0.3, ZF: 300 };
+CL.CHUNKS = CL.PER / 4;
+const _clV = new THREE.Vector3(), _clSize = new THREE.Vector2();
+class NQClusterNode extends THREE.LightsNode {
+  static get type() { return 'NQClusterNode'; }
+  constructor() {
+    super();
+    this.materialLights = []; this.clusteredLights = [];
+    const T = THREE.TSL;
+    const data = new Float32Array(CL.MAX * 4 * 2);
+    this._lightsTexture = new THREE.DataTexture(data, CL.MAX, 2, THREE.RGBAFormat, THREE.FloatType);
+    this._zData = new Float32Array(CL.NZ * 4);
+    this._zTexture = new THREE.DataTexture(this._zData, CL.NZ, 1, THREE.RGBAFormat, THREE.FloatType);
+    this._viewZ = new Float32Array(CL.MAX); this._order = []; this._active = [];
+    this._count = T.uniform(0, 'int');
+    const G = (n, v, t) => T.uniform(v, t).setName(n).setGroup(T.renderGroup);
+    this._zn = G('clZn', CL.ZN); this._zf = G('clZf', CL.ZF); this._far = G('clFar', 1000);
+    this._view = G('clView', new THREE.Matrix4(), 'mat4'); this._proj = G('clProj', new THREE.Matrix4(), 'mat4');
+    this._target = G('clTarget', new THREE.Vector2(1, 1));
+    this._build();
+    this.updateBeforeType = THREE.NodeUpdateType.RENDER;
+  }
+  customCacheKey() { return this._compute.getCacheKey() + super.customCacheKey(); }
+  // the depth slice a view distance falls in (the same formula on the CPU and in both shaders)
+  _sliceNear(z) { return z === 0 ? 0 : CL.ZN * Math.pow(CL.ZF / CL.ZN, z / CL.NZ); }
+  _sliceFar(z, far) { return z === CL.NZ - 1 ? far : CL.ZN * Math.pow(CL.ZF / CL.ZN, (z + 1) / CL.NZ); }
+  updateLightsTexture(camera) {
+    const data = this._lightsTexture.image.data, line = CL.MAX * 4, act = this._active; act.length = 0;
+    for (const l of this.clusteredLights) if (l.intensity > 0 && l.visible && act.length < CL.MAX) act.push(l);
+    const n = act.length, vz = this._viewZ, ord = this._order; ord.length = n;
+    this._count.value = n;
+    for (let i = 0; i < n; i++) { _clV.setFromMatrixPosition(act[i].matrixWorld).applyMatrix4(camera.matrixWorldInverse); vz[i] = _clV.z; ord[i] = i; }
+    ord.sort((a, b) => vz[b] - vz[a]);   // nearest first (view z is negative in front)
+    for (let i = 0; i < n; i++) {
+      const l = act[ord[i]], o = i * 4, k = l.intensity, s = l.userData.src;
+      _clV.setFromMatrixPosition(l.matrixWorld);
+      data[o] = _clV.x; data[o + 1] = _clV.y; data[o + 2] = _clV.z; data[o + 3] = l.distance;
+      data[line + o] = l.color.r * k; data[line + o + 1] = l.color.g * k; data[line + o + 2] = l.color.b * k; data[line + o + 3] = s ? -s : l.decay;
+    }
+    this._lightsTexture.needsUpdate = true;
+    const zr = this._zData, far = camera.far;
+    for (let z = 0; z < CL.NZ; z++) {
+      const sn = -this._sliceNear(z), sf = -this._sliceFar(z, far);
+      let a = n, b = 0;
+      for (let i = 0; i < n; i++) { const v = vz[ord[i]], r = act[ord[i]].distance || far; if (v + r >= sf && v - r <= sn) { if (i < a) a = i; b = i + 1; } }
+      if (a >= n) { a = 0; b = 0; }
+      zr[z * 4] = a; zr[z * 4 + 1] = b;
+    }
+    this._zTexture.needsUpdate = true;
+  }
+  updateBefore(frame) {
+    const { renderer, camera } = frame, rt = renderer.getRenderTarget();
+    if (rt) this._target.value.set(rt.width, rt.height); else { renderer.getDrawingBufferSize(_clSize); this._target.value.copy(_clSize); }
+    this.updateLightsTexture(camera);
+    this._far.value = camera.far;
+    this._view.value = camera.matrixWorldInverse; this._proj.value = camera.projectionMatrix;
+    renderer.compute(this._compute);
+  }
+  setLights(lights) {
+    const C = this.clusteredLights, M = this.materialLights; let m = 0, c = 0;
+    for (const l of lights) { if (l.isPointLight === true && l.castShadow !== true) C[c++] = l; else M[m++] = l; }
+    M.length = m; C.length = c;
+    return super.setLights(lights);
+  }
+  getBuiltinLights() { return this.materialLights; }
+  _light(index) {
+    const T = THREE.TSL, a = T.textureLoad(this._lightsTexture, T.ivec2(index, 0)), b = T.textureLoad(this._lightsTexture, T.ivec2(index, 1));
+    return { position: a.xyz, viewPosition: this._view.mul(T.vec4(a.xyz, 1)).xyz, distance: a.w, color: b.rgb, decay: b.w };
+  }
+  _build() {
+    const T = THREE.TSL, { Fn, If, Loop, Return, int, float, vec3, ivec2, ivec4, min, max, pow, log, clamp, dot, instanceIndex } = T;
+    const { NX, NY, NZ, CHUNKS, PER } = CL, count = NX * NY * NZ;
+    const idx = T.attributeArray(new Int32Array(count * CHUNKS * 4), 'ivec4').setName('nqClusterLights');
+    const slot = (base, s) => { s = int(s); return idx.element(base.mul(CHUNKS).add(s.div(4))).element(s.mod(4)); };
+    const lnZ = log(float(CL.ZF / CL.ZN));
+    this._compute = Fn(() => {
+      const ifx = float(1).div(this._proj.element(0).element(0)), ify = float(1).div(this._proj.element(1).element(1));
+      const cx = instanceIndex.mod(NX), cy = instanceIndex.div(NX).mod(NY), cz = instanceIndex.div(NX * NY);
+      const x0 = float(cx).mul(2 / NX).sub(1), x1 = float(cx.add(1)).mul(2 / NX).sub(1);
+      const y1 = float(1).sub(float(cy).mul(2 / NY)), y0 = float(1).sub(float(cy.add(1)).mul(2 / NY));
+      // slice 0 reaches back to the eye and the last one out to the far plane, so nothing falls outside the grid
+      const zn = cz.equal(0).select(float(0), this._zn.mul(T.exp(float(cz).mul(lnZ.div(NZ))))).negate();
+      const zf = cz.equal(NZ - 1).select(this._far, this._zn.mul(T.exp(float(cz.add(1)).mul(lnZ.div(NZ))))).negate();
+      const sxn = zn.negate().mul(ifx), sxf = zf.negate().mul(ifx), syn = zn.negate().mul(ify), syf = zf.negate().mul(ify);
+      const bmin = vec3(min(x0.mul(sxn), x0.mul(sxf)), min(y0.mul(syn), y0.mul(syf)), zf), bmax = vec3(max(x1.mul(sxn), x1.mul(sxf)), max(y1.mul(syn), y1.mul(syf)), zn);
+      Loop(CHUNKS, ({ i }) => { idx.element(instanceIndex.mul(CHUNKS).add(i)).assign(ivec4(0)); });
+      const n = int(0).toVar(), zr = T.textureLoad(this._zTexture, ivec2(cz, 0)), a = int(zr.x), b = int(zr.y);
+      Loop(CL.MAX, ({ i }) => {
+        const li = a.add(i);
+        If(n.greaterThanEqual(PER).or(li.greaterThanEqual(b)), () => { Return(); });
+        const { viewPosition, distance } = this._light(li);
+        const d = viewPosition.sub(max(bmin, min(viewPosition, bmax)));
+        If(dot(d, d).lessThanEqual(distance.mul(distance)), () => { slot(instanceIndex, n).assign(li.add(1)); n.addAssign(1); });
+      });
+    })().compute(count).setName('NQ clustered lights');
+    // fragment -> its cluster, in fractions of whatever target is being drawn
+    this._cluster = Fn(() => {
+      const t = T.screenCoordinate.div(this._target), tx = clamp(T.floor(t.x.mul(NX)), 0, NX - 1), ty = clamp(T.floor(t.y.mul(NY)), 0, NY - 1);
+      const zs = clamp(T.floor(log(max(T.positionView.z.negate(), CL.ZN).div(this._zn)).div(lnZ).mul(NZ)), 0, NZ - 1);
+      return int(tx).add(int(ty).mul(NX)).add(int(zs).mul(NX * NY));
+    })().toVar();
+    this._slot = (i) => slot(this._cluster, i);
+  }
+  setupLights(builder, lightNodes) {
+    const T = THREE.TSL, { Fn, If, Loop, Break, int, float, max, dot } = T;
+    const lm = builder.context.reflectedLight; lm.directDiffuse.toStack(); lm.directSpecular.toStack();
+    const pbr = builder.material && builder.material.isMeshStandardMaterial === true;
+    super.setupLights(builder, lightNodes);
+    Fn(() => {
+      Loop(CL.PER, ({ i }) => {
+        const li = this._slot(i);
+        If(li.equal(int(0)), () => { Break(); });
+        const { color, decay, viewPosition, distance } = this._light(li.sub(1));
+        const lv = viewPosition.sub(T.positionView), d2 = dot(lv, lv);
+        If(d2.lessThanEqual(distance.mul(distance)), () => {
+          // three's window (Frostbite eq. 26) on both kinds; a glowing body (neon, decay < 0 holds its radius) falls off as
+          // 1 / (d^2 + r^2), every other light as three's 1 / max(d^decay, 0.01). One BRDF evaluation either way.
+          const w = d2.div(distance.mul(distance)), win = w.mul(w).oneMinus().clamp().pow2();
+          const att = T.select(decay.lessThan(0), float(1).div(d2.add(decay.mul(decay))), T.pow(T.sqrt(d2), max(decay, 0)).max(0.01).reciprocal());
+          if (!pbr) { builder.lightsNode.setupDirectLight(builder, this, { lightDirection: lv.normalize(), lightColor: color.mul(att.mul(win)) }); return; }
+          // A glowing body's highlight on a near-mirror (wet glass, polished paint) is the tube's own shape, which the mirror
+          // and env map already draw; as a point it burned a pin-sharp star the streaks smeared across the frame. Karis's
+          // sphere-light normalisation scales its specular by (a / a')^2, a' = a + radius / (2 d): the energy a highlight as
+          // wide as the tube would spread out. Plain point lights (radius 0) are untouched.
+          const sp0 = lm.directSpecular.toVar(), a = T.roughness.mul(T.roughness).max(0.002);
+          const a2 = a.add(max(decay.negate(), 0).mul(T.inverseSqrt(d2.max(1e-4))).mul(0.5)).min(1), norm = a.div(a2).pow2();
+          builder.lightsNode.setupDirectLight(builder, this, { lightDirection: lv.normalize(), lightColor: color.mul(att.mul(win)) });
+          lm.directSpecular.assign(sp0.add(lm.directSpecular.sub(sp0).mul(norm)));
+        });
+      });
+    }, 'void')();
+  }
+  dispose() { this._compute.dispose(); this._lightsTexture.dispose(); this._zTexture.dispose(); super.dispose(); }
+}
+class NQClusterLighting extends THREE.Lighting {
+  createNode(lights = []) { return new NQClusterNode().setLights(lights); }
+}
+// WebGPU only: the WebGL2 backend has no storage buffers in fragment shaders, so it keeps three's forward lights
+const CLUSTERED = NQ_BACKEND === 'webgpu';
+if (CLUSTERED) renderer.lighting = new NQClusterLighting();
 
 /* ============================================================
    Street props, modelled in code with the Geo kit (rounded boxes, lathes, tubes, blobs).
@@ -3570,6 +3775,7 @@ const WORLD = {
   tanks: [],       // {x, z, r, h, circle} the Refinery's fuel tanks (hazards.js blows them up)
   flares: [],      // [x, y, z] flare stacks, burning
   plumes: [],      // [x, y, z, r] cooling-tower steam
+  emit: [],        // {m, c, mat} every glowing box (world matrix, colour x emission): r3.js buildNeonLights
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -3637,6 +3843,7 @@ function billboardTexture(kind) {
 }
 
 function buildCity() {
+  GEO_EMIT = [];   // engine.js Geo.box collects the glowing boxes from here to the end (WORLD.emit)
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
   const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(), gSub = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
@@ -4055,9 +4262,9 @@ function buildCity() {
   // run fn against a throwaway mesh and collision lists: it rolls the same dice as the real build, so cutting
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
-    const pg = g, keep = {}; g = new Geo();
+    const pg = g, pe = GEO_EMIT, keep = {}; g = new Geo(); GEO_EMIT = null;
     for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'propSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
-    try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
+    try { fn(g); } finally { g = pg; GEO_EMIT = pe; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
@@ -4069,6 +4276,7 @@ function buildCity() {
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
   WORLD.train = { x: 34, wait: 0 };   // stalled over the plaza since the outbreak
+  WORLD.emit = GEO_EMIT; GEO_EMIT = null;
 }
 
 function drawCityDynamic(time) {
@@ -7506,6 +7714,100 @@ function updateLights3(cam) {
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
   for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
+  if (CLUSTERED) updateNeonLights(cam, fdt);
+}
+
+/* ---------------- the neon lights the street (WebGPU: cluster.js) ----------------
+   Every glowing tube, trim, awning strip and sign becomes light: the corner strips wash the walls and the wet ground
+   in their colour, a sign tints the pavement under it. A long tube is cut into pieces a few metres long, each a soft
+   glowing body (cluster.js: 1 / (d^2 + r^2)) as wide as its piece, held off the wall it hangs on so the light spreads
+   across the bricks. Shop and room lights past the sixteen-light pool keep shining too, so a street no longer goes
+   dark 55 m out. All of it fades in and out with distance: nothing pops. */
+// kNeon / kSign: light per m^2 of glowing surface (the city's lamps and shop lights are far brighter than a physical tube
+// would be, so the neon is scaled to sit among them); a light's reach ends where it falls under eps
+const NEON_L = { src: [], grid: new Map(), cell: 16, pool: [], N: 640, near: [], kNeon: 14, kSign: 12, eps: 0.012, rMax: 18 };
+const NEON_SEG = 3.5, NEON_TOP = 28;   // m of tube per light; no lights higher than this
+const _nk = (i, j) => i * 73856093 ^ j * 19349663;
+function neonPush(x, y, z, c, area, rad, kind, ref) {
+  if (y > NEON_TOP) return;   // up a tower: lights nothing you see from the street (the facade's own glow covers it)
+  // held off the facade it hangs on: a light inside or on a wall lights the wall edge-on, i.e. barely at all
+  for (const b of WORLD.boxes) {
+    if (x < b.x0 - 0.4 || x > b.x1 + 0.4 || z < b.z0 - 0.4 || z > b.z1 + 0.4 || y > b.y1 + 0.4 || (b.y0 !== undefined && y < b.y0 - 0.4)) continue;
+    const dx0 = x - b.x0, dx1 = b.x1 - x, dz0 = z - b.z0, dz1 = b.z1 - z, m = Math.min(dx0, dx1, dz0, dz1);
+    if (m === dx0) x = b.x0 - 0.7; else if (m === dx1) x = b.x1 + 0.7; else if (m === dz0) z = b.z0 - 0.7; else z = b.z1 + 0.7;
+    break;
+  }
+  const lum = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11; if (lum * area < 0.02) return;
+  const s = { p: [x, y, z], c: [c[0] * area, c[1] * area, c[2] * area], lum: lum * area, rad, r: 16, kind, ref };
+  NEON_L.src.push(s);
+  const k = _nk(Math.floor(x / NEON_L.cell), Math.floor(z / NEON_L.cell)); let a = NEON_L.grid.get(k); if (!a) NEON_L.grid.set(k, a = []); a.push(s);
+}
+function buildNeonLights() {
+  if (!CLUSTERED) return;
+  for (let i = 0; i < NEON_L.N; i++) { const l = new THREE.PointLight(0xffffff, 0, 1, 1); l.layers.enableAll(); l.castShadow = false; l.matrixAutoUpdate = false; scene.add(l); NEON_L.pool.push(l); }
+  for (const e of WORLD.emit || []) {
+    const m = e.m, ax = [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]], L = ax.map(v => Math.hypot(v[0], v[1], v[2]));
+    const o = [0, 1, 2].sort((a, b) => L[b] - L[a]), long = L[o[0]], wide = L[o[1]];
+    if (long < 0.3) continue;
+    const n = Math.min(24, Math.max(1, Math.round(long / NEON_SEG))), seg = long / n, d = ax[o[0]];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5, y = m[13] + d[1] * t;
+      // a slab glowing on two long sides (a roof trim, a lit window) shows its light along a band, not its whole face
+      neonPush(m[12] + d[0] * t, y, m[14] + d[2] * t, e.c, seg * Math.min(1, Math.max(wide, 0.15)), Math.max(0.35, Math.min(1.6, seg * 0.45)), 'neon', null);
+    }
+  }
+  // signs: each canvas's mean colour, once per texture
+  const cv = document.createElement('canvas'); cv.width = 16; cv.height = 4; const cx = cv.getContext('2d', { willReadFrequently: true }); const mean = new Map();
+  for (const q of SIGNS) {
+    const s = q.s, img = s.tex.image; if (!img || !img.width) continue;
+    let mc = mean.get(s.tex);
+    if (!mc) {
+      cx.clearRect(0, 0, 16, 4); cx.drawImage(img, 0, 0, 16, 4); const D = cx.getImageData(0, 0, 16, 4).data; let r = 0, g = 0, b = 0;
+      for (let i = 0; i < D.length; i += 4) { const a = D[i + 3] / 255; r += (D[i] / 255) ** 2.2 * a; g += (D[i + 1] / 255) ** 2.2 * a; b += (D[i + 2] / 255) ** 2.2 * a; }
+      mc = [r / 64, g / 64, b / 64]; mean.set(s.tex, mc);
+    }
+    const m = s.m, w = Math.hypot(m[0], m[1], m[2]), h = Math.hypot(m[4], m[5], m[6]), nz = Math.hypot(m[8], m[9], m[10]) || 1;
+    const nx = m[8] / nz, ny = m[9] / nz, nzz = m[10] / nz, off = 0.6;
+    const n = Math.min(4, Math.max(1, Math.round(w / 4))), ux = m[0] / w, uy = m[1] / w, uz = m[2] / w;
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n - 0.5) * w;
+      neonPush(m[12] + ux * t + nx * off, m[13] + uy * t + ny * off, m[14] + uz * t + nzz * off, [mc[0] * s.col[0], mc[1] * s.col[1], mc[2] * s.col[2]], w * h / n, Math.max(0.4, Math.min(1.8, Math.min(w / n, h) * 0.5)), 'sign', q);
+    }
+  }
+}
+const byNW = (a, b) => b.pri - a.pri;
+function updateNeonLights(cam, fdt) {
+  const T = THEME, U = SETTINGS.quality >= 3, R = U ? 90 : 60, near = NEON_L.near; near.length = 0;
+  const S = NEON_L.cell, i0 = Math.floor((cam[0] - R) / S), i1 = Math.floor((cam[0] + R) / S), j0 = Math.floor((cam[2] - R) / S), j1 = Math.floor((cam[2] + R) / S);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const a = NEON_L.grid.get(_nk(i, j)); if (!a) continue;
+    for (const s of a) {
+      const dx = s.p[0] - cam[0], dy = s.p[1] - cam[1], dz = s.p[2] - cam[2], d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > R + NEON_L.rMax) continue;
+      let k = s.kind === 'sign' ? (s.ref.vis && (s.ref.s.seed % 1) >= 0.08 ? T.sign * NEON_L.kSign : 0) : T.neon * NEON_L.kNeon;
+      if (k <= 0) continue;
+      s.r = Math.min(NEON_L.rMax, Math.max(2, Math.sqrt(s.lum * k / NEON_L.eps)));   // reach: where it falls under eps (a dim Look's neon reaches less far)
+      if (d > R + s.r) continue;
+      s.k = k * Math.min(1, Math.max(0, (R + s.r - d) / 12)); s.pri = s.k * (s.c[0] + s.c[1] + s.c[2]) / Math.max(1, d * d) * s.r; near.push(s);
+    }
+  }
+  // the shop, room and doorway lights the sixteen-light pool has no slot for (or is fading out of): the complement of its fade
+  for (const l of nearbyWorld('lights', cam[0], cam[2], R)) {
+    if (l.kind === 'lamp') continue;
+    const w = 1 - (l.fw || 0); if (w <= 0.001) continue;
+    const dx = l.p[0] - cam[0], dz = l.p[2] - cam[2], d = Math.sqrt(dx * dx + dz * dz); if (d > R) continue;
+    const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c;
+    const e = l._nq || (l._nq = { p: l.p, c: [0, 0, 0], rad: 0, r: l.r, kind: 'stat' });
+    e.c[0] = c[0]; e.c[1] = c[1]; e.c[2] = c[2]; e.k = w * Math.min(1, (R - d) / 12) * PL_K * l.r; e.pri = 1e3 / Math.max(1, d * d); near.push(e);
+  }
+  if (near.length > NEON_L.N) { near.sort(byNW); near.length = NEON_L.N; }
+  let n = 0;
+  for (const s of near) {
+    const l = NEON_L.pool[n++];
+    l.position.set(s.p[0], s.p[1], s.p[2]); l.updateMatrix(); l.matrixWorld.copy(l.matrix);
+    l.color.setRGB(s.c[0], s.c[1], s.c[2]); l.intensity = s.k; l.distance = s.r; l.decay = 1; l.userData.src = s.rad || 0;
+  }
+  for (; n < NEON_L.N; n++) NEON_L.pool[n].intensity = 0;
 }
 
 /* ---------------- world meshes ---------------- */
@@ -7964,7 +8266,7 @@ function buildWorld3() {
   addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
   buildBlossoms();
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
+  buildSigns(); buildDecalPool(); buildLights(); buildNeonLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
 }
 
@@ -9785,7 +10087,7 @@ window.NQ = {
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
+  GPOST, GRADE_U, NEON_L, CL, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

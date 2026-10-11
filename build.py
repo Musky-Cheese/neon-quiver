@@ -18,6 +18,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 '''
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
 TREE_VER = hashlib.sha1(open(os.path.join(root, 'models', 'tree.glb'), 'rb').read()).hexdigest()[:10] if os.path.exists(os.path.join(root, 'models', 'tree.glb')) else '0'
@@ -32,7 +33,7 @@ SND_FILES = sorted(f for f in os.listdir(SND_DIR) if f.endswith('.ogg')) if os.p
 SND_SETS = {}
 for f in SND_FILES: k = f[:-4].rsplit('_', 1)[0]; SND_SETS[k] = SND_SETS.get(k, 0) + 1
 SND_VER = hashlib.sha1(b''.join(open(os.path.join(SND_DIR, f), 'rb').read() for f in SND_FILES)).hexdigest()[:10]
-SRC = ['models.js', 'engine.js', 'gpu.js', 'props.js', 'architecture.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'ads.js', 'game.js']
+SRC = ['models.js', 'engine.js', 'gpu.js', 'cluster.js', 'props.js', 'architecture.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'ads.js', 'game.js']
 CONSTS = 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TREE_VER = "%s";   // Meshy tree model cache key\n' % TREE_VER + 'const MODEL_VER = %s;   // Meshy cars, props and zombies: cache key per file\n' % json.dumps(MODEL_VER) + 'const PROP_MODELS = %s;\n' % json.dumps([f[5:-4] for f in PROP_FILES]) + 'const MZ_TYPES = %s;\n' % json.dumps([f[3:-4] for f in MZ_FILES]) + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER
 CONSTS += 'const SND_SETS = %s;   // takes per recorded sound set\nconst SND_VER = "%s";\n' % (json.dumps(SND_SETS), SND_VER)
 js = IMPORTS + CONSTS + '\n'.join(S(f) for f in SRC)
