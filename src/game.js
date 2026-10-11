@@ -529,7 +529,7 @@ const GAME = {
     const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
     const scrap = z.T.scrap * (z.elite ? 2 : 1) + (head ? 2 : 0);   // scrap per kill: see ZTYPES in zombies.js
     this.score += pts; this.scrap += scrap; this.kills++; if (head) this.headshots++;
-    AUD.kill(); AUD.die(PLAYER.at(z.x, z.z, (z.y || 0) + 1.4), zVoice(z)); objOnKill(z); mutOnKill(z);
+    AUD.kill(); objOnKill(z); mutOnKill(z);
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
     if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
     // drops
