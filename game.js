@@ -3538,6 +3538,9 @@ const AUD = {
     this.intensity = 0.5;
     const sched = () => {
       if (!this.ctx) return;
+      // a hidden tab throttles this timer while the audio clock runs on: skip the steps that went by instead of
+      // playing them all at once when the tab comes back
+      if (next < c.currentTime) { const k = Math.ceil((c.currentTime - next) / step); next += k * step; n += k; }
       while (next < c.currentTime + 0.2) {
         const bar = Math.floor(n / 16) % 4, s = n % 16, ch = prog[bar], t = next;
         // bass
@@ -5245,9 +5248,10 @@ function navSpawnPoint(minD = 26, maxD = 62) {
 }
 
 /* ---------------- supplies ---------------- */
-function nearestSupply(kind, x, z) {
+// r: search radius; pass 0 to search the whole city (there are only a few dozen supplies)
+function nearestSupply(kind, x, z, r = 12) {
   let best = null, bd = 1e9;
-  for (const s of nearbyWorld('supplies', x, z, 12)) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
+  for (const s of r ? nearbyWorld('supplies', x, z, r) : WORLD.supplies) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
   return best ? { s: best, d: bd } : null;
 }
 function updateSupplies(dt) {
@@ -5262,7 +5266,7 @@ function updateSupplies(dt) {
     }
   }
   const t = nearestSupply('terminal', PLAYER.x, PLAYER.z);
-  GAME.nearTerminal = GAME.intermission && t && t.d < 2.6 ? t.s : null;
+  GAME.nearTerminal = GAME.intermission && GAME.wave > 0 && t && t.d < 2.6 ? t.s : null;   // not before wave 1: nothing to spend yet
 }
 // burn barrels: a bright core and flickering tongues of flame above the rim (particles do the rest)
 function drawFires(time) {
@@ -5387,7 +5391,7 @@ function drawMinimap(hx, W, H, time) {
 // on-screen pointer to the nearest armory terminal during an intermission
 function drawObjective(hx, W, H) {
   if (!GAME.intermission || GAME.state !== 'playing') return;
-  const t = nearestSupply('terminal', PLAYER.x, PLAYER.z); if (!t) return;
+  const t = nearestSupply('terminal', PLAYER.x, PLAYER.z, 0); if (!t) return;
   const cx = W / 2, cy = H / 2;
   const ang = Math.atan2(t.s.x - PLAYER.x, t.s.z - PLAYER.z), fwd = Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw));
   let rel = ang - fwd; rel = ((rel + Math.PI) % TAU + TAU) % TAU - Math.PI;
@@ -6031,9 +6035,10 @@ function updateZombies(dt, time) {
       if (z.dieT > CORPSE_LIFE) ZOMBIES.splice(i, 1);
       continue;
     }
-    if (z.type === 'spitter') { updateSpitter(z, dt, P); continue; }
-    if (z.type === 'screamer') { updateScreamer(z, dt, P); continue; }
-    if (z.type === 'climber') { updateClimber(z, dt, P); continue; }
+    // the specials keep their distance on purpose, so time spent in their own range counts as progress
+    if (z.type === 'spitter') { updateSpitter(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 18); continue; }
+    if (z.type === 'screamer') { updateScreamer(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 8); continue; }
+    if (z.type === 'climber') { updateClimber(z, dt, P); zStallCheck(z, dt, Math.hypot(P.x - z.x, P.z - z.z), z.climbState !== 'ground'); continue; }
     if (z.state === 'drop') { // boss falls from the sky
       z.vy = (z.vy || 0) - 40 * dt; z.y += z.vy * dt;
       if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(PLAYER.at(z.x, z.z, 0.5)); AUD.roar(PLAYER.at(z.x, z.z, 4)); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
@@ -6068,14 +6073,7 @@ function updateZombies(dt, time) {
     if (spd > 0.5 && moved < spd * dt * 0.3) z.stuckT += dt; else z.stuckT = Math.max(0, z.stuckT - dt * 0.5);
     if (z.stuckT > 2.5) { z.side *= -1; z.stuckT = 0.6; }
     z.phase += dt * (z.crawl ? 3.2 : z.type === 'runner' ? 11 : z.type === 'brute' ? 4.2 : z.type === 'boss' ? 3.2 : 5.2) * (spd > 0.1 || z.crawl ? 1 : 0.15);
-    if (GAME.state === 'playing' && z.type !== 'boss') {
-      const pd = NAV.ready ? Math.min(navDistAt(z.x, z.z), 1e6) : dist;
-      if (pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
-      if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
-        const s = navSpawnPoint();
-        z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
-      }
-    }
+    if (z.type !== 'boss') zStallCheck(z, dt, dist, false);
     z.groan -= dt;
     if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), zVoice(z)); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
@@ -6090,6 +6088,18 @@ function updateZombies(dt, time) {
   }
 }
 // speed / attack-rate factors from Cryo (slow or freeze) and Shock (stun)
+// one that hasn't got closer along the flow field for 12 s (30 s crawling) is stuck behind something: bring it back in
+// at a fresh spawn point, so a wave can always end
+function zStallCheck(z, dt, dist, engaged) {
+  if (GAME.state !== 'playing') return;
+  const pd = NAV.ready ? Math.min(navDistAt(z.x, z.z), 1e6) : dist;
+  if (engaged || pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
+  if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
+    const s = navSpawnPoint();
+    z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
+    if (z.type === 'climber') { z.climbState = 'ground'; z.y = 0; z.climbCd = rand(2, 4); }
+  }
+}
 function zSlowK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? z.chillK : 1; }
 function zAtkK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? (z.chillK <= 0 ? 0 : Math.max(0.45, z.chillK)) : 1; }
 // Cryo Arrow: the coolant capsule slows (Lv 3: freezes) whatever it hits, plus anything standing right at the impact.
@@ -6323,12 +6333,12 @@ function updateClimber(z, dt, P) {
     }
     z.atkCd -= dt;
   } else if (z.climbState === 'climb') {
-    z.climbT += dt; const k = Math.min(1, z.climbT / 1.1);
+    z.climbT += dt * zAtkK(z); const k = Math.min(1, z.climbT / 1.1);   // stunned or frozen: it hangs on the wall
     z.y = lerp(z.climbFrom, z.climbTo, easeOut(k)); z.state = 'walk';
     if (k >= 1) { z.climbState = 'perch'; z.perchT = 0; }
   } else if (z.climbState === 'perch') {
-    z.perchT += dt;
-    const want = Math.atan2(P.x - z.x, P.z - z.z); let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(dyaw, -4 * dt, 4 * dt);
+    const ck = zAtkK(z); z.perchT += dt * ck;
+    const want = Math.atan2(P.x - z.x, P.z - z.z); let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(dyaw, -4 * dt * ck, 4 * dt * ck);
     if (z.perchT > 0.7) {
       const dx = P.x - z.x, dz = P.z - z.z, d = Math.hypot(dx, dz) || 1;
       z.climbState = 'pounce'; z.pounceT = 0;
@@ -6338,6 +6348,7 @@ function updateClimber(z, dt, P) {
     }
   } else if (z.climbState === 'pounce') {
     z.pounceT += dt; z.dvy -= 16 * dt;
+    if (zSlowK(z) <= 0) { z.dvx = 0; z.dvz = 0; }   // stunned or frozen mid-leap: it drops where it is
     z.x += z.dvx * dt; z.z += z.dvz * dt; z.y = Math.max(0, z.y + z.dvy * dt);
     pushOutCircle(z, 0.3 * z.scale);
     if (z.y <= 0.02 && z.pounceT > 0.15) {
@@ -9078,7 +9089,7 @@ const SETTINGS = { sens: 1, music: true, volMaster: 1, volSfx: 1, volMusic: 1, v
 const QUALITY_NAMES = { 2: 'High', 3: 'Ultra' }, RES_STEPS = [100, 85, 75, 67, 50];
 function loadLS(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }
 function saveLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
-const SAVED_SETTINGS = loadLS('nq_settings', {});
+const SAVED_SETTINGS = ((s) => s && typeof s === 'object' && !Array.isArray(s) ? s : {})(loadLS('nq_settings', {}));
 Object.assign(SETTINGS, SAVED_SETTINGS);
 if (SAVED_SETTINGS.v !== 2) {   // from the Fast/Laptop/Balanced/Sharp/Ultra + Auto ladder: Ultra stays Ultra, everything else is High now
   SETTINGS.quality = SAVED_SETTINGS.quality >= 3 && !SAVED_SETTINGS.auto ? 3 : 2; SETTINGS.res = 'auto'; SETTINGS.v = 2;
@@ -9087,6 +9098,7 @@ if (SAVED_SETTINGS.v !== 2) {   // from the Fast/Laptop/Balanced/Sharp/Ultra + A
 if (SETTINGS.quality !== 2 && SETTINGS.quality !== 3) SETTINGS.quality = 2;
 if (SETTINGS.res !== 'auto' && !RES_STEPS.includes(SETTINGS.res)) SETTINGS.res = 'auto';
 if (!THEMES[SETTINGS.look]) SETTINGS.look = 'noir';
+if (!(+SETTINGS.sens > 0 && +SETTINGS.sens < 100)) SETTINGS.sens = 1;
 setTheme(SETTINGS.look);
 const VOLS = [['volMaster', 'master'], ['volSfx', 'sfx'], ['volMusic', 'music'], ['volAmb', 'amb']];
 for (const [k, b] of VOLS) AUD.vol[b] = clamp(+SETTINGS[k] || 0, 0, 1);
@@ -9106,7 +9118,7 @@ const PLAYER = {
   hurt(d, fx, fz) {
     if (this.dead || GAME.state !== 'playing') return;
     d *= 1 - this.armor;   // Armor Plating
-    this.hp -= d; this.lastHurt = GAME.time; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
+    this.hp -= d; this.lastHurt = GAME.playT; this.dmgFlash = Math.min(1, this.dmgFlash + 0.35 + d / 60); shake(0.25 + d / 80); AUD.hurt();
     const ang = Math.atan2(fx - this.x, fz - this.z); this.hurtDirs.push({ ang, t: 1.2 });
     if (this.hp <= 0) { this.hp = 0; GAME.gameOver(); }
   },
@@ -9157,7 +9169,9 @@ addEventListener('keydown', (e) => {
   else if (GAME.state === 'shop' && k === 'Escape') { e.preventDefault(); GAME.closeShop(); }   // back to the street; the countdown keeps running
 });
 addEventListener('keyup', (e) => { INPUT.keys[e.code] = false; if (e.code === 'KeyQ' && HOOK.aiming) { HOOK.aiming = false; HOOK.aim = null; if (GAME.state === 'playing') hookFire(); } });
-addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } });
+addEventListener('blur', () => { INPUT.keys = {}; HOOK.aiming = false; if (INPUT.mouseDown) { INPUT.mouseDown = false; } if (GAME.state === 'playing') GAME.pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && GAME.state === 'playing') GAME.pause(); });
+addEventListener('pagehide', () => { if (GAME.state !== 'title') GAME.saveBest(); });
 addEventListener('mousemove', (e) => { if (GAME.state !== 'playing') return; if (INPUT.locked || INPUT.freeLook) { INPUT.dx += e.movementX || 0; INPUT.dy += e.movementY || 0; } });
 gameEl.addEventListener('mousedown', (e) => {
   if (GAME.state !== 'playing') return;
@@ -9249,7 +9263,7 @@ function tracerAt(x, z, t) { const L = Math.max(1, upLv('tracer')); tracerMark(x
 // one token per standard arrow fired, oldest first. Picking an arrow up spends its token; at Arrow Recovery Lv 4
 // any token still unspent after 10 s brings that arrow home on its own.
 const RECQ = [];
-function recToken(proj) { const k = { t: GAME.time, done: false, proj, z: null }; RECQ.push(k); return k; }
+function recToken(proj) { const k = { t: GAME.playT, done: false, proj, z: null }; RECQ.push(k); return k; }
 function dropZombieArrow(z) { const i = z.stuck.findIndex((sa) => sa.type === 0); if (i >= 0) z.stuck.splice(i, 1); }
 function updateRecovery() {
   const P = PLAYER; let got = 0, back = 0;
@@ -9270,9 +9284,9 @@ function updateRecovery() {
     }
   }
   const ret = upLv('recovery') >= 4;
-  while (RECQ.length && (RECQ[0].done || GAME.time - RECQ[0].t >= 10)) {
+  while (RECQ.length && (RECQ[0].done || GAME.playT - RECQ[0].t >= 10)) {
     const k = RECQ.shift(); if (k.done || !ret) continue;   // below Lv 4 it simply stays where it fell
-    if (P.ammo[0] + got + back >= P.quiverMax) { k.t = GAME.time; RECQ.push(k); break; }   // quiver full: try again later
+    if (P.ammo[0] + got + back >= P.quiverMax) { k.t = GAME.playT; RECQ.push(k); break; }   // quiver full: try again later
     k.done = true; back++;
     if (k.z) { k.z.quiver = Math.max(0, k.z.quiver - 1); const j = k.z.toks ? k.z.toks.indexOf(k) : -1; if (j >= 0) k.z.toks.splice(j, 1); dropZombieArrow(k.z); }
     else if (k.proj) { const j = PROJ.indexOf(k.proj); if (j >= 0) PROJ.splice(j, 1); }
@@ -9377,7 +9391,10 @@ function updateProjectiles(dt) {
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
       AUD.thunk(PLAYER.at(hx, hz, hy));
       let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
-      if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
+      if (nst > 60) {   // too many in the walls: drop the oldest one that can't be picked up again, else the oldest
+        let k = PROJ.findIndex(p => p.stuck && p !== a && (!p.tok || p.tok.done)); if (k < 0) k = PROJ.findIndex(p => p.stuck && p !== a);
+        if (k >= 0) { const g = PROJ[k]; if (g.tok) g.tok.proj = null; PROJ.splice(k, 1); if (k < i) i--; }
+      }
     }
   }
 }
@@ -9493,7 +9510,7 @@ function drawProjectiles() {
 /* ---------------- game state ---------------- */
 const GAME = {
   state: 'title', wave: 0, toSpawn: 0, spawnT: 0, score: 0, scrap: 0, kills: 0, headshots: 0, shots: 0, hits: 0, combo: 0, comboT: 0,
-  best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
+  best: loadLS('nq_best', 0), bestWave: loadLS('nq_bestwave', 0), time: 0, playT: 0, bossCount: 0, clearT: 0, bannerT: 0, banner: null, lastType: 0, frozen: false,
   boss: null, bossPending: 0, hm: { t: 0, head: false, kill: false }, startT: 0, toasts: [],
   newGame() {
     AUD.setMusicScreen(false);
@@ -9584,6 +9601,7 @@ const GAME = {
     document.getElementById('bossbar').hidden = false;
   },
   onKill(z, part, arrowType) {
+    if (this.state !== 'playing') return;   // fires, tanks and bursting bodies can still drop them after you're overrun
     const head = part === 'head';
     this.combo++; this.comboT = 3.5;
     const mult = 1 + Math.min(8, Math.floor(this.combo / 3)) * 0.25;
@@ -9606,16 +9624,21 @@ const GAME = {
   openShop() {
     if (this.state !== 'playing') return;
     this.state = 'shop'; AUD.drawStop(); INPUT.mouseDown = false; INPUT.keys = {}; HOOK.aiming = false; HOOK.aim = null; BOW.state = 'ready'; BOW.draw = 0;
+    if (BOW.nextType >= 0) { BOW.type = BOW.nextType; BOW.nextType = -1; } BOW.carryOld = false;   // finish a half-done arrow swap
     if (document.exitPointerLock) document.exitPointerLock(); setScreen('shop'); armoryOpen(); AUD.armory();
   },
   closeShop() { if (this.state !== 'shop') return; setScreen(null); this.state = 'playing'; requestLock(); if (!this.intermission) this.startWave(); },   // Esc keeps the countdown running
   startNow() { this.intermission = false; this.interT = 0; this.closeShop(); },
   pause() { if (this.state !== 'playing') return; this.state = 'paused'; AUD.drawStop(); INPUT.mouseDown = false; if (BOW.state === 'drawing') BOW.state = 'letdown'; setScreen('pause'); drawLogo($('pauseLogo'), 'PAUSED', '#29e7ff'); if (document.exitPointerLock && INPUT.locked) document.exitPointerLock(); },
+  // best score and wave: on death, and whenever a run is left (quit, graphics reset, closing the tab)
+  saveBest() {
+    if (this.score > this.best) { this.best = this.score; saveLS('nq_best', this.best); }
+    if (this.wave > this.bestWave) { this.bestWave = this.wave; saveLS('nq_bestwave', this.bestWave); }
+  },
   resume() { if (this.state !== 'paused') return; this.state = 'playing'; setScreen(null); requestLock(); },
   gameOver() {
     this.state = 'over'; PLAYER.dead = true; AUD.drawStop(); AUD.gameOver(); AUD.intensity = 0.2; INPUT.mouseDown = false;
-    const newBest = this.score > this.best; if (newBest) { this.best = this.score; saveLS('nq_best', this.best); }
-    if (this.wave > this.bestWave) { this.bestWave = this.wave; saveLS('nq_bestwave', this.bestWave); }
+    const newBest = this.score > this.best; this.saveBest();
     setTimeout(() => {
       if (document.exitPointerLock) document.exitPointerLock();
       document.getElementById('goStats').innerHTML = [['Wave reached', this.wave], ['Score', this.score.toLocaleString()], ['Kills', this.kills], ['Headshots', this.headshots], ['Accuracy', this.shots ? Math.round(this.hits / this.shots * 100) + '%' : '—'], ['Best', this.best.toLocaleString()]]
@@ -9844,7 +9867,7 @@ function updatePlayer(dt) {
   for (let i = P.hurtDirs.length - 1; i >= 0; i--) { P.hurtDirs[i].t -= dt; if (P.hurtDirs[i].t <= 0) P.hurtDirs.splice(i, 1); }
   P.vmIn = Math.min(1, P.vmIn + dt * 2.5);
   // slow regen, on purpose: 6 s after the last hit, 1 HP every 4 s (Slow Regen: down to every 2.5 s)
-  P.regen = GAME.state === 'playing' && !P.dead && P.hp < P.maxHp && GAME.time - P.lastHurt > REGEN.delay;
+  P.regen = GAME.state === 'playing' && !P.dead && P.hp < P.maxHp && GAME.playT - P.lastHurt > REGEN.delay;
   if (P.regen) P.hp = Math.min(P.maxHp, P.hp + dt / P.regenInt);
   if (GAME.state === 'playing' && !P.dead) updateRecovery();
   if (P.hp / P.maxHp < 0.3) { P.beat -= dt; if (P.beat <= 0) { P.beat = 0.9; AUD.heartbeat(); } }
@@ -9869,6 +9892,7 @@ let lastT = performance.now() / 1000, acc = 0;
 const camM = M4.create();
 function step(dt) {
   GAME.time += dt; STEPN.n++;
+  if (GAME.state === 'playing' || GAME.state === 'shop') GAME.playT += dt;   // the run's own clock: stops while paused
   const t = GAME.time;
   AUD.listen(PLAYER.x, PLAYER.y + PLAYER.eyeH, PLAYER.z, PLAYER.yaw); audioFrame();
   if (GAME.state === 'playing') { updatePlayer(dt); updateBow(dt, INPUT); }
@@ -10001,6 +10025,7 @@ function wireUI() {
   addEventListener('resize', () => { if (GAME.state === 'title') drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); });
 }
 function toTitle() {
+  GAME.saveBest(); objReset(); GAME.intermission = false; GAME.interT = 0; GAME.toSpawn = 0; GAME.bossPending = 0; HOOK.state = 'idle'; HOOK.aiming = false;
   GAME.state = 'title'; ZOMBIES.length = 0; DECALS.length = 0; DEBRIS.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; FIRES.length = 0; GAME.boss = null; $('bossbar').hidden = true; hazReset();
   for (let i = 0; i < 9; i++) { const zz = spawnZombie(pick(['walker', 'walker', 'walker', 'runner', 'brute']), rand(-30, 30), rand(-30, 30), 1); zz.speed *= 0.5; }
   setScreen('title'); updateTitleStats(); drawLogo($('logo'), 'NEON QUIVER', '#ff2e88', true, true); AUD.intensity = 0.35; AUD.setMusicScreen(true);
@@ -10025,7 +10050,7 @@ function gpuCheck() {
 function gpuDeviceLost(info) {
   const why = 'Device lost' + (info && info.message ? ': ' + info.message : '') + (info && info.reason ? ' (' + info.reason + ')' : '');
   if (!window.NQ_READY) { if (window.NQ_FATAL) window.NQ_FATAL(new Error(why)); return; }
-  GPU.lost = true; if (GAME.state === 'playing') GAME.pause();
+  GPU.lost = true; GAME.saveBest(); if (GAME.state === 'playing') GAME.pause();
   if (window.NQ_SYS) window.NQ_SYS.show('GRAPHICS', 'Graphics were reset', 'Your browser reset the graphics card, which can happen after sleep or when the GPU is busy. Reload to pick up again: your best score is saved.', why);
 }
 const GPU = { name: '', soft: false, lost: false };
