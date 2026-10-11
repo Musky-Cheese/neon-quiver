@@ -23,18 +23,25 @@ const AUD = {
     let AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const c = this.ctx = new AC();
     // bus compressor glues the mix; a soft clipper after it rounds off the peaks when a wave piles sounds on top of each
-    // other (linear below 0.8, so normal levels pass untouched, then a tanh knee that never exceeds 1)
+    // other (linear below 0.8, so normal levels pass untouched, then a tanh knee that never exceeds 1). A second
+    // compressor on the SFX bus alone was tried and dropped: rendered offline it took 3-7 dB off a single arrow hit at
+    // any threshold from -12 to -4 dB, and the hits' punch matters more than a steadier music level (ducking covers that).
     const lim = c.createWaveShaper(), cv = new Float32Array(2049);
     for (let i = 0; i < cv.length; i++) { const x = i / 1024 - 1, a = Math.abs(x); cv[i] = Math.sign(x) * (a < 0.8 ? a : 0.8 + 0.2 * Math.tanh((a - 0.8) / 0.2)); }
     lim.curve = cv; lim.oversample = '2x'; lim.connect(c.destination);
     const comp = c.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4; comp.attack.value = 0.006; comp.release.value = 0.2; comp.connect(lim);
     this.master = c.createGain(); this.master.connect(comp);
-    this.sfx = c.createGain(); this.sfx.connect(this.master);
+    // world: everything heard in the game world passes one lowpass, which closes in as the player nears death (danger).
+    // The UI bus (blips, the heartbeat) and the music skip it, so they stay clear while the world goes muffled.
+    this.world = c.createBiquadFilter(); this.world.type = 'lowpass'; this.world.frequency.value = 20000; this.world.Q.value = 0.5; this.world.connect(this.master);
+    this.sfx = c.createGain(); this.sfx.connect(this.world);
     this.ui = c.createGain(); this.ui.connect(this.master);   // menu / pickup blips: dry, no reverb
-    this.music = c.createGain(); this.music.gain.value = 0.0; this.music.connect(this.master);
-    this.amb = c.createGain(); this.amb.connect(this.master);
+    // music and ambience each pass a duck gain, dipped for a moment under explosions, slams, roars and hits (duck)
+    this.duckM = c.createGain(); this.duckM.connect(this.master); this.duckA = c.createGain(); this.duckA.connect(this.world);
+    this.music = c.createGain(); this.music.gain.value = 0.0; this.music.connect(this.duckM);
+    this.amb = c.createGain(); this.amb.connect(this.duckA);
     // reverb: one convolver fed by sends from the world SFX and ambience buses (post-volume, so the sliders scale it too)
-    this.verb = c.createConvolver(); this.verb.buffer = this.makeIR(1.8, 3); this.verb.connect(this.master);
+    this.verb = c.createConvolver(); this.verb.buffer = this.makeIR(1.8, 3); this.verb.connect(this.world);
     const ss = c.createGain(); ss.gain.value = 0.22; this.sfx.connect(ss); ss.connect(this.verb);
     const as = c.createGain(); as.gain.value = 0.3; this.amb.connect(as); as.connect(this.verb);
     this.applyVol(true);
@@ -76,19 +83,52 @@ const AUD = {
     if (L.positionX) { L.positionX.value = x; L.positionY.value = y; L.positionZ.value = z; L.forwardX.value = fx; L.forwardY.value = 0; L.forwardZ.value = fz; L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0; }
     else { L.setPosition(x, y, z); L.setOrientation(fx, 0, fz, 0, 1, 0); }
   },
+  // dip the music and ambience by `db` for a moment (drop in ~40 ms, hold, recover over ~`rel` s) so a big hit owns the
+  // mix. A shallower duck landing on a deeper one still in progress leaves it alone.
+  duck(db, rel = 0.8, hold = 0.12) {
+    if (!this.ctx || db <= 0) return; const t = this.now(), g = Math.pow(10, -db / 20);
+    for (const p of [this.duckM.gain, this.duckA.gain]) {
+      const v = p.value; if (g >= v) continue;
+      p.cancelScheduledValues(t); p.setValueAtTime(v, t); p.setTargetAtTime(g, t, 0.012); p.setTargetAtTime(1, t + hold, rel / 3);
+    }
+  },
+  // k 0..1: how near death the player is. The world (SFX, ambience, reverb) loses its top end down to ~1.1 kHz, as if
+  // heard through the blood in your ears; the heartbeat and UI stay clear
+  danger(k) { if (!this.ctx) return; paramTarget(this.world.frequency, Math.round(20000 * Math.pow(1100 / 20000, clamp(k, 0, 1))), this.now(), 0.25); },
+  // the crowd bed under a horde: one loop of ten zombies on two playheads half a loop apart (so the repeat can't be
+  // picked out), panned a little apart for width. Per frame: k 0..1 how much horde there is around the player,
+  // near 0..1 how close the closest of it is (far crowds come in muffled), pan -1..1 which side it leans to.
+  hordeN: null,
+  horde(k, near, pan) {
+    if (!this.ctx) return; const S = this.smp.horde;
+    if (!this.hordeN) {
+      if (!S || !S.b.length) return;
+      const c = this.ctx, b = S.b[0], f = c.createBiquadFilter(), g = c.createGain(); f.type = 'lowpass'; f.Q.value = 0.5; f.frequency.value = 800; g.gain.value = 0;
+      f.connect(g); g.connect(this.sfx);
+      const P = [];
+      for (const off of [0, b.duration / 2]) { const s = c.createBufferSource(), p = c.createStereoPanner(); s.buffer = b; s.loop = true; s.connect(p); p.connect(f); s.start(0, off); P.push(p); }
+      this.hordeN = { f, g, P };
+    }
+    const H = this.hordeN, t = this.now();
+    paramTarget(H.g.gain, 0.25 * k * k, t, 0.6);   // a full horde at your back sits around -30 dB RMS, a good 10 dB under the hits
+    paramTarget(H.f.frequency, Math.round(700 * Math.pow(7000 / 700, near)), t, 0.5);
+    const p = Math.round(clamp(pan, -1, 1) * 0.7 * 100) / 100;
+    paramTarget(H.P[0].pan, clamp(p - 0.3, -1, 1), t, 0.4); paramTarget(H.P[1].pan, clamp(p + 0.3, -1, 1), t, 0.4);
+  },
   // a 3D source at world point p {x, y, z}: HRTF panning (front / back / above), gentle distance falloff, and
   // air absorption so far-off sounds come in muffled
-  at(p) {
+  // ref: the distance (m) the falloff starts at; big sounds (blasts, the Warden) pass a larger one so they carry
+  at(p, ref = 6) {
     const c = this.ctx; if (!c.createPanner) return this.sfx;
-    const pn = c.createPanner(); pn.panningModel = 'HRTF'; pn.distanceModel = 'inverse'; pn.refDistance = 6; pn.rolloffFactor = 0.5; pn.maxDistance = 300;
+    const pn = c.createPanner(); pn.panningModel = 'HRTF'; pn.distanceModel = 'inverse'; pn.refDistance = ref; pn.rolloffFactor = 0.5; pn.maxDistance = 300;
     if (pn.positionX) { pn.positionX.value = p.x; pn.positionY.value = p.y; pn.positionZ.value = p.z; } else pn.setPosition(p.x, p.y, p.z);
     const L = this.lis, d = Math.hypot(p.x - L.x, p.y - L.y, p.z - L.z);
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = clamp(20000 / (1 + d / 10), 1500, 20000); lp.Q.value = 0.5;
     lp.connect(pn); pn.connect(this.sfx); return lp;
   },
   env(g, t, a, peak, dcy, end = 0.0001) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(end, t + a + dcy); },
-  out(pan) {   // pan: undefined (centred), a number -1..1 (stereo), or a world position {x, y, z} (3D)
-    if (pan && typeof pan === 'object') return this.at(pan);
+  out(pan, ref) {   // pan: undefined (centred), a number -1..1 (stereo), or a world position {x, y, z} (3D)
+    if (pan && typeof pan === 'object') return this.at(pan, ref);
     if (pan === undefined || !this.ctx.createStereoPanner) return this.sfx;
     const p = this.ctx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); p.connect(this.sfx); return p;
   },
@@ -180,9 +220,14 @@ const AUD = {
   step(k = 1) { if (!this.ctx) return; if (!this.sample('step', 0.1 * k, this.sfx, 1, this.now(), 3)) this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
   land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); if (!this.sample('step', 0.3 * k, this.sfx, 0.85)) this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
   kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04, this.ui); this.tone('square', 990, 990, 0.08, 0.04, this.ui, this.now() + 0.05); },
-  explode(dist) {
-    if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);
-    this.burst('lowpass', 2400, 90, 0.8, 1.2, 0.9 * v); this.tone('sine', 110, 28, 0.9, 0.9 * v); this.burst('highpass', 4000, 2000, 0.5, 0.2, 0.2 * v);
+  // how close world point p is to the player, 1 on top of them to 0 at R metres (1 for a sound with no position)
+  near(p, R) { if (!p || typeof p !== 'object') return 1; const L = this.lis; return clamp(1 - Math.hypot(p.x - L.x, p.z - L.z) / R, 0, 1); },
+  // a blast at world point p; size ~0.35 (a small Blast Arrow) to 1 (a full blast) or more (a fuel tank). It comes from
+  // where it went off, the panner doing the distance falloff (from 10 m, so it carries); near ones duck the mix.
+  explode(p, size = 1) {
+    if (!this.ctx) return; const o = this.out(p, 10), v = 1.2 * (0.45 + 0.55 * size);
+    this.burst('lowpass', 2400, 90, 0.8, 1.2, 0.9 * v, o); this.tone('sine', 110, 28, 0.9, 0.9 * v, o); this.burst('highpass', 4000, 2000, 0.5, 0.2, 0.2 * v, o);
+    this.duck(9 * Math.min(1, size) * this.near(p, 50), 1.2);
   },
   // a Volatile body bursting: a wet crack and a low thump
   pop(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 1400, 300, 1.2, 0.25, 0.35, o); this.tone('sine', 140, 45, 0.22, 0.4, o); this.burst('lowpass', 700, 120, 0.8, 0.4, 0.25, o); },
@@ -202,9 +247,10 @@ const AUD = {
   // a struck zombie flinching, and one dying; both fall back to a short synth groan
   pain(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zpain', 0.35, this.out(pan), Math.pow(low, 0.45), this.now(), 3)) this.groan(pan, 0.08, low * 1.2); },
   die(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zdie', 0.32, this.out(pan), Math.pow(low, 0.45), this.now(), 4)) this.groan(pan, 0.1, low * 0.8); },
-  roar() { if (!this.ctx) return; this.groan(0, 0.5, 0.45); this.groan(0, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4); },
-  slam() { if (!this.ctx) return; this.tone('sine', 70, 25, 0.8, 1.0); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8); },
-  hurt() { if (!this.ctx) return; this.tone('square', 160, 90, 0.12, 0.1); this.burst('lowpass', 600, 200, 1, 0.15, 0.3); this.tone('sine', 55, 40, 0.3, 0.4); },
+  // the Warden: its roar and its ground slam come from where it stands and carry (falloff from 10 m)
+  roar(pan) { if (!this.ctx) return; this.groan(pan, 0.5, 0.45); this.groan(pan, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4, this.out(pan, 10)); this.duck(5 * this.near(pan, 60), 1); },
+  slam(pan) { if (!this.ctx) return; const o = this.out(pan, 10); this.tone('sine', 70, 25, 0.8, 1.0, o); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8, o); this.duck(6 * this.near(pan, 40), 0.7); },
+  hurt() { if (!this.ctx) return; this.tone('square', 160, 90, 0.12, 0.1); this.burst('lowpass', 600, 200, 1, 0.15, 0.3); this.tone('sine', 55, 40, 0.3, 0.4); this.duck(4, 0.5); },
   pickup() { if (!this.ctx) return; const t = this.now(); [880, 1175, 1568].forEach((f, i) => this.tone('triangle', f, f, 0.12, 0.08, this.ui, t + i * 0.06)); },
   heal() { if (!this.ctx) return; const t = this.now(); [523, 659, 784, 1047].forEach((f, i) => this.tone('sine', f, f, 0.2, 0.08, this.ui, t + i * 0.05)); },
   click() { if (!this.ctx) return; this.tone('square', 1400, 1400, 0.03, 0.04, this.ui); },
@@ -330,7 +376,7 @@ const AUD = {
   pounce(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 1400, 300, 1, 0.18, 0.3, o); this.tone('sine', 90, 45, 0.14, 0.2, o); },
   cleared() { if (!this.ctx) return; const t = this.now(); [392, 523, 659, 784].forEach((f, i) => this.tone('square', f, f, 0.25, 0.05, this.ui, t + i * 0.09)); },
   gameOver() { if (!this.ctx) return; const t = this.now(); [392, 330, 262, 196].forEach((f, i) => this.tone('sawtooth', f, f * 0.98, 0.5, 0.08, this.ui, t + i * 0.28)); },
-  heartbeat() { if (!this.ctx) return; const t = this.now(); this.tone('sine', 60, 40, 0.12, 0.35, this.sfx, t); this.tone('sine', 55, 38, 0.12, 0.25, this.sfx, t + 0.18); },
+  heartbeat() { if (!this.ctx) return; const t = this.now(); this.tone('sine', 60, 40, 0.12, 0.35, this.ui, t); this.tone('sine', 55, 38, 0.12, 0.25, this.ui, t + 0.18); },   // on the dry bus: it stays clear while danger muffles the world
   // ---------------- ambient ----------------
   startAmbient() {
     const c = this.ctx;

@@ -272,7 +272,7 @@ function updateZombies(dt, time) {
     if (z.type === 'climber') { updateClimber(z, dt, P); continue; }
     if (z.state === 'drop') { // boss falls from the sky
       z.vy = (z.vy || 0) - 40 * dt; z.y += z.vy * dt;
-      if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(); AUD.roar(); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
+      if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(PLAYER.at(z.x, z.z, 0.5)); AUD.roar(PLAYER.at(z.x, z.z, 4)); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
         for (let k = 0; k < 90; k++) { const a = k / 90 * TAU; emit(z.x + Math.cos(a) * 2, 0.3, z.z + Math.sin(a) * 2, Math.cos(a) * 16, rand(0.5, 2), Math.sin(a) * 16, 0.8, [2.5, 0.5, 2.2], 0.5, 2, 2.5); }
         burst(z.x, 0.5, z.z, 60, [0.6, 0.5, 0.7], 8, 1.4, 0.8, 4, 1.5, 3);
       }
@@ -410,13 +410,13 @@ function updateBoss(z, dt, dist) {
   z.slamCd -= dt; z.summonCd -= dt;
   if (z.state === 'roar') { z.roarT += dt; z.jaw = 1; if (z.roarT > 1.4) { z.state = 'walk'; } return; }
   if (z.state === 'walk') {
-    if (dist < 8 && z.slamCd <= 0) { z.state = 'slam'; z.atkT = 0; z.hitDone = false; AUD.groan(0, 0.35, 0.5); }
-    else if (z.summonCd <= 0) { z.state = 'roar'; z.roarT = 0; z.summonCd = rand(13, 17); AUD.roar(); shake(0.3); for (let k = 0; k < 2 + Math.min(3, GAME.bossCount); k++) { const s = navSpawnPoint(14, 40); GAME.spawnExtra('runner', s[0], s[1]); } }
+    if (dist < 8 && z.slamCd <= 0) { z.state = 'slam'; z.atkT = 0; z.hitDone = false; AUD.groan(PLAYER.at(z.x, z.z, 4), 0.35, 0.5); }
+    else if (z.summonCd <= 0) { z.state = 'roar'; z.roarT = 0; z.summonCd = rand(13, 17); AUD.roar(PLAYER.at(z.x, z.z, 4)); shake(0.3); for (let k = 0; k < 2 + Math.min(3, GAME.bossCount); k++) { const s = navSpawnPoint(14, 40); GAME.spawnExtra('runner', s[0], s[1]); } }
   }
   if (z.state === 'slam') {
     z.atkT += dt / 1.6;
     if (!z.hitDone && z.atkT > 0.62) {
-      z.hitDone = true; shake(1); AUD.slam();
+      z.hitDone = true; shake(1); AUD.slam(PLAYER.at(z.x, z.z, 0.5));
       const fx = z.x + Math.sin(z.yaw) * 3.5, fz = z.z + Math.cos(z.yaw) * 3.5;
       for (let k = 0; k < 80; k++) { const a = k / 80 * TAU; emit(fx + Math.cos(a) * 0.5, 0.25, fz + Math.sin(a) * 0.5, Math.cos(a) * 14, rand(0.2, 1.5), Math.sin(a) * 14, 0.7, [2.6, 0.4, 2.2], 0.45, 1, 2.8); }
       burst(fx, 0.4, fz, 40, [0.5, 0.45, 0.6], 7, 1.2, 0.6, 6, 1.5, 3);
