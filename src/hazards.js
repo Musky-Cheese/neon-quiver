@@ -55,7 +55,7 @@ function tankBlast(t) {
   const x = t.x, z = t.z, R = TANK_BLAST_R, pd = Math.hypot(PLAYER.x - x, PLAYER.z - z);
   t.alive = false; t.fuse = 0; t.cook = null; t.burnT = TANK_BURN; t.deadWave = GAME.wave; t.circle.h = 1.6;
   explode(x, 1.8, z);   // the blast core: flash, sound, the inner ring of damage, the hive nest
-  AUD.tankBoom(pd); shake(clamp(1.5 - pd / 26, 0.15, 1.1));
+  AUD.tankBoom(PLAYER.at(x, z, 1.8)); shake(clamp(1.5 - pd / 26, 0.15, 1.1));
   flashLight(x, 5, z, [9, 3.6, 0.9], 42, 0.9);
   burst(x, 2.6, z, 150, [3, 1.25, 0.22], 12, 0.9, 0.5, -2, 3.5);
   burst(x, 3.5, z, 60, [3.2, 2.2, 0.8], 7, 0.5, 0.7, 0, 5);
@@ -178,10 +178,10 @@ Object.assign(AUD, {
     this.burst('highpass', 3200, 5500, 1.2, TANK_COOK, 0.2 * k, o);
     for (let i = 0; i < 4; i++) this.tone('square', 1320, 1320, 0.09, 0.05 * k, o, t + i * 0.36);
   },
-  tankBoom(dist) {
-    if (!this.ctx) return; const v = clamp(1.3 - dist / 90, 0.25, 1.3);
-    this.explode(dist * 0.6); this.tone('sine', 48, 18, 2.2, 0.9 * v); this.burst('lowpass', 700, 40, 0.7, 2.6, 0.7 * v);
-    this.burst('bandpass', 400, 120, 1.5, 3.5, 0.25 * v, this.amb, this.now() + 0.3);   // the roar of the fire after
+  tankBoom(p) {   // p: the tank's position; on top of the blast core's own explode(), a bigger one and a long low boom
+    if (!this.ctx) return; const o = this.out(p, 18);
+    this.explode(p, 1.3); this.tone('sine', 48, 18, 2.2, 1.17, o); this.burst('lowpass', 700, 40, 0.7, 2.6, 0.9, o);
+    this.burst('bandpass', 400, 120, 1.5, 3.5, 0.32 * (0.3 + 0.7 * this.near(p, 90)), this.amb, this.now() + 0.3);   // the roar of the fire after
   },
   hazAmb(metroK, refK, dt) {
     if (!this.ctx || !this.amb) return; const c = this.ctx;

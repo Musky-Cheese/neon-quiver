@@ -21,6 +21,8 @@ RATE = 44100
 #   cuts: [(start, end), ...] seconds to keep as separate takes
 #   max: keep at most this many takes from this source
 #   maxlen: cut each take to this many seconds (with a fade)
+#   loop: (start, length, crossfade) seconds: a seamless loop instead of a one-shot (no trimming), levelled by its
+#         average loudness rather than its loudest moment, at `kbps` (default 128)
 # Source files are named after their Freesound / OpenGameArt / Kenney originals: see sounds/CREDITS.md.
 RECIPE = {
     # JoeDines' longbow was recorded from outside a shed: the quiet release first, the arrow striking the shed ~2 s later.
@@ -33,8 +35,10 @@ RECIPE = {
     'zgroan': [('zombie_moans.ogg', {'split': 0.25, 'maxlen': 2.4}), ('tonsil5_growl_*.ogg', {'maxlen': 2.4})],
     'zpain':  [('tonsil5_pain_*.ogg', {'maxlen': 1.0})],
     'zdie':   [('tonsil5_death_*.ogg', {'maxlen': 1.8})],
+    # the crowd bed under a horde (AUD.horde): GaryQ's ten zombies, steady for the whole two minutes
+    'horde':  [('garyq_zombie_group.ogg', {'loop': (40, 30, 1.5), 'kbps': 80})],
 }
-TARGET_DB, PEAK_DB, GATE_DB = -14.0, -1.0, -42.0
+TARGET_DB, PEAK_DB, GATE_DB, LOOP_DB = -14.0, -1.0, -42.0, -20.0
 
 
 def load(path):
@@ -83,10 +87,22 @@ def clean(d, maxlen=None):
     return d
 
 
-def write(d, base):
+def loop(d, start, length, xf):
+    """`length` s from `start`, its head crossfaded (equal power) with the `xf` s that follow it, so the end runs into the start"""
+    a, n, x = int(start * RATE), int(length * RATE), int(xf * RATE)
+    body, tail = d[a:a + n].copy(), d[a + n:a + n + x]
+    k = np.linspace(0, np.pi / 2, x)
+    body[:x] = body[:x] * np.sin(k) + tail * np.cos(k)
+    body *= 10 ** ((LOOP_DB - 20 * np.log10(np.sqrt((body ** 2).mean()))) / 20)
+    pk = np.abs(body).max(); lim = 10 ** (PEAK_DB / 20)
+    if pk > lim: body *= lim / pk
+    return body
+
+
+def write(d, base, kbps=128):
     s = aud.Sound.buffer(d.reshape(-1, 1).astype(np.float32), RATE)
-    s.write(base + '.ogg', RATE, aud.CHANNELS_MONO, aud.FORMAT_S16, aud.CONTAINER_OGG, aud.CODEC_VORBIS, 128000)
-    s.write(base + '.mp3', RATE, aud.CHANNELS_MONO, aud.FORMAT_S16, aud.CONTAINER_MP3, aud.CODEC_MP3, 128000)
+    s.write(base + '.ogg', RATE, aud.CHANNELS_MONO, aud.FORMAT_S16, aud.CONTAINER_OGG, aud.CODEC_VORBIS, kbps * 1000)
+    s.write(base + '.mp3', RATE, aud.CHANNELS_MONO, aud.FORMAT_S16, aud.CONTAINER_MP3, aud.CODEC_MP3, kbps * 1000)
 
 
 def main():
@@ -99,11 +115,14 @@ def main():
             if not files: print('  missing', pat); continue
             for path in files:
                 d = load(path)
+                if 'loop' in opt:
+                    n += 1; write(loop(d, *opt['loop']), os.path.join(OUT, '%s_%d' % (name, n)), opt.get('kbps', 128))
+                    print('  %s_%d  %.2fs loop  <- %s' % (name, n, opt['loop'][1], os.path.basename(path))); continue
                 takes = [d[int(a * RATE):int(b * RATE)] for a, b in opt['cuts']] if 'cuts' in opt else split(d, opt['split']) if 'split' in opt else [d]
                 for t in takes[:opt.get('max', 99)]:
                     t = clean(t, opt.get('maxlen'))
                     if t is None: continue
-                    n += 1; write(t, os.path.join(OUT, '%s_%d' % (name, n)))
+                    n += 1; write(t, os.path.join(OUT, '%s_%d' % (name, n)), opt.get('kbps', 128))
                     print('  %s_%d  %.2fs  <- %s' % (name, n, len(t) / RATE, os.path.basename(path)))
         print(name, n, 'takes')
 

@@ -367,7 +367,7 @@ function updateFires(dt) {
 function explode(x, y, z, R = 6, knock = true) {
   const q = clamp(R / 6, 0.35, 1);   // smaller blasts spend fewer particles
   objBlast(x, y, z, R, 160 * PLAYER.dmgMult);
-  AUD.explode(Math.hypot(x - PLAYER.x, z - PLAYER.z) + (1 - q) * 14); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9) * (0.5 + 0.5 * q));
+  AUD.explode(PLAYER.at(x, z, y), q); shake(clamp(1.2 - Math.hypot(x - PLAYER.x, z - PLAYER.z) / 30, 0.15, 0.9) * (0.5 + 0.5 * q));
   flashLight(x, y + 1, z, [6, 1.2, 5.5], 26 * (0.4 + 0.6 * q), 0.55);
   burst(x, y, z, Math.round(120 * q), [2.8, 0.5, 2.6], 14 * q, 0.7, 0.3, 2, 2.5);
   burst(x, y, z, Math.round(60 * q), [3, 2.2, 3], 8 * q, 0.35, 0.45, 0, 4);
@@ -789,12 +789,27 @@ function updatePlayer(dt) {
   if (P.hp / P.maxHp < 0.3) { P.beat -= dt; if (P.beat <= 0) { P.beat = 0.9; AUD.heartbeat(); } }
 }
 
+// the horde's crowd bed and the near-death muffle, every frame. Each zombie within 45 m adds weight (1 - d/45)^2 (the
+// Warden has its own sounds); the bed swells with the total past the first one or two, opens up as the nearest closes
+// in, and leans to the side the weight is on (right = forward turned a quarter clockwise). Levels move in 1/50 steps,
+// so one that hasn't changed isn't re-sent to the audio thread.
+function audioFrame() {
+  const P = PLAYER, rx = Math.cos(P.yaw), rz = -Math.sin(P.yaw), q = x => Math.round(x * 50) / 50;
+  let W = 0, side = 0, near = 0;
+  if (GAME.state === 'playing') for (const z of ZOMBIES) {
+    if (z.dead || z.type === 'boss') continue;
+    const dx = z.x - P.x, dz = z.z - P.z, d = Math.hypot(dx, dz); if (d > 45) continue;
+    const w = (1 - d / 45) ** 2; W += w; side += w * (dx * rx + dz * rz) / (d + 1e-3); near = Math.max(near, w);
+  }
+  AUD.horde(q(1 - Math.exp(-Math.max(0, W - 0.5) / 2.5)), q(Math.sqrt(near)), W > 0 ? q(side / W) : 0);
+  AUD.danger(GAME.state === 'over' ? 1 : GAME.state === 'playing' ? q(clamp(1 - P.hp / P.maxHp / 0.3, 0, 1)) : 0);
+}
 let lastT = performance.now() / 1000, acc = 0;
 const camM = M4.create();
 function step(dt) {
   GAME.time += dt; STEPN.n++;
   const t = GAME.time;
-  AUD.listen(PLAYER.x, PLAYER.y + PLAYER.eyeH, PLAYER.z, PLAYER.yaw);
+  AUD.listen(PLAYER.x, PLAYER.y + PLAYER.eyeH, PLAYER.z, PLAYER.yaw); audioFrame();
   if (GAME.state === 'playing') { updatePlayer(dt); updateBow(dt, INPUT); }
   else if (GAME.state === 'over') { PLAYER.deathT += dt; }
   else if (GAME.state === 'title') { updateBow(dt, INPUT); }
