@@ -5,6 +5,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 const RIG_VER = "78bcf6844f";   // content hash: a new model always busts the browser cache
 const TREE_VER = "0eb1f64b0a";   // Meshy tree model cache key
 const MODEL_VER = {"car_sedan": "dc8aed416d", "car_van": "e794bfa008", "prop_azalea": "f622c6edac", "prop_boxwood": "3272119542", "prop_hedge": "4dc2ffd068", "prop_hydrangea": "7fb55fd7df", "prop_kasuga": "49c88cfd9e", "prop_shrub": "7d13b5fb80", "prop_yukimi": "433bac220e", "mz_alpha": "ce7220ddfa", "mz_boss": "47a7f36b05", "mz_brute": "2202d60382", "mz_climber": "206c02545a", "mz_runner": "c7477bcdb0", "mz_screamer": "c550d143df", "mz_spitter": "e415ddca04", "mz_walker": "f8ebba4c98", "mz_walker_dock": "4428692586", "mz_walker_vendor": "d385fde1e5"};   // Meshy cars, props and zombies: cache key per file
@@ -441,7 +442,7 @@ async function loadModels() {
 const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArray, reference, attribute, texture, property, varyingProperty,
   positionLocal, positionWorld, positionView, positionViewDirection, normalWorldGeometry, normalView, materialNormal, materialReference, cameraPosition,
   cameraViewMatrix, cameraWorldMatrix, screenUV, uv, diffuseColor, mrt, output, mix, smoothstep, step: stepT, fract, floor, abs, min, max, clamp: clampT, sin, cos, pow, exp, sqrt,
-  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup } = THREE.TSL;
+  atan, length, normalize, dot, cross, sign, dFdx, dFdy, fwidth, select, pass, convertToTexture, cameraProjectionMatrix, varying, modelViewMatrix, renderGroup, velocity } = THREE.TSL;
 
 /* ---- the shared uniforms (NQU, engine.js) as nodes: each one reads its NQU entry at every render call ---- */
 const NQN = {};
@@ -1118,7 +1119,7 @@ function skyMaterialGPU(U) {
   // the dome sits at the far plane (depth just under 1, where the buffer is still clear), so with the depth test on it only
   // shades the pixels no geometry covers; the result is the same picture as drawing it first and painting the city over it
   m.vertexNode = Fn(() => { const c = cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(positionLocal, 1)).toVar(); return vec4(c.xy, c.w.mul(0.9999998), c.w); })();
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const d = normalize(positionWorld.sub(cameraPosition)).toVar(), h = d.y, T = NQN.uTime, glow = R(U.uGlow, 'color'), disc = R(U.uDiscCol, 'color');
     const c = mix(NQN.uFogCol.mul(1.25), R(U.uMid, 'color'), smoothstep(0, 0.18, h)).toVar();
     c.assign(mix(c, R(U.uZen, 'color'), smoothstep(0.15, 0.7, h)));
@@ -1143,7 +1144,7 @@ function coneMaterialGPU(U) {
   const m = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.CustomBlending,
     blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
   m.fog = false;
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const W = positionWorld, Nn = normalWorldGeometry, d = length(W.sub(cameraPosition));
     const facing = pow(abs(dot(Nn, normalize(cameraPosition.sub(W)))), 1.6);
     const h = clampT(uv().y, 0, 1);   // MSAA samples can land just outside the triangle: pow() of a negative is NaN
@@ -1160,6 +1161,14 @@ function coneMaterialGPU(U) {
    Fog for these: 1 - exp(-d * density), at 80% strength. */
 const fogD = (d) => d.mul(NQN.uFogDen);
 const fogMix = (c, d) => mix(c, NQN.uFogCol, clampT(exp(fogD(d).negate()).oneMinus().mul(0.8), 0, 1));
+// The effect materials set outputNode, not fragmentNode: the same pixels, but it goes through three's MRT path, so in the
+// Ultra world pass (TAA) they also fill the motion and reactive targets (a fragmentNode writes only the first target).
+// Such a material's own lighting and environment are never shown (its outputNode replaces them), so it builds none: left in,
+// the scene's env map was compiled into every one of them, half-declared, and the pipelines failed.
+for (const C of [THREE.NodeMaterial, THREE.MeshBasicNodeMaterial]) {
+  const env = C.prototype.setupEnvironment;
+  C.prototype.setupEnvironment = function (builder) { return this.outputNode !== null ? null : env.call(this, builder); };
+}
 function basicGPU(o) { const m = new THREE.MeshBasicNodeMaterial(o); m.fog = false; m.lights = false; return m; }
 const ADD = { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor };
 // signs: one instanced draw per texture size and blend mode, their canvases as the layers of one texture array
@@ -1187,7 +1196,7 @@ function signArrayLayer(arr, t, L) {
 function signMaterialGPU(arr, add) {
   const m = basicGPU({ transparent: add, depthWrite: !add, side: THREE.DoubleSide, blending: add ? THREE.AdditiveBlending : THREE.NoBlending });   // additive signs weigh by alpha
   m.uA = uniform(1);
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const S = attribute('iSign', 'vec3'), col = attribute('iCol', 'vec3'), T = NQN.uTime, u = uv().toVar(), flick = float(1).toVar();
     If(S.y.greaterThan(0.5), () => {   // holo billboards: torn scanlines and a fast shimmer
       const row = floor(u.y.oneMinus().mul(24)), g = stepT(0.93, h21(vec2(row, floor(T.mul(6)).add(S.x))));
@@ -1201,7 +1210,7 @@ function signMaterialGPU(arr, add) {
 }
 function decalMaterialGPU(tex) {
   const m = basicGPU({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-  m.fragmentNode = Fn(() => { const t = texture(tex, uv()); return vec4(fogMix(t.rgb, length(positionWorld.sub(cameraPosition))), t.a.mul(attribute('iAlpha', 'float'))); })();
+  m.outputNode = Fn(() => { const t = texture(tex, uv()); return vec4(fogMix(t.rgb, length(positionWorld.sub(cameraPosition))), t.a.mul(attribute('iAlpha', 'float'))); })();
   return m;
 }
 // screen-facing quads standing in for GL points (WebGPU points are always one pixel): corner -> clip-space offset in pixels
@@ -1217,13 +1226,13 @@ function particlesGPU(data) {
   m.uH = uniform(500);
   const ps = attribute('psize', 'float');
   m.vertexNode = Fn(() => { const mv = modelViewMatrix.mul(vec4(attribute('ppos', 'vec3'), 1)); return spriteClip(mv, clampT(abs(ps).mul(m.uH).div(max(mv.z.negate(), 0.05)), 1, 256)); })();
-  m.fragmentNode = Fn(() => {
+  m.fragmentNode = taaReactive(Fn(() => {
     const C = varying(attribute('pcol', 'vec4')), blend = varying(ps.lessThan(0).select(float(1), float(0))), d = length(attribute('position', 'vec3').xy).mul(0.5);
     const out = vec4(0).toVar();
     If(blend.greaterThan(0.5), () => { const s = smoothstep(0.5, 0.3, d).mul(C.a); out.assign(vec4(C.rgb.mul(s), s)); })
       .Else(() => { const a = smoothstep(0.5, 0, d); out.assign(vec4(C.rgb.mul(a.mul(a)).mul(C.a), 0)); });
     return out;
-  })();
+  })(), 8);   // TAA: sparks and blood fly too fast for the history
   m.uniforms = { uH: m.uH };   // r3.js sets it through .uniforms, like the other effect materials
   const mesh = new THREE.Mesh(g, m); mesh.userData.buf = buf; return mesh;
 }
@@ -1241,7 +1250,7 @@ function rainGPU(geo) {
   const K = stepT(rnd, dens).mul(fract(rnd.mul(13.7)).mul(0.8).add(0.45)).mul(indoorAt(x, z, y).oneMinus());
   const wind = U.uWind.mul(0.32).add(0.08).add(sin(T.mul(1.3).add(P.y.mul(0.21))).mul(0.12)), len = fract(rnd.mul(5.3)).mul(0.9).add(0.55).mul(0.9);
   m.positionNode = vec3(x.add(a2.y.mul(wind).mul(len).mul(2)), y.add(a2.y.mul(len)), z.add(a2.y.mul(0.05)));
-  m.fragmentNode = vec4(U.uRainCol.mul(U.uAlpha).mul(varying(a2.y).mul(0.7).add(0.3)).mul(varying(K)), 0);
+  m.fragmentNode = taaReactive(vec4(U.uRainCol.mul(U.uAlpha).mul(varying(a2.y).mul(0.7).add(0.3)).mul(varying(K)), 0), 30);   // TAA: streaks too thin and fast for the history: fully reactive
   m.uniforms = U; return m;
 }
 // snow: one soft flake per drop that swirls and rides the wind (instanced quads over the drops' first vertices)
@@ -1265,7 +1274,7 @@ function snowGPU(rainGeo, n) {
     const px = K.greaterThan(0).select(clampT(U.uPx.mul(fract(rnd.mul(5.3)).mul(0.07).add(0.07)).div(max(mv.z.negate(), 0.1)).mul(1000), 1.5, U.uPx.mul(16)), float(0));
     return spriteClip(mv, px);
   })();
-  m.fragmentNode = Fn(() => { const d = length(attribute('position', 'vec3').xy).mul(0.5); return vec4(U.uCol.mul(smoothstep(0.5, 0.12, d).mul(varying(K)).mul(U.uAlpha)), 0); })();
+  m.fragmentNode = taaReactive(Fn(() => { const d = length(attribute('position', 'vec3').xy).mul(0.5); return vec4(U.uCol.mul(smoothstep(0.5, 0.12, d).mul(varying(K)).mul(U.uAlpha)), 0); })(), 12);   // TAA: flakes drift too fast
   m.uniforms = U; return new THREE.Mesh(g, m);
 }
 // halos round bulbs: camera-facing quads pushed toward the eye, faded with distance and fog
@@ -1273,7 +1282,7 @@ function haloMaterialGPU(VU) {
   const m = basicGPU({ transparent: true, depthWrite: false, ...ADD });
   const hp = attribute('hp', 'vec4'), hc = attribute('hc', 'vec3'), c = cameraViewMatrix.mul(vec4(hp.xyz, 1)), vD = varying(c.z.negate());
   m.vertexNode = cameraProjectionMatrix.mul(vec4(c.xy.add(attribute('position', 'vec3').xy.mul(hp.w)), c.z.add(hp.w.mul(0.4)), c.w));
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const r = length(uv().sub(0.5)).mul(2), a = exp(r.mul(r).mul(-5)).mul(r.oneMinus()).mul(smoothstep(0.3, 2.5, vD));
     const col = varying(hc.x.lessThan(0).select(reference('value', 'color', VU.uLamp).mul(0.35), hc));
     return vec4(col.mul(max(a, 0)).mul(0.35).mul(reference('value', 'float', VU.uVolK)).mul(exp(fogD(vD).mul(-0.4))), 0);
@@ -1283,7 +1292,7 @@ function haloMaterialGPU(VU) {
 // shopfront glass: see-through, fresnel-bright at grazing angles, rain-beaded and grimy low down
 function glassMaterialGPU() {
   const m = basicGPU({ transparent: true, depthWrite: false });
-  m.fragmentNode = Fn(() => {
+  m.outputNode = Fn(() => {
     const W = positionWorld, V = normalize(cameraPosition.sub(W)), N = normalize(normalWorldGeometry), ndv = abs(dot(N, V)), T = NQN.uTime, R = NQN.uRain;
     const fr = pow(ndv.oneMinus(), 5).mul(0.96).add(0.04), fc = select(abs(N.x).greaterThan(0.5), W.zy, W.xy);
     const beads = smoothstep(0.8, 0.95, vn(fc.mul(vec2(26, 14)))).mul(R.mul(0.6).add(0.3));
@@ -1304,13 +1313,39 @@ const GRADE_U = { uTime: uniform(0), uDmg: uniform(0), uLow: uniform(0), uExpo: 
   uStreak: uniform(0.45), uStreakThr: uniform(1.8), uHal: uniform(5), uWhite: uniform(0.5) };   // the lens and film: anamorphic streaks, halation, highlights burning to white
 // weather on the lens (r3.js updateLens): beads of water, drops running down, a damp film, frost creeping in from the edges
 Object.assign(GRADE_U, { uLensDrop: uniform(0), uLensRun: uniform(0), uLensFog: uniform(0), uLensFrost: uniform(0) });
-const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null };
+const GPOST = { pipe: null, key: '', world: null, vm: null, bloom: null, ao: null, pre: null, comb: null, streak: null, taa: null, san: null };
+// Temporal AA (Ultra): the world pass drops its 4x MSAA and instead draws every frame from a slightly different sub-pixel
+// offset; three's TRAA (vendor/addons, patched for a reactive mask) blends each pixel with its history, found again by the
+// pixel's motion. Every edge, every window grid, every wet highlight and every shader-made detail gets a few dozen samples
+// instead of four, and stops crawling when you move. The bow keeps its own MSAA pass, laid over afterwards, razor sharp.
+// ?aa=msaa keeps Ultra on MSAA (for comparing).
+let TAA_OFF = false; try { TAA_OFF = new URLSearchParams(location.search).get('aa') === 'msaa'; } catch (e) { }
+// What each material writes into the world pass's motion and reactive targets, decided once per material at build time:
+// solid surfaces write their motion; a blended one writes nothing to it (zero with zero alpha, which every blend mode in
+// the game leaves untouched), so rain, glass, halos and signs keep the motion of the surface behind them. Moving things
+// with no depth of their own (rain, snow, sparks: taaReactive) mark the reactive mask instead, by how bright they
+// are, so TAA takes them from the current frame and they neither smear nor fade.
+const taaVelocity = Fn((_, b) => (b.material && b.material.transparent) ? vec4(0) : vec4(velocity, 0, 1))();
+// They write all three targets themselves (fragmentNode as an MRT; rain and snow never draw in the mirror or the env cube,
+// and the MSAA world pass simply has no targets for the other two). Not outputNode: their vertex-stage indoor lookup
+// leaks a half-declared texture into the fragment stage on that path and the pipeline fails.
+function taaReactive(c, k) {
+  return mrt({ output: c, velocity: vec4(0), reactive: vec4(vec3(clampT(max(dot(c.rgb, vec3(0.3, 0.59, 0.11)), c.a.mul(0.25)).mul(k), 0, 1)), 1) });
+}
 const aces = (x) => clampT(x.mul(x.mul(2.51).add(0.03)).div(x.mul(x.mul(2.43).add(0.59)).add(0.14)), 0, 1);
 function buildPostGPU(q) {
-  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
-  const samples = 4;
-  const world = pass(scene, camera, { samples }), vmP = pass(scene, vmCamera, { samples });
+  if (GPOST.pipe) { GPOST.pipe.dispose(); for (const k of ['world', 'vm', 'bloom', 'ao', 'pre', 'comb', 'taa', 'san']) if (GPOST[k]) GPOST[k].dispose(); if (GPOST.streak) for (const n of GPOST.streak) n.dispose(); }
+  const useTAA = q >= 3 && !TAA_OFF && !GPOST.noTAA;   // (GPOST.noTAA + GPOST.key = -1 swaps at runtime, for A/B)
+  const world = pass(scene, camera, { samples: useTAA ? 0 : 4 }), vmP = pass(scene, vmCamera, { samples: 4 });
   world.name = 'world'; vmP.name = 'bow';
+  if (useTAA) {
+    const m = mrt({ output, velocity: taaVelocity, reactive: vec4(0) });
+    m.setBlendMode('velocity', new THREE.BlendMode(THREE.MaterialBlending));
+    const add = new THREE.BlendMode(THREE.CustomBlending); Object.assign(add, { blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneFactor });
+    m.setBlendMode('reactive', add); m.setClearColor('velocity', 0x000000, 0); m.setClearColor('reactive', 0x000000, 0);
+    world.setMRT(m);
+    world.getTexture('reactive').type = THREE.UnsignedByteType;
+  }
   vmP.setMRT(mrt({ output }).setClearColor('output', 0x000000, 0));   // transparent wherever the bow isn't, whoever triggers the pass
   let col = world.getTextureNode('output').rgb;
   let aoN = null, pre = null;
@@ -1325,6 +1360,19 @@ function buildPostGPU(q) {
     const aoT = denoise(aoN.getTextureNode(), pd, pn, camera);
     aoT.lumaPhi.value = 10; aoT.depthPhi.value = 2; aoT.normalPhi.value = 3; aoT.radius.value = 6;
     col = col.mul(mix(1, aoT.r, 0.85));
+  }
+  let taaN = null, san = null;
+  if (useTAA) {   // the history must never take in a NaN or Inf pixel (it would stay forever), nor a sun-hot glint
+    const lit = col;   // (the Fn runs at build time, when col is already the TAA output: take it now)
+    san = convertToTexture(Fn(() => {
+      const c = lit.toVar(), ok = c.r.greaterThanEqual(0).and(c.r.lessThan(6e4)).and(c.g.greaterThanEqual(0)).and(c.g.lessThan(6e4)).and(c.b.greaterThanEqual(0)).and(c.b.lessThan(6e4));
+      const v = select(ok, c, vec3(0)), m = max(max(v.r, v.g), v.b);
+      return vec4(v.mul(min(float(1), float(24).div(max(m, 1e-4)))), 1);
+    })());
+    san.name = 'taaInput';
+    taaN = traa(san, world.getTextureNode('depth'), world.getTextureNode('velocity'), camera);
+    taaN.reactiveNode = world.getTextureNode('reactive');
+    col = taaN.getTextureNode().rgb;
   }
   const vm = vmP.getTextureNode('output');
   col = mix(col, vm.rgb, clampT(vm.a, 0, 1));
@@ -1468,7 +1516,7 @@ function buildPostGPU(q) {
   });
   const pipe = new THREE.RenderPipeline(renderer, grade());
   pipe.outputColorTransform = false;   // the grade does its own tone curve + gamma
-  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q });
+  Object.assign(GPOST, { pipe, world, vm: vmP, bloom: bl, ao: aoN, pre, comb, streak: [st1, st2, st3], key: q, taa: taaN, san });
 }
 
 /* ---------------- GPU timing per pass (?prof=1): WebGPU timestamp queries, one per render call ----------------

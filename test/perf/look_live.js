@@ -16,7 +16,7 @@ const L = window.__L = {
     const cv = document.createElement('canvas'); cv.width = W * Math.min(2, spots.length); cv.height = H * Math.ceil(spots.length / 2); const cx = cv.getContext('2d');
     for (let i = 0; i < spots.length; i++) {
       const [x, z, yaw, pitch] = spots[i]; N.clear(); const P = { x, z, y: 0, yaw, pitch, roll: 0 };
-      for (let k = 0; k < 10; k++) { N.pose(P); N.step(1 / 60); } N.pose(P); N.renderOnce(); N.renderOnce();
+      for (let k = 0; k < 16; k++) { N.pose(P); N.step(1 / 60); N.renderOnce(); }   // rendered each step: TAA builds its history
       cx.drawImage(gl, (i % 2) * W, Math.floor(i / 2) * H, W, H);
     }
     const r = await fetch(L.sink + name + '.jpg', { method: 'POST', body: cv.toDataURL('image/jpeg', 0.9) });
@@ -24,7 +24,7 @@ const L = window.__L = {
   },
   async crop(name, spot, x0, y0, w, h) {   // one spot, a full-resolution window of it
     const N = NQ, gl = document.getElementById('gl'), [x, z, yaw, pitch] = spot, P = { x, z, y: 0, yaw, pitch, roll: 0 };
-    for (let k = 0; k < 10; k++) { N.pose(P); N.step(1 / 60); } N.pose(P); N.renderOnce(); N.renderOnce();
+    for (let k = 0; k < 16; k++) { N.pose(P); N.step(1 / 60); N.renderOnce(); }
     const cv = document.createElement('canvas'); cv.width = w; cv.height = h; cv.getContext('2d').drawImage(gl, x0, y0, w, h, 0, 0, w, h);
     return (await fetch(L.sink + name + '.jpg', { method: 'POST', body: cv.toDataURL('image/jpeg', 0.92) })).status;
   },

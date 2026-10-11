@@ -18,6 +18,7 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 '''
 RIG_VER = hashlib.sha1(open(os.path.join(root, 'models', 'zombie.glb'), 'rb').read()).hexdigest()[:10]
 TREE_VER = hashlib.sha1(open(os.path.join(root, 'models', 'tree.glb'), 'rb').read()).hexdigest()[:10] if os.path.exists(os.path.join(root, 'models', 'tree.glb')) else '0'
