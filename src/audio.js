@@ -194,14 +194,10 @@ const AUD = {
   },
   release(power, type) {
     if (!this.ctx) return; this.drawStop(); const t = this.now();
-    // a recorded longbow string and arrow leaving it; a harder draw is louder and a touch lower. The synth sine
-    // stays under it for weight, and the arrow types keep their neon layers.
-    if (!this.sample('bow', 0.68 + power * 0.43, this.sfx, 1.04 - power * 0.06)) {
-      this.tone('triangle', 180 + power * 60, 60, 0.22, 0.5 * (0.5 + power * 0.5));
-      this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
-      this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
-    }
+    this.tone('triangle', 180 + power * 60, 60, 0.22, 0.5 * (0.5 + power * 0.5));
     this.tone('sine', 90, 45, 0.18, 0.35);
+    this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
+    this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
     if (type === 2) this.tone('square', 900, 300, 0.25, 0.05);
     if (type === 3) { this.tone('sawtooth', 2400, 600, 0.2, 0.06); this.tone('sine', 1200, 3000, 0.15, 0.05); }
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
@@ -244,9 +240,8 @@ const AUD = {
     const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
     o.connect(f1); f1.connect(g); g.connect(this.out(pan)); o.start(t); lfo.start(t); o.stop(t + d + 0.05); lfo.stop(t + d + 0.05);
   },
-  // a struck zombie flinching, and one dying; both fall back to a short synth groan
+  // a struck zombie flinching; falls back to a short synth groan
   pain(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zpain', 0.35, this.out(pan), Math.pow(low, 0.45), this.now(), 3)) this.groan(pan, 0.08, low * 1.2); },
-  die(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zdie', 0.32, this.out(pan), Math.pow(low, 0.45), this.now(), 4)) this.groan(pan, 0.1, low * 0.8); },
   // the Warden: its roar and its ground slam come from where it stands and carry (falloff from 10 m)
   roar(pan) { if (!this.ctx) return; this.groan(pan, 0.5, 0.45); this.groan(pan, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4, this.out(pan, 10)); this.duck(5 * this.near(pan, 60), 1); },
   slam(pan) { if (!this.ctx) return; const o = this.out(pan, 10); this.tone('sine', 70, 25, 0.8, 1.0, o); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8, o); this.duck(6 * this.near(pan, 40), 0.7); },
@@ -434,7 +429,7 @@ const AUD = {
 };
 // Every play of these gets its own slight pitch and level, so repeated hits, steps and shots don't sound copy-pasted.
 // [name, pitch spread, volume spread]; all layers of one play shift together.
-for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['pain', 0.04, 0.15], ['die', 0.04, 0.1], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
+for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['pain', 0.04, 0.15], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
   ['explode', 0.06, 0.1], ['fireIgnite', 0.08, 0.15], ['hurt', 0.06, 0.12], ['slam', 0.05, 0.1], ['spit', 0.08, 0.15], ['pounce', 0.08, 0.15], ['zap', 0.06, 0.15],
   ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
   const f = AUD[k];

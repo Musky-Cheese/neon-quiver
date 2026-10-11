@@ -25,16 +25,12 @@ RATE = 44100
 #         average loudness rather than its loudest moment, at `kbps` (default 128)
 # Source files are named after their Freesound / OpenGameArt / Kenney originals: see sounds/CREDITS.md.
 RECIPE = {
-    # JoeDines' longbow was recorded from outside a shed: the quiet release first, the arrow striking the shed ~2 s later.
-    # The release of take 1 sits too near the noise floor, so only takes 2 and 3 give a bow sound; all three give a hit.
-    'bow':    [('longbow_release_*.ogg', {'maxlen': 0.8}), ('joedines_shoot_2.ogg', {'cuts': [(0.27, 0.95)]}), ('joedines_shoot_3.ogg', {'cuts': [(0.32, 1.0)]})],
     'thunk':  [('joedines_wood_impact_*.ogg', {'maxlen': 0.7}), ('joedines_target_impact_*.ogg', {'maxlen': 0.7}), ('twisted_arrow_impact.ogg', {'maxlen': 0.7}),
                ('joedines_shoot_1.ogg', {'cuts': [(1.8, 2.45)]}), ('joedines_shoot_2.ogg', {'cuts': [(2.5, 3.15)]}), ('joedines_shoot_3.ogg', {'cuts': [(2.75, 3.4)]})],
     'flesh':  [('flesh_1.ogg', {'maxlen': 0.6}), ('flesh_2.ogg', {'split': 0.4, 'maxlen': 0.5}), ('flesh_3.ogg', {'maxlen': 0.6})],
     'step':   [('kenney/Audio/footstep_concrete_*.ogg', {'maxlen': 0.4})],
     'zgroan': [('zombie_moans.ogg', {'split': 0.25, 'maxlen': 2.4}), ('tonsil5_growl_*.ogg', {'maxlen': 2.4})],
     'zpain':  [('tonsil5_pain_*.ogg', {'maxlen': 1.0})],
-    'zdie':   [('tonsil5_death_*.ogg', {'maxlen': 1.8})],
     # the crowd bed under a horde (AUD.horde): GaryQ's ten zombies, steady for the whole two minutes
     'horde':  [('garyq_zombie_group.ogg', {'loop': (40, 30, 1.5), 'kbps': 80})],
 }
