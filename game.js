@@ -1225,7 +1225,7 @@ function particlesGPU(data) {
 }
 // rain: the drop buffer wrapped round the camera, falling, slanted by the wind, dry under ceilings (r3.js rainGeo)
 const RAIN_U = { uAlpha: uniform(0.5), uRainCol: uniform(new THREE.Color()), uDens: uniform(0.7), uWind: uniform(0.4) };
-const SNOW_U = { uAlpha: uniform(0.9), uCol: uniform(new THREE.Color()), uDens: uniform(0), uWind: uniform(0.3), uPx: uniform(1) };
+const SNOW_U = { uAlpha: uniform(0.9), uCol: uniform(new THREE.Color()), uDens: uniform(0), uDrift: uniform(0), uPx: uniform(1) };
 const indoorAt = (x, z, y) => NQN.uOccB.z.greaterThan(0).select(stepT(0.5, TEXN.indoor.sample(vec2(x, z).sub(NQN.uOccB.xy).mul(NQN.uOccB.zw)).level(0).r).mul(stepT(y, 4.6)), float(0));
 function rainGPU(geo) {
   const U = RAIN_U, m = new THREE.LineBasicNodeMaterial({ transparent: true, depthWrite: false, ...ADD }); m.fog = false;
@@ -1241,6 +1241,7 @@ function rainGPU(geo) {
   m.uniforms = U; return m;
 }
 // snow: one soft flake per drop that swirls and rides the wind (instanced quads over the drops' first vertices)
+// (uDrift is the wind added up frame by frame in r3.js: wind*time would sweep the whole field back and forth whenever a gust changed the wind)
 function snowGPU(rainGeo, n) {
   const g = new THREE.InstancedBufferGeometry(); g.index = SPRITE_QUAD.index; g.setAttribute('position', SPRITE_QUAD.attributes.position);
   const src = rainGeo.attributes.position.array, a2 = rainGeo.attributes.aP2.array, p = new Float32Array(n * 3), s = new Float32Array(n);
@@ -1251,7 +1252,7 @@ function snowGPU(rainGeo, n) {
   const P = attribute('dpos', 'vec3'), sd = attribute('dseed', 'float'), T = NQN.uTime, cp = cameraPosition, S = 24;
   const rnd = fract(sd.mul(7.31).add(P.x.mul(0.137)).add(P.y.mul(0.071)));
   const sw = sin(T.mul(rnd.add(0.7)).add(P.x.mul(3.1))).mul(0.7), sw2 = cos(T.mul(rnd.mul(0.8).add(0.5)).add(P.y.mul(2.3))).mul(0.5);
-  const x = gmod(P.x.mul(0.48).add(U.uWind.mul(T).mul(3)).add(sw).sub(cp.x), float(S)).sub(S * 0.5).add(cp.x);
+  const x = gmod(P.x.mul(0.48).add(U.uDrift).add(sw).sub(cp.x), float(S)).sub(S * 0.5).add(cp.x);
   const z = gmod(P.y.mul(0.48).add(sw2).sub(cp.z), float(S)).sub(S * 0.5).add(cp.z);
   const y = gmod(P.z.mul(0.55).sub(T.mul(rnd.mul(1.1).add(1.3))), float(20)).sub(4).add(cp.y);
   const K = stepT(rnd, U.uDens).mul(fract(rnd.mul(13.7)).mul(0.5).add(0.5)).mul(indoorAt(x, z, y).oneMinus());
@@ -7311,6 +7312,7 @@ const rainMat = rainGPU(rainGeo);
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; rainLines.matrixAutoUpdate = false; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
 const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
+let snowDriftT = 0;   // last frame time, for adding up the snow's wind drift
 snowPts.frustumCulled = false; snowPts.renderOrder = 11; snowPts.matrixAutoUpdate = false; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
@@ -8237,7 +8239,7 @@ function render3(time, W, H, fov, cam) {
   // weather (weather.js) on top of the Look: how much falls, rain or snow, wind, how wet or white the streets are, lightning
   const rk = wxRainK(), sk = wxSnowK(), wetK = T.rain > 0.2 ? 1 : 0.5;
   rainMat.uniforms.uAlpha.value = Math.max(0.35, T.rain) * (0.75 + 0.45 * rk); rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol); rainMat.uniforms.uDens.value = rk * wetK; rainMat.uniforms.uWind.value = WX.wind + WX.gust;
-  snowMat.uniforms.uDens.value = sk; snowMat.uniforms.uWind.value = WX.wind + WX.gust * 0.6; snowMat.uniforms.uPx.value = H / 1000;
+  snowMat.uniforms.uDens.value = sk; { const dt = Math.min(Math.max(time - snowDriftT, 0), 0.1), U = snowMat.uniforms; snowDriftT = time; U.uDrift.value = (U.uDrift.value + (WX.wind + WX.gust * 0.6) * 3 * dt) % 24; } snowMat.uniforms.uPx.value = H / 1000;
   snowMat.uniforms.uCol.value.setRGB(T.rainCol[0] * 0.8 + 0.25, T.rainCol[1] * 0.8 + 0.25, T.rainCol[2] * 0.8 + 0.27);
   NQU.uWet.value = T.wet * WX.wet * (1 - WX.cover * 0.85); NQU.uSnowCov.value = WX.cover;
   NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain * rk * 1.4;
