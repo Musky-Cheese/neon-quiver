@@ -26,8 +26,15 @@ MZ_FILES = sorted(f for f in os.listdir(os.path.join(root, 'models')) if f.start
 # one content hash per car, prop and zombie model: changing one model only busts the browser cache for that file
 MODEL_VER = {f[:-4]: hashlib.sha1(open(os.path.join(root, 'models', f), 'rb').read()).hexdigest()[:10] for f in ['car_sedan.glb', 'car_van.glb'] + PROP_FILES + MZ_FILES}
 TEX_VER = hashlib.sha1(b''.join(open(os.path.join(root, 'textures', f), 'rb').read() for f in ('albedo.jpg', 'normal.jpg', 'orm.jpg'))).hexdigest()[:10]
+# recorded sound sets: sounds/<set>_<n>.ogg (+ an .mp3 twin for browsers without Vorbis), written by tools/make_sounds.py
+SND_DIR = os.path.join(root, 'sounds')
+SND_FILES = sorted(f for f in os.listdir(SND_DIR) if f.endswith('.ogg')) if os.path.isdir(SND_DIR) else []
+SND_SETS = {}
+for f in SND_FILES: k = f[:-4].rsplit('_', 1)[0]; SND_SETS[k] = SND_SETS.get(k, 0) + 1
+SND_VER = hashlib.sha1(b''.join(open(os.path.join(SND_DIR, f), 'rb').read() for f in SND_FILES)).hexdigest()[:10]
 SRC = ['models.js', 'engine.js', 'gpu.js', 'props.js', 'architecture.js', 'interiors.js', 'theme.js', 'seg.js', 'audio.js', 'weather.js', 'fx.js', 'city.js', 'districts.js', 'world.js', 'bow.js', 'hook.js', 'zombies.js', 'objectives.js', 'hazards.js', 'rig.js', 'r3.js', 'armory.js', 'ads.js', 'game.js']
 CONSTS = 'const RIG_VER = "%s";   // content hash: a new model always busts the browser cache\n' % RIG_VER + 'const TREE_VER = "%s";   // Meshy tree model cache key\n' % TREE_VER + 'const MODEL_VER = %s;   // Meshy cars, props and zombies: cache key per file\n' % json.dumps(MODEL_VER) + 'const PROP_MODELS = %s;\n' % json.dumps([f[5:-4] for f in PROP_FILES]) + 'const MZ_TYPES = %s;\n' % json.dumps([f[3:-4] for f in MZ_FILES]) + 'const TEX_VER = "%s";   // same for the Ultra texture strips\n' % TEX_VER
+CONSTS += 'const SND_SETS = %s;   // takes per recorded sound set\nconst SND_VER = "%s";\n' % (json.dumps(SND_SETS), SND_VER)
 js = IMPORTS + CONSTS + '\n'.join(S(f) for f in SRC)
 open(os.path.join(root, 'game.js'), 'w', encoding='utf-8', newline='\n').write(js)   # LF + UTF-8 on every OS, so a Windows build and a cloud build are byte-identical
 boot = S('boot.js').replace('/*__GAME__*/""', json.dumps('game.js?v=' + hashlib.sha1(js.encode()).hexdigest()[:10]))

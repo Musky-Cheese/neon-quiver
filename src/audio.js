@@ -46,7 +46,7 @@ const AUD = {
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     this.noise = buf;
     const pb = c.createBuffer(1, len, c.sampleRate); fillPink(pb.getChannelData(0)); this.pink = pb;
-    this.startAmbient(); this.startMusic();
+    this.startAmbient(); this.startMusic(); this.loadSamples();
   },
   now() { return this.ctx ? this.ctx.currentTime : 0; },
   noiseSrc(pink) { const s = this.ctx.createBufferSource(); s.buffer = pink ? this.pink : this.noise; s.loop = true; s.loopStart = Math.random(); return s; },
@@ -106,6 +106,31 @@ const AUD = {
     f.frequency.setValueAtTime(f0, t); if (f1 !== f0) f.frequency.exponentialRampToValueAtTime(Math.max(f1, 20), t + dur);
     const g = c.createGain(); this.env(g, t, a, vol, dur); s.connect(f); f.connect(g); g.connect(dest || this.sfx); s.start(t, Math.random()); s.stop(t + a + dur + 0.05);
   },
+  // ---------------- recorded samples ----------------
+  // sounds/<set>_<n>.ogg|.mp3, all CC0 (sources in sounds/CREDITS.md), already trimmed and level-matched by
+  // tools/make_sounds.py. Each set decodes in the background after the first click; until its takes are in (or if a
+  // file is missing or won't decode) the sound plays its synth version, so the game never goes quiet.
+  smp: {},     // set -> { b: [AudioBuffer], last: index of the last take played, live: voices still sounding }
+  loadSamples() {
+    const ext = new Audio().canPlayType('audio/ogg; codecs="vorbis"') ? 'ogg' : 'mp3';
+    for (const k in SND_SETS) {
+      const S = this.smp[k] = { b: [], last: -1, live: 0 };
+      for (let i = 1; i <= SND_SETS[k]; i++)
+        fetch(`sounds/${k}_${i}.${ext}?v=${SND_VER}`).then(r => r.ok ? r.arrayBuffer() : Promise.reject(r.status))
+          .then(a => this.ctx.decodeAudioData(a)).then(b => { S.b.push(b); }).catch(() => {});
+    }
+  },
+  // one take from a set: never the same take twice running, pitch and level varied like the synth sounds (the
+  // wrapper's _pv / _vv). Returns false when the set isn't loaded so the caller falls back to synth. Past `max`
+  // voices of one set the new one is dropped but still reported as played, so a crowd doesn't turn into a buzz.
+  sample(k, vol, dest, rate = 1, t = this.now(), max = 6) {
+    const S = this.smp[k]; if (!S || !S.b.length) return false; if (S.live >= max) return true;
+    let i = Math.floor(Math.random() * S.b.length); if (S.b.length > 1 && i === S.last) i = (i + 1) % S.b.length; S.last = i;
+    const c = this.ctx, s = c.createBufferSource(), g = c.createGain();
+    s.buffer = S.b[i]; s.playbackRate.value = rate * this._pv; g.gain.value = vol * this._vv;
+    s.connect(g); g.connect(dest || this.sfx); S.live++; s.onended = () => { S.live--; g.disconnect(); };
+    s.start(t); return true;
+  },
   // ---------------- SFX ----------------
   drawStart(time) {
     if (!this.ctx) return; this.drawStop();
@@ -126,10 +151,14 @@ const AUD = {
   },
   release(power, type) {
     if (!this.ctx) return; this.drawStop(); const t = this.now();
-    this.tone('triangle', 180 + power * 60, 60, 0.22, 0.5 * (0.5 + power * 0.5));
+    // a recorded longbow string and arrow leaving it; a harder draw is louder and a touch lower. The synth sine
+    // stays under it for weight, and the arrow types keep their neon layers.
+    if (!this.sample('bow', 0.55 + power * 0.35, this.sfx, 1.04 - power * 0.06)) {
+      this.tone('triangle', 180 + power * 60, 60, 0.22, 0.5 * (0.5 + power * 0.5));
+      this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
+      this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
+    }
     this.tone('sine', 90, 45, 0.18, 0.35);
-    this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
-    this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
     if (type === 2) this.tone('square', 900, 300, 0.25, 0.05);
     if (type === 3) { this.tone('sawtooth', 2400, 600, 0.2, 0.06); this.tone('sine', 1200, 3000, 0.15, 0.05); }
     if (type === 4) { this.burst('highpass', 6000, 3000, 2, 0.35, 0.1); this.tone('sine', 1900, 2400, 0.25, 0.05); }
@@ -139,10 +168,14 @@ const AUD = {
   },
   nock() { if (!this.ctx) return; const t = this.now(); this.burst('bandpass', 2500, 2500, 6, 0.05, 0.12); this.tone('square', 1800, 1700, 0.03, 0.03, this.sfx, t + 0.02); },
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
-  hit(head, pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o); this.tone('sine', 120, 50, 0.12, 0.35, o); if (head) { this.tone('sine', 1650, 1600, 0.25, 0.14, o); this.tone('sine', 2475, 2450, 0.18, 0.06, o); } },
-  thunk() { if (!this.ctx) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2); this.tone('triangle', 300, 120, 0.06, 0.1); },
-  step(k = 1) { if (!this.ctx) return; this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
-  land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
+  hit(head, pan) {
+    if (!this.ctx) return; const o = this.out(pan);
+    if (!this.sample('flesh', head ? 0.9 : 0.75, o, head ? 0.92 : 1)) this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o);
+    this.tone('sine', 120, 50, 0.12, 0.35, o);
+    if (head) { this.tone('sine', 1650, 1600, 0.25, 0.14, o); this.tone('sine', 2475, 2450, 0.18, 0.06, o); } },
+  thunk(pan) { if (!this.ctx) return; const o = this.out(pan); if (this.sample('thunk', 0.7, o)) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2, o); this.tone('triangle', 300, 120, 0.06, 0.1, o); },
+  step(k = 1) { if (!this.ctx) return; if (!this.sample('step', 0.16 * k, this.sfx, 1, this.now(), 3)) this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
+  land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); if (!this.sample('step', 0.3 * k, this.sfx, 0.85)) this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
   kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04, this.ui); this.tone('square', 990, 990, 0.08, 0.04, this.ui, this.now() + 0.05); },
   explode(dist) {
     if (!this.ctx) return; const v = clamp(1.4 - dist / 40, 0.2, 1.2);
@@ -151,14 +184,21 @@ const AUD = {
   // a Volatile body bursting: a wet crack and a low thump
   pop(pan) { if (!this.ctx) return; const o = this.out(pan); this.burst('bandpass', 1400, 300, 1.2, 0.25, 0.35, o); this.tone('sine', 140, 45, 0.22, 0.4, o); this.burst('lowpass', 700, 120, 0.8, 0.4, 0.25, o); },
   fireIgnite() { if (!this.ctx) return; this.burst('bandpass', 600, 2400, 0.7, 0.4, 0.25); },
+  // a zombie's voice. low < 1 is a bigger throat (brutes, the boss), > 1 a thinner one (runners); a recording is only
+  // pitched part of the way so it stays a voice rather than a chipmunk or a slowed tape
   groan(pan, vol = 0.12, low = 1) {
-    if (!this.ctx) return; const c = this.ctx, t = this.now(), d = rand(0.6, 1.3);
+    if (!this.ctx) return;
+    if (this.sample('zgroan', vol * 3.2, this.out(pan), Math.pow(low, 0.45) * rand(0.94, 1.06), this.now(), 5)) return;
+    const c = this.ctx, t = this.now(), d = rand(0.6, 1.3);
     const o = c.createOscillator(); o.type = 'sawtooth'; const f0 = rand(70, 120) * low; o.frequency.setValueAtTime(f0, t); o.frequency.linearRampToValueAtTime(f0 * rand(0.7, 1.2), t + d);
     const lfo = c.createOscillator(); lfo.frequency.value = rand(5, 9); const lg = c.createGain(); lg.gain.value = f0 * 0.06; lfo.connect(lg); lg.connect(o.frequency);
     const f1 = c.createBiquadFilter(); f1.type = 'bandpass'; f1.Q.value = 6; f1.frequency.setValueAtTime(rand(450, 750), t); f1.frequency.linearRampToValueAtTime(rand(300, 900), t + d);
     const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
     o.connect(f1); f1.connect(g); g.connect(this.out(pan)); o.start(t); lfo.start(t); o.stop(t + d + 0.05); lfo.stop(t + d + 0.05);
   },
+  // a struck zombie flinching, and one dying; both fall back to a short synth groan
+  pain(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zpain', 0.5, this.out(pan), Math.pow(low, 0.45), this.now(), 3)) this.groan(pan, 0.08, low * 1.2); },
+  die(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zdie', 0.6, this.out(pan), Math.pow(low, 0.45), this.now(), 4)) this.groan(pan, 0.1, low * 0.8); },
   roar() { if (!this.ctx) return; this.groan(0, 0.5, 0.45); this.groan(0, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4); },
   slam() { if (!this.ctx) return; this.tone('sine', 70, 25, 0.8, 1.0); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8); },
   hurt() { if (!this.ctx) return; this.tone('square', 160, 90, 0.12, 0.1); this.burst('lowpass', 600, 200, 1, 0.15, 0.3); this.tone('sine', 55, 40, 0.3, 0.4); },
@@ -345,7 +385,7 @@ const AUD = {
 };
 // Every play of these gets its own slight pitch and level, so repeated hits, steps and shots don't sound copy-pasted.
 // [name, pitch spread, volume spread]; all layers of one play shift together.
-for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
+for (const [k, p, v] of [['release', 0.04, 0.1], ['nock', 0.06, 0.15], ['quiver', 0.08, 0.2], ['hit', 0.07, 0.15], ['thunk', 0.08, 0.2], ['pain', 0.04, 0.15], ['die', 0.04, 0.1], ['step', 0.1, 0.3], ['land', 0.08, 0.2],
   ['explode', 0.06, 0.1], ['fireIgnite', 0.08, 0.15], ['hurt', 0.06, 0.12], ['slam', 0.05, 0.1], ['spit', 0.08, 0.15], ['pounce', 0.08, 0.15], ['zap', 0.06, 0.15],
   ['tag', 0.03, 0.1], ['frost', 0.05, 0.1], ['scream', 0.06, 0.1], ['hookFire', 0.06, 0.12], ['hookAttach', 0.07, 0.15], ['hookRelease', 0.06, 0.12], ['hookReel', 0.1, 0.25], ['swap', 0.05, 0.1]]) {
   const f = AUD[k];

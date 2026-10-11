@@ -12,6 +12,9 @@ const ZTYPES = {
   screamer: { hp: 48, hpW: 6, speed: [1.7, 2.1], dmg: 6, scale: 1, score: 200, scrap: 11, eyes: [0.85, 0.25, 1], reach: 1.3, atk: 0.85 },
   climber: { hp: 38, hpW: 5, speed: [3.4, 4.2], dmg: 16, scale: 0.92, score: 220, scrap: 11, eyes: [0.6, 1, 0.15], reach: 1.4, atk: 0.6 },
 };
+// the pitch of a zombie's voice: big throats lower, the lean fast ones higher (see AUD.groan)
+const ZVOICE = { runner: 1.3, climber: 1.2, brute: 0.7, boss: 0.5 };
+function zVoice(z) { return ZVOICE[z.type] || 1; }
 // how long a corpse holds before it starts sinking, and before it's finally removed (blood pools use DECAL_LIFE/DECAL_CAP in fx.js)
 const CORPSE_SETTLE = 14, CORPSE_LIFE = 24, CORPSE_CAP = 26;
 // dead skin across every complexion: pallid, ashen, olive, brown, deep brown, sallow, livid, jaundiced
@@ -310,7 +313,7 @@ function updateZombies(dt, time) {
       }
     }
     z.groan -= dt;
-    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), z.type === 'brute' ? 0.7 : z.type === 'runner' ? 1.3 : 1); z.jaw = 1; }
+    if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), zVoice(z)); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
     z.atkCd -= dt;
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }

@@ -4,3 +4,4 @@ __pycache__/
 textures_src/
 models/zombie_raw.glb
 test/out/
+sounds_src/
