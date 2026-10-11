@@ -170,6 +170,7 @@ const rainMat = rainGPU(rainGeo);
 const rainLines = new THREE.LineSegments(rainGeo, rainMat); rainLines.frustumCulled = false; rainLines.renderOrder = 11; rainLines.matrixAutoUpdate = false; scene.add(rainLines);
 // snow: soft flakes that drift, swirl and ride the wind (same drop buffer, one point per drop)
 const snowPts = snowGPU(rainGeo, RAIN_N), snowMat = snowPts.material;
+let snowDriftT = 0;   // last frame time, for adding up the snow's wind drift
 snowPts.frustumCulled = false; snowPts.renderOrder = 11; snowPts.matrixAutoUpdate = false; scene.add(snowPts);
 
 /* ---------------- lights ---------------- */
@@ -1096,7 +1097,7 @@ function render3(time, W, H, fov, cam) {
   // weather (weather.js) on top of the Look: how much falls, rain or snow, wind, how wet or white the streets are, lightning
   const rk = wxRainK(), sk = wxSnowK(), wetK = T.rain > 0.2 ? 1 : 0.5;
   rainMat.uniforms.uAlpha.value = Math.max(0.35, T.rain) * (0.75 + 0.45 * rk); rainMat.uniforms.uRainCol.value.setRGB(...T.rainCol); rainMat.uniforms.uDens.value = rk * wetK; rainMat.uniforms.uWind.value = WX.wind + WX.gust;
-  snowMat.uniforms.uDens.value = sk; snowMat.uniforms.uWind.value = WX.wind + WX.gust * 0.6; snowMat.uniforms.uPx.value = H / 1000;
+  snowMat.uniforms.uDens.value = sk; { const dt = Math.min(Math.max(time - snowDriftT, 0), 0.1), U = snowMat.uniforms; snowDriftT = time; U.uDrift.value = (U.uDrift.value + (WX.wind + WX.gust * 0.6) * 3 * dt) % 24; } snowMat.uniforms.uPx.value = H / 1000;
   snowMat.uniforms.uCol.value.setRGB(T.rainCol[0] * 0.8 + 0.25, T.rainCol[1] * 0.8 + 0.25, T.rainCol[2] * 0.8 + 0.27);
   NQU.uWet.value = T.wet * WX.wet * (1 - WX.cover * 0.85); NQU.uSnowCov.value = WX.cover;
   NQU.uEnvK.value = T.envK !== undefined ? T.envK : 0.5; NQU.uRain.value = T.rain * rk * 1.4;
