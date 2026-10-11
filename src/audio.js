@@ -120,6 +120,9 @@ const AUD = {
           .then(a => this.ctx.decodeAudioData(a)).then(b => { S.b.push(b); }).catch(() => {});
     }
   },
+  // Sample gains in the sounds below were set by rendering each one offline against its synth version (loudest 50 ms,
+  // pre-master): the bow and flesh hits sit where the synth did, while the wall thunk, footsteps and zombie voices,
+  // which the synth left barely audible (-35 to -45 dB), now land around -26 to -38 dB.
   // one take from a set: never the same take twice running, pitch and level varied like the synth sounds (the
   // wrapper's _pv / _vv). Returns false when the set isn't loaded so the caller falls back to synth. Past `max`
   // voices of one set the new one is dropped but still reported as played, so a crowd doesn't turn into a buzz.
@@ -153,7 +156,7 @@ const AUD = {
     if (!this.ctx) return; this.drawStop(); const t = this.now();
     // a recorded longbow string and arrow leaving it; a harder draw is louder and a touch lower. The synth sine
     // stays under it for weight, and the arrow types keep their neon layers.
-    if (!this.sample('bow', 0.55 + power * 0.35, this.sfx, 1.04 - power * 0.06)) {
+    if (!this.sample('bow', 0.68 + power * 0.43, this.sfx, 1.04 - power * 0.06)) {
       this.tone('triangle', 180 + power * 60, 60, 0.22, 0.5 * (0.5 + power * 0.5));
       this.burst('highpass', 3000, 1200, 0.7, 0.25, 0.18 + power * 0.2);
       this.burst('bandpass', 900, 3000, 1.5, 0.3, 0.12);
@@ -170,11 +173,11 @@ const AUD = {
   quiver() { if (!this.ctx) return; this.burst('bandpass', 1800, 900, 2, 0.18, 0.08); },
   hit(head, pan) {
     if (!this.ctx) return; const o = this.out(pan);
-    if (!this.sample('flesh', head ? 0.9 : 0.75, o, head ? 0.92 : 1)) this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o);
+    if (!this.sample('flesh', head ? 0.57 : 0.47, o, head ? 0.92 : 1)) this.burst('lowpass', 900, 200, 1, 0.14, 0.45, o);
     this.tone('sine', 120, 50, 0.12, 0.35, o);
     if (head) { this.tone('sine', 1650, 1600, 0.25, 0.14, o); this.tone('sine', 2475, 2450, 0.18, 0.06, o); } },
-  thunk(pan) { if (!this.ctx) return; const o = this.out(pan); if (this.sample('thunk', 0.7, o)) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2, o); this.tone('triangle', 300, 120, 0.06, 0.1, o); },
-  step(k = 1) { if (!this.ctx) return; if (!this.sample('step', 0.16 * k, this.sfx, 1, this.now(), 3)) this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
+  thunk(pan) { if (!this.ctx) return; const o = this.out(pan); if (this.sample('thunk', 0.29, o)) return; this.burst('bandpass', 1200, 500, 3, 0.08, 0.2, o); this.tone('triangle', 300, 120, 0.06, 0.1, o); },
+  step(k = 1) { if (!this.ctx) return; if (!this.sample('step', 0.1 * k, this.sfx, 1, this.now(), 3)) this.burst('lowpass', 900, 260, 0.8, 0.05, 0.05 * k); this.tone('sine', 70, 50, 0.05, 0.03 * k); },
   land(k = 1) { if (!this.ctx) return; this.tone('sine', 95, 42, 0.13, 0.12 * k); if (!this.sample('step', 0.3 * k, this.sfx, 0.85)) this.burst('lowpass', 500, 180, 0.7, 0.07, 0.07 * k); },
   kill() { if (!this.ctx) return; this.tone('square', 660, 660, 0.05, 0.04, this.ui); this.tone('square', 990, 990, 0.08, 0.04, this.ui, this.now() + 0.05); },
   explode(dist) {
@@ -188,7 +191,7 @@ const AUD = {
   // pitched part of the way so it stays a voice rather than a chipmunk or a slowed tape
   groan(pan, vol = 0.12, low = 1) {
     if (!this.ctx) return;
-    if (this.sample('zgroan', vol * 3.2, this.out(pan), Math.pow(low, 0.45) * rand(0.94, 1.06), this.now(), 5)) return;
+    if (this.sample('zgroan', vol * 1.2, this.out(pan), Math.pow(low, 0.45) * rand(0.94, 1.06), this.now(), 5)) return;
     const c = this.ctx, t = this.now(), d = rand(0.6, 1.3);
     const o = c.createOscillator(); o.type = 'sawtooth'; const f0 = rand(70, 120) * low; o.frequency.setValueAtTime(f0, t); o.frequency.linearRampToValueAtTime(f0 * rand(0.7, 1.2), t + d);
     const lfo = c.createOscillator(); lfo.frequency.value = rand(5, 9); const lg = c.createGain(); lg.gain.value = f0 * 0.06; lfo.connect(lg); lg.connect(o.frequency);
@@ -197,8 +200,8 @@ const AUD = {
     o.connect(f1); f1.connect(g); g.connect(this.out(pan)); o.start(t); lfo.start(t); o.stop(t + d + 0.05); lfo.stop(t + d + 0.05);
   },
   // a struck zombie flinching, and one dying; both fall back to a short synth groan
-  pain(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zpain', 0.5, this.out(pan), Math.pow(low, 0.45), this.now(), 3)) this.groan(pan, 0.08, low * 1.2); },
-  die(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zdie', 0.6, this.out(pan), Math.pow(low, 0.45), this.now(), 4)) this.groan(pan, 0.1, low * 0.8); },
+  pain(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zpain', 0.35, this.out(pan), Math.pow(low, 0.45), this.now(), 3)) this.groan(pan, 0.08, low * 1.2); },
+  die(pan, low = 1) { if (!this.ctx) return; if (!this.sample('zdie', 0.32, this.out(pan), Math.pow(low, 0.45), this.now(), 4)) this.groan(pan, 0.1, low * 0.8); },
   roar() { if (!this.ctx) return; this.groan(0, 0.5, 0.45); this.groan(0, 0.35, 0.6); this.burst('lowpass', 500, 120, 1, 1.3, 0.4); },
   slam() { if (!this.ctx) return; this.tone('sine', 70, 25, 0.8, 1.0); this.burst('lowpass', 900, 60, 0.7, 0.9, 0.8); },
   hurt() { if (!this.ctx) return; this.tone('square', 160, 90, 0.12, 0.1); this.burst('lowpass', 600, 200, 1, 0.15, 0.3); this.tone('sine', 55, 40, 0.3, 0.4); },

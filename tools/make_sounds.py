@@ -19,16 +19,20 @@ RATE = 44100
 # set -> sources. A source is a file name in sounds_src/ (glob allowed), optionally with options:
 #   split: split the file into takes at silent gaps of at least this many seconds
 #   cuts: [(start, end), ...] seconds to keep as separate takes
-#   max: keep at most this many takes from this source (longest-gap split order)
+#   max: keep at most this many takes from this source
 #   maxlen: cut each take to this many seconds (with a fade)
+# Source files are named after their Freesound / OpenGameArt / Kenney originals: see sounds/CREDITS.md.
 RECIPE = {
-    'bow':    [('joedines_shoot_*.wav', {'maxlen': 1.4}), ('longbow_release_*.wav', {'maxlen': 1.4})],
-    'thunk':  [('joedines_wood_impact_*.wav', {'maxlen': 0.7}), ('joedines_target_impact_*.wav', {'maxlen': 0.7})],
-    'flesh':  [('flesh_*.wav', {'maxlen': 0.6})],
-    'step':   [('footstep_concrete_*.ogg', {'maxlen': 0.4})],
-    'zgroan': [('zombie_moans.ogg', {'split': 0.25, 'maxlen': 2.2}), ('tonsil5_growl_*.wav', {'maxlen': 2.2})],
-    'zpain':  [('tonsil5_pain_*.wav', {'maxlen': 1.0})],
-    'zdie':   [('tonsil5_death_*.wav', {'maxlen': 1.8})],
+    # JoeDines' longbow was recorded from outside a shed: the quiet release first, the arrow striking the shed ~2 s later.
+    # The release of take 1 sits too near the noise floor, so only takes 2 and 3 give a bow sound; all three give a hit.
+    'bow':    [('longbow_release_*.ogg', {'maxlen': 0.8}), ('joedines_shoot_2.ogg', {'cuts': [(0.27, 0.95)]}), ('joedines_shoot_3.ogg', {'cuts': [(0.32, 1.0)]})],
+    'thunk':  [('joedines_wood_impact_*.ogg', {'maxlen': 0.7}), ('joedines_target_impact_*.ogg', {'maxlen': 0.7}), ('twisted_arrow_impact.ogg', {'maxlen': 0.7}),
+               ('joedines_shoot_1.ogg', {'cuts': [(1.8, 2.45)]}), ('joedines_shoot_2.ogg', {'cuts': [(2.5, 3.15)]}), ('joedines_shoot_3.ogg', {'cuts': [(2.75, 3.4)]})],
+    'flesh':  [('flesh_1.ogg', {'maxlen': 0.6}), ('flesh_2.ogg', {'split': 0.4, 'maxlen': 0.5}), ('flesh_3.ogg', {'maxlen': 0.6})],
+    'step':   [('kenney/Audio/footstep_concrete_*.ogg', {'maxlen': 0.4})],
+    'zgroan': [('zombie_moans.ogg', {'split': 0.25, 'maxlen': 2.4}), ('tonsil5_growl_*.ogg', {'maxlen': 2.4})],
+    'zpain':  [('tonsil5_pain_*.ogg', {'maxlen': 1.0})],
+    'zdie':   [('tonsil5_death_*.ogg', {'maxlen': 1.8})],
 }
 TARGET_DB, PEAK_DB, GATE_DB = -14.0, -1.0, -42.0
 
@@ -59,7 +63,7 @@ def split(d, gap):
             quiet += 1
             if quiet * win >= gap * RATE: takes.append((start * win, (i - quiet + 1) * win)); start = None
     if start is not None: takes.append((start * win, len(d)))
-    return [d[a:b + int(RATE * 0.15)] for a, b in takes if b - a > RATE * 0.12]
+    return [d[a:b + int(RATE * 0.15)] for a, b in takes if b - a > RATE * 0.03]
 
 
 def clean(d, maxlen=None):
@@ -68,8 +72,9 @@ def clean(d, maxlen=None):
     if not len(loud): return None
     a = max(0, loud[0] * win - int(RATE * 0.003)); b = min(len(d), (loud[-1] + 1) * win + int(RATE * 0.03))
     d = d[a:b].copy()
-    if maxlen and len(d) > maxlen * RATE: d = d[:int(maxlen * RATE)]
-    fi, fo = int(RATE * 0.002), min(int(RATE * 0.04), len(d) // 4)
+    cut = maxlen and len(d) > maxlen * RATE
+    if cut: d = d[:int(maxlen * RATE)]
+    fi, fo = int(RATE * 0.002), min(int(RATE * (0.2 if cut else 0.04)), len(d) // 4)   # a cut-short voice dies away, not clicks off
     d[:fi] *= np.linspace(0, 1, fi); d[-fo:] *= np.linspace(1, 0, fo)
     st = windows_db(d, int(RATE * 0.05)).max()
     d *= 10 ** ((TARGET_DB - st) / 20)
