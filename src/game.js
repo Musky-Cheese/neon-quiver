@@ -298,7 +298,7 @@ function updateProjectiles(dt) {
       burst(hx, hy, hz, hitPart === 'head' ? 10 : 5, [0.45, 1.3, 0.25], 3, 0.4, 0.05, 10, 1.2);
       burst(hx, hy, hz, 8, A.glow, 6, 0.25, 0.05, 0, 3);
       AUD.hit(hitPart !== 'body', PLAYER.at(hx, hz, hy));
-      if (killed) { GAME.hitMarker(true, true); }
+      if (killed) { GAME.hitMarker(true, true); } else if (wasAlive && !z.dead && Math.random() < 0.6) AUD.pain(PLAYER.at(z.x, z.z, (z.y || 0) + 1.6), zVoice(z));
       if (a.type === AT.FROST) { cryoAt(hx, hy, hz, z); PROJ.splice(i, 1); continue; }
       if (a.type === AT.SHOCK) { shockAt(hx, hy, hz, z, dmg); PROJ.splice(i, 1); continue; }
       if (a.type === AT.TRACER) { tracerAt(hx, hz, z); PROJ.splice(i, 1); continue; }
@@ -314,7 +314,7 @@ function updateProjectiles(dt) {
       if (a.type === AT.SHOCK) shockAt(hx, hy + 0.2, hz, null, arrowDamage(a, A));
       if (a.type === AT.TRACER) tracerAt(hx, hz, null);
       if (a.type === AT.SCATTER) { PROJ.splice(i, 1); continue; }   // shards shatter on walls
-      AUD.thunk();
+      AUD.thunk(PLAYER.at(hx, hz, hy));
       let nst = 0; for (const p of PROJ) if (p.stuck) nst++;
       if (nst > 60) { const k = PROJ.findIndex(p => p.stuck); if (k >= 0 && k !== i) PROJ.splice(k, 1); }
     }
@@ -529,7 +529,7 @@ const GAME = {
     const pts = Math.round(z.T.score * (z.elite ? 2 : 1) * (head ? 1.5 : 1) * mult);
     const scrap = z.T.scrap * (z.elite ? 2 : 1) + (head ? 2 : 0);   // scrap per kill: see ZTYPES in zombies.js
     this.score += pts; this.scrap += scrap; this.kills++; if (head) this.headshots++;
-    AUD.kill(); objOnKill(z); mutOnKill(z);
+    AUD.kill(); AUD.die(PLAYER.at(z.x, z.z, (z.y || 0) + 1.4), zVoice(z)); objOnKill(z); mutOnKill(z);
     floatText(z.x, (z.y + 2.1) * 1, z.z, `+${pts}`, head ? '#ffd23a' : '#29e7ff', head ? 1.2 : 1, 1.2);
     if (head) this.toast(`HEADSHOT  +${pts}`, '#ffd23a'); else if (z.elite) this.toast(`ELITE DOWN  +${pts}`, '#f4f0ff'); else if (z.type === 'brute') this.toast(`BRUTE DOWN  +${pts}`, '#ff2e88');
     // drops
