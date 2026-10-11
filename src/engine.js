@@ -141,7 +141,7 @@ const NQU = {
   uRimCol: { value: new THREE.Color() }, uEnvK: { value: 0.4 }, uAirK: { value: 0 },
   // release look pass: soft camera-side fill + two-tone neon rim on the infected, and wind for the foliage (weather.js)
   uZFill: { value: 0.1 }, uZRim: { value: 0.25 }, uWind: { value: 0.3 },
-  uReflOn: { value: 0 }, uRain: { value: 0.5 },
+  uReflOn: { value: 0 }, uRain: { value: 0.5 }, uUpCol: { value: new THREE.Color() },
   // baked sky-visibility map of the city (r3.js buildOcclusion): x0, z0, 1/width, 1/depth in metres
   uOcc: { value: null }, uOccB: { value: new THREE.Vector4(0, 0, 0, 0) }, uIndoor: { value: null }, uLitter: { value: null },
   // Ultra: CC0 Poly Haven texture arrays (textures/*.jpg, packed by tools/pack_textures.py), triplanar in world space

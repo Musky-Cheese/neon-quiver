@@ -132,7 +132,7 @@ function buildDistricts(C) {
   crates(14, -97); crates(-24, -110);
   bench(-6, -77, '+z'); bench(16, -77, '+z');
   // yard signage
-  addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), 0, 9, -74.3, Math.PI, 12, 3, [1.3, 1.3, 1.3], 0, true);
+  addSign(signTexture('RAIL YARD 7', '#ffb52e', 'seg'), 0, 9, -74.3, 0, 12, 3, [1.3, 1.3, 1.3], 0, true);   // on the wall's street face, read from the avenue
   WORLD.supplies.push({ kind: 'terminal', x: -22, z: -79, ry: 0.4, d: 'yard' }, { kind: 'cache', x: 25, z: -104, d: 'yard' }, { kind: 'cache', x: -12, z: -135, d: 'yard' });
 
   /* ---------------- NIGHT MARKET (east) ---------------- */

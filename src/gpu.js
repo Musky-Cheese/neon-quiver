@@ -14,7 +14,7 @@ const { Fn, If, Loop, Discard, float, int, vec2, vec3, vec4, uniform, uniformArr
 const NQN = {};
 for (const [k, t] of Object.entries({ uTime: 'float', uFogCol: 'color', uFogDen: 'float', uNeon: 'float', uWin: 'float', uWinWarm: 'float', uGrid: 'float', uDyn: 'float',
   uDynVM: 'float', uWet: 'float', uRimCol: 'color', uEnvK: 'float', uAirK: 'float', uZFill: 'float', uZRim: 'float', uWind: 'float', uReflOn: 'float', uRain: 'float',
-  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float' })) NQN[k] = uniform(NQU[k].value, t).setGroup(renderGroup).onRenderUpdate(() => NQU[k].value);
+  uOccB: 'vec4', uTexOn: 'float', uSnowCov: 'float', uUpCol: 'color' })) NQN[k] = uniform(NQU[k].value, t).setGroup(renderGroup).onRenderUpdate(() => NQU[k].value);
 // shared by every draw: uploaded once per render pass, not once per object (the per-object path cost ~25 uniforms x every draw)
 NQN.uTexM = uniformArray(NQU.uTexM.value, 'vec4').setGroup(renderGroup); NQN.uTexS = uniformArray(NQU.uTexS.value, 'vec2').setGroup(renderGroup);
 // textures: one node each, pointed at whatever NQU holds (gpuSyncTextures, every frame)
@@ -275,7 +275,12 @@ function nqSurface(material, builder) {
       const bseed = h21(floor(W.xz.div(37)).add(floor(N0.xz.mul(3.1).add(0.5)))).toVar();
       const seed = h21(id.mul(1.37).add(bseed.mul(91))).toVar();
       const floorLit = stepT(select(offc, float(0.94), float(0.968)), h21(vec2(id.y.mul(1.7).add(0.3), bseed.mul(53.1)))).mul(stepT(4.5, W.y)).toVar();   // an office floor someone left on
-      const lit = max(stepT(bseed.mul(-0.1).add(0.82), seed), floorLit).mul(stepT(1.2, W.y));   // dead city: most rooms still dark
+      // dead city: most rooms still dark, and they went dark in whole wings rather than one by one (a slow noise over the window
+      // grid switches blocks of a few bays by several floors off; the rest light up more often, so the facade's lit share, and
+      // its far average below, stay the same), with now and then a stairwell lit straight up the building
+      const wing = smoothstep(0.32, 0.5, vn(id.mul(vec2(0.22, 0.12)).add(bseed.mul(37))));
+      const stair = stepT(0.972, h21(vec2(id.x.mul(2.3).add(bseed.mul(17)), 4.1))).mul(stepT(0.3, h21(id.add(2.9)))).mul(stepT(4.5, W.y));
+      const lit = max(max(stepT(bseed.mul(-0.16).add(0.7), seed).mul(wing), floorLit), stair).mul(stepT(1.2, W.y));
       const wc = select(seed.greaterThan(0.93), vec3(1.0, 0.25, 0.6), select(seed.greaterThan(0.84), vec3(0.25, 0.85, 1.0), vec3(1.0, 0.68, 0.38))).toVar();
       wc.assign(mix(wc, vec3(1.0, 0.66, 0.36).mul(h21(id.add(3.7)).mul(0.6).add(0.7)), NQN.uWinWarm));
       const tv = stepT(0.78, h21(id.add(8.8))).mul(floorLit.oneMinus());   // a TV still playing to an empty room
@@ -349,6 +354,12 @@ function nqSurface(material, builder) {
       const sill = stepT(x0, wx).mul(stepT(wx, x1)).mul(stepT(f.y, y0)).mul(smoothstep(0, y0, f.y)).mul(vn(vec2(fc.x.mul(14), id.y.mul(3.1))).mul(0.7).add(0.3));
       const grime = smoothstep(4, 0, fc.y).mul(0.35).add(streak.mul(0.5)).add(sill.mul(0.55)).add(nqOcc.oneMinus().mul(0.45));
       wall.mulAssign(clampT(grime, 0, 1.4).mul(spd.mul(-0.5).add(1)).mul(-0.5).add(1));
+      // the faces of a block turned toward the moon's side of the sky (theme discDir) catch a little more of its light than the
+      // ones turned away, so two sides of a tower part at the corner instead of reading as one flat grey cut-out
+      wall.mulAssign(dot(N0.xz, vec2(-0.6, -0.8)).mul(0.24).add(1));
+      // the street's glow (neon and lamplight off the wet road) climbing the wall: it warms the lowest floors and dies away with
+      // height, so a tower stands in light at its foot and goes dark against the sky above, the way a tall building reads
+      emis.addAssign(wall.mul(NQN.uUpCol).mul(exp(W.y.mul(-0.05)).mul(nqOcc.mul(0.4).add(0.6))).mul(glass.oneMinus()).mul(2.2));
       // dark glass: every pane a slightly different tint and polish, so the reflections break up pane by pane, and behind some
       // of the dark ones a curtain is drawn; the frame round it is painted timber on the brick, dark metal elsewhere
       const gh = h21(id.add(6.6)).toVar(), cur = select(h21(id.add(7.7)).lessThan(0.3), drawn, float(0)).mul(lit.oneMinus()).mul(det);
@@ -596,7 +607,10 @@ function nqSurface(material, builder) {
   if (city) If(W.y.lessThan(0.4).and(M(17.5, 18.5).not()).and(M(22.5, 23.5).not()).and(M(4.5, 5.5).not()), () => { litter(select(M(16.5, 17.5), float(0.06), float(0))); });
   const texN = NQP.texN, texK = NQP.texK; texN.assign(N0); texK.assign(0);
   if (city) {
-    If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {   // High and Ultra: CC0 photo detail, triplanar
+    // High and Ultra: CC0 photo detail, triplanar. Never compiled into the textured Meshy models (trees, bushes, lanterns): none
+    // of their material ids picks a layer, and its three texture arrays took the batched trees to 17 samplers on Ultra, one past
+    // WebGPU's per-stage limit, so their pipeline failed and the trees went missing
+    if (!hasMap) If(NQN.uTexOn.greaterThan(0.5).and(nqTL.greaterThan(-0.5)).and(nqTS.greaterThan(0.01)), () => {
       const li = int(nqTL.add(0.5)), sc = NQN.uTexS.element(li), mean = NQN.uTexM.element(li);
       const tr = nqTri(li, W, N0, sc.x);
       const det = pow(tr.a, vec3(2.2)).div(max(mean.rgb, vec3(0.02)));          // photo detail relative to the layer's average colour
@@ -633,6 +647,8 @@ function nqFog(material, out) {
   const W = positionWorld, d = length(W.sub(cameraPosition)), c = out.rgb.toVar();
   const fog = exp(d.mul(NQN.uFogDen).negate()).oneMinus().mul(mix(1, 0.55, clampT(W.y.div(180), 0, 1)));
   c.assign(mix(c, NQN.uFogCol, clampT(fog, 0, 1)));
+  // the low cloud: the tallest towers climb into it and fade into its glow, which is what gives them their height
+  c.assign(mix(c, NQN.uFogCol.mul(1.3), smoothstep(120, 320, W.y).mul(0.6)));
   if (material.nqKind !== 'vm') If(NQN.uAirK.greaterThan(0.0001), () => {
     // light scattered by the rain haze between the eye and this surface, integrated along the view ray per point light
     const P = W.sub(cameraPosition), t = length(P), v = P.div(max(t, 1e-4)), air = vec3(0).toVar();

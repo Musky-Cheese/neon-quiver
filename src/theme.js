@@ -64,6 +64,7 @@ function setTheme(k) { const prev = THEME; THEME = THEMES[k] || THEMES.noir; if 
 function applyThemeUniforms() {
   const T = THEME;
   NQU.uFogCol.value.setRGB(T.fog[0], T.fog[1], T.fog[2]); NQU.uFogDen.value = T.fogDen;
+  NQU.uUpCol.value.setRGB(T.glow[0], T.glow[1], T.glow[2]);   // the street's glow on the lower floors of every tower (gpu.js facades)
   NQU.uNeon.value = T.neon; NQU.uWin.value = T.win; NQU.uWinWarm.value = T.winWarm; NQU.uGrid.value = T.grid; NQU.uWet.value = T.wet;
   NQU.uDyn.value = T.dyn; NQU.uDynVM.value = 0.5 + 0.5 * Math.max(T.neon, 0.2);
   NQU.uRimCol.value.setRGB(T.rim[0], T.rim[1], T.rim[2]);
