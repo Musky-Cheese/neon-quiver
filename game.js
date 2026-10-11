@@ -177,6 +177,7 @@ const TEX_LAYERS = ['asphalt', 'concrete', 'brick', 'rust', 'corrugated', 'paver
    Skinned zombies carry     color = (ao, cloth, blood, glow) and a per-vertex part id that indexes per-zombie uniform arrays. */
 const ZPARTS = 10;
 /* ---------------- Geometry builder ---------------- */
+let GEO_EMIT = null;   // while buildCity runs: every glowing box (world matrix, colour x emission), the neon that lights the street
 // vertex layout: pos3 nor3 col3 mat2 => 11 floats
 class Geo {
   constructor() { this.v = []; this.i = []; this.n = 0; }
@@ -199,6 +200,7 @@ class Geo {
   }
   // unit box centered at origin (size 1) transformed by m
   box(m, c, e = 0, mat = 0, skipBottom = false) {
+    if (GEO_EMIT && m && e >= 0.8) GEO_EMIT.push({ m: m.slice(), c: [c[0] * e, c[1] * e, c[2] * e], mat });   // glowing: r3.js buildNeonLights lights the street with it
     const h = 0.5;
     this.quad(m, [h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h], [1, 0, 0], c, e, mat);
     this.quad(m, [-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h], [-1, 0, 0], c, e, mat);
@@ -1495,6 +1497,161 @@ function gpuProfPoll() {
     GPU_PROF.ok = true;
   }).catch(() => { }).finally(() => { GPU_PROF.busy = false; });
 }
+
+/* ============================================================
+   Clustered lighting (WebGPU): every point light in reach, not just the nearest sixteen
+   Forward+ clustered shading after three r186's ClusteredLightsNode (examples/jsm/tsl/lighting), changed for this game:
+   - the cluster grid is a fixed 48 x 27 x 24 in screen fractions, not pixel tiles, so one grid serves every target the
+     scene draws into (the MSAA world pass, the bow, the puddle mirror, the 128 px env cube faces) and the material shaders
+     never change when the target size does (a pixel grid rebuilt its shader on every size change: a compile per pass);
+   - depth slices run from 0.3 m to 300 m (the camera's 0.03 m near plane wasted a third of them on the first metre);
+   - each cluster lists its nearest lights first, so a crowded far cluster drops distant lights, never close ones;
+   - a light with userData.src (the neon, r3.js buildNeonLights) is a small glowing body of that radius, lit with
+     1 / (d^2 + src^2): bright along the wall it hangs on, without the hot point a bare 1 / d^2 burns into the bricks.
+     Every other light keeps three's usual falloff, so the lamps, shops and flashes look exactly as they did.
+   Lights with intensity 0 are skipped, so a pool can be parked by zeroing it, without changing the scene's light list
+   (which would rebuild every material). Shadow-casting lights stay on three's own path.
+   ============================================================ */
+const CL = { NX: 48, NY: 27, NZ: 24, PER: 96, MAX: 1024, ZN: 0.3, ZF: 300 };
+CL.CHUNKS = CL.PER / 4;
+const _clV = new THREE.Vector3(), _clSize = new THREE.Vector2();
+class NQClusterNode extends THREE.LightsNode {
+  static get type() { return 'NQClusterNode'; }
+  constructor() {
+    super();
+    this.materialLights = []; this.clusteredLights = [];
+    const T = THREE.TSL;
+    const data = new Float32Array(CL.MAX * 4 * 2);
+    this._lightsTexture = new THREE.DataTexture(data, CL.MAX, 2, THREE.RGBAFormat, THREE.FloatType);
+    this._zData = new Float32Array(CL.NZ * 4);
+    this._zTexture = new THREE.DataTexture(this._zData, CL.NZ, 1, THREE.RGBAFormat, THREE.FloatType);
+    this._viewZ = new Float32Array(CL.MAX); this._order = []; this._active = [];
+    this._count = T.uniform(0, 'int');
+    const G = (n, v, t) => T.uniform(v, t).setName(n).setGroup(T.renderGroup);
+    this._zn = G('clZn', CL.ZN); this._zf = G('clZf', CL.ZF); this._far = G('clFar', 1000);
+    this._view = G('clView', new THREE.Matrix4(), 'mat4'); this._proj = G('clProj', new THREE.Matrix4(), 'mat4');
+    this._target = G('clTarget', new THREE.Vector2(1, 1));
+    this._build();
+    this.updateBeforeType = THREE.NodeUpdateType.RENDER;
+  }
+  customCacheKey() { return this._compute.getCacheKey() + super.customCacheKey(); }
+  // the depth slice a view distance falls in (the same formula on the CPU and in both shaders)
+  _sliceNear(z) { return z === 0 ? 0 : CL.ZN * Math.pow(CL.ZF / CL.ZN, z / CL.NZ); }
+  _sliceFar(z, far) { return z === CL.NZ - 1 ? far : CL.ZN * Math.pow(CL.ZF / CL.ZN, (z + 1) / CL.NZ); }
+  updateLightsTexture(camera) {
+    const data = this._lightsTexture.image.data, line = CL.MAX * 4, act = this._active; act.length = 0;
+    for (const l of this.clusteredLights) if (l.intensity > 0 && l.visible && act.length < CL.MAX) act.push(l);
+    const n = act.length, vz = this._viewZ, ord = this._order; ord.length = n;
+    this._count.value = n;
+    for (let i = 0; i < n; i++) { _clV.setFromMatrixPosition(act[i].matrixWorld).applyMatrix4(camera.matrixWorldInverse); vz[i] = _clV.z; ord[i] = i; }
+    ord.sort((a, b) => vz[b] - vz[a]);   // nearest first (view z is negative in front)
+    for (let i = 0; i < n; i++) {
+      const l = act[ord[i]], o = i * 4, k = l.intensity, s = l.userData.src;
+      _clV.setFromMatrixPosition(l.matrixWorld);
+      data[o] = _clV.x; data[o + 1] = _clV.y; data[o + 2] = _clV.z; data[o + 3] = l.distance;
+      data[line + o] = l.color.r * k; data[line + o + 1] = l.color.g * k; data[line + o + 2] = l.color.b * k; data[line + o + 3] = s ? -s : l.decay;
+    }
+    this._lightsTexture.needsUpdate = true;
+    const zr = this._zData, far = camera.far;
+    for (let z = 0; z < CL.NZ; z++) {
+      const sn = -this._sliceNear(z), sf = -this._sliceFar(z, far);
+      let a = n, b = 0;
+      for (let i = 0; i < n; i++) { const v = vz[ord[i]], r = act[ord[i]].distance || far; if (v + r >= sf && v - r <= sn) { if (i < a) a = i; b = i + 1; } }
+      if (a >= n) { a = 0; b = 0; }
+      zr[z * 4] = a; zr[z * 4 + 1] = b;
+    }
+    this._zTexture.needsUpdate = true;
+  }
+  updateBefore(frame) {
+    const { renderer, camera } = frame, rt = renderer.getRenderTarget();
+    if (rt) this._target.value.set(rt.width, rt.height); else { renderer.getDrawingBufferSize(_clSize); this._target.value.copy(_clSize); }
+    this.updateLightsTexture(camera);
+    this._far.value = camera.far;
+    this._view.value = camera.matrixWorldInverse; this._proj.value = camera.projectionMatrix;
+    renderer.compute(this._compute);
+  }
+  setLights(lights) {
+    const C = this.clusteredLights, M = this.materialLights; let m = 0, c = 0;
+    for (const l of lights) { if (l.isPointLight === true && l.castShadow !== true) C[c++] = l; else M[m++] = l; }
+    M.length = m; C.length = c;
+    return super.setLights(lights);
+  }
+  getBuiltinLights() { return this.materialLights; }
+  _light(index) {
+    const T = THREE.TSL, a = T.textureLoad(this._lightsTexture, T.ivec2(index, 0)), b = T.textureLoad(this._lightsTexture, T.ivec2(index, 1));
+    return { position: a.xyz, viewPosition: this._view.mul(T.vec4(a.xyz, 1)).xyz, distance: a.w, color: b.rgb, decay: b.w };
+  }
+  _build() {
+    const T = THREE.TSL, { Fn, If, Loop, Return, int, float, vec3, ivec2, ivec4, min, max, pow, log, clamp, dot, instanceIndex } = T;
+    const { NX, NY, NZ, CHUNKS, PER } = CL, count = NX * NY * NZ;
+    const idx = T.attributeArray(new Int32Array(count * CHUNKS * 4), 'ivec4').setName('nqClusterLights');
+    const slot = (base, s) => { s = int(s); return idx.element(base.mul(CHUNKS).add(s.div(4))).element(s.mod(4)); };
+    const lnZ = log(float(CL.ZF / CL.ZN));
+    this._compute = Fn(() => {
+      const ifx = float(1).div(this._proj.element(0).element(0)), ify = float(1).div(this._proj.element(1).element(1));
+      const cx = instanceIndex.mod(NX), cy = instanceIndex.div(NX).mod(NY), cz = instanceIndex.div(NX * NY);
+      const x0 = float(cx).mul(2 / NX).sub(1), x1 = float(cx.add(1)).mul(2 / NX).sub(1);
+      const y1 = float(1).sub(float(cy).mul(2 / NY)), y0 = float(1).sub(float(cy.add(1)).mul(2 / NY));
+      // slice 0 reaches back to the eye and the last one out to the far plane, so nothing falls outside the grid
+      const zn = cz.equal(0).select(float(0), this._zn.mul(T.exp(float(cz).mul(lnZ.div(NZ))))).negate();
+      const zf = cz.equal(NZ - 1).select(this._far, this._zn.mul(T.exp(float(cz.add(1)).mul(lnZ.div(NZ))))).negate();
+      const sxn = zn.negate().mul(ifx), sxf = zf.negate().mul(ifx), syn = zn.negate().mul(ify), syf = zf.negate().mul(ify);
+      const bmin = vec3(min(x0.mul(sxn), x0.mul(sxf)), min(y0.mul(syn), y0.mul(syf)), zf), bmax = vec3(max(x1.mul(sxn), x1.mul(sxf)), max(y1.mul(syn), y1.mul(syf)), zn);
+      Loop(CHUNKS, ({ i }) => { idx.element(instanceIndex.mul(CHUNKS).add(i)).assign(ivec4(0)); });
+      const n = int(0).toVar(), zr = T.textureLoad(this._zTexture, ivec2(cz, 0)), a = int(zr.x), b = int(zr.y);
+      Loop(CL.MAX, ({ i }) => {
+        const li = a.add(i);
+        If(n.greaterThanEqual(PER).or(li.greaterThanEqual(b)), () => { Return(); });
+        const { viewPosition, distance } = this._light(li);
+        const d = viewPosition.sub(max(bmin, min(viewPosition, bmax)));
+        If(dot(d, d).lessThanEqual(distance.mul(distance)), () => { slot(instanceIndex, n).assign(li.add(1)); n.addAssign(1); });
+      });
+    })().compute(count).setName('NQ clustered lights');
+    // fragment -> its cluster, in fractions of whatever target is being drawn
+    this._cluster = Fn(() => {
+      const t = T.screenCoordinate.div(this._target), tx = clamp(T.floor(t.x.mul(NX)), 0, NX - 1), ty = clamp(T.floor(t.y.mul(NY)), 0, NY - 1);
+      const zs = clamp(T.floor(log(max(T.positionView.z.negate(), CL.ZN).div(this._zn)).div(lnZ).mul(NZ)), 0, NZ - 1);
+      return int(tx).add(int(ty).mul(NX)).add(int(zs).mul(NX * NY));
+    })().toVar();
+    this._slot = (i) => slot(this._cluster, i);
+  }
+  setupLights(builder, lightNodes) {
+    const T = THREE.TSL, { Fn, If, Loop, Break, int, float, max, dot } = T;
+    const lm = builder.context.reflectedLight; lm.directDiffuse.toStack(); lm.directSpecular.toStack();
+    const pbr = builder.material && builder.material.isMeshStandardMaterial === true;
+    super.setupLights(builder, lightNodes);
+    Fn(() => {
+      Loop(CL.PER, ({ i }) => {
+        const li = this._slot(i);
+        If(li.equal(int(0)), () => { Break(); });
+        const { color, decay, viewPosition, distance } = this._light(li.sub(1));
+        const lv = viewPosition.sub(T.positionView), d2 = dot(lv, lv);
+        If(d2.lessThanEqual(distance.mul(distance)), () => {
+          // three's window (Frostbite eq. 26) on both kinds; a glowing body (neon, decay < 0 holds its radius) falls off as
+          // 1 / (d^2 + r^2), every other light as three's 1 / max(d^decay, 0.01). One BRDF evaluation either way.
+          const w = d2.div(distance.mul(distance)), win = w.mul(w).oneMinus().clamp().pow2();
+          const att = T.select(decay.lessThan(0), float(1).div(d2.add(decay.mul(decay))), T.pow(T.sqrt(d2), max(decay, 0)).max(0.01).reciprocal());
+          if (!pbr) { builder.lightsNode.setupDirectLight(builder, this, { lightDirection: lv.normalize(), lightColor: color.mul(att.mul(win)) }); return; }
+          // A glowing body's highlight on a near-mirror (wet glass, polished paint) is the tube's own shape, which the mirror
+          // and env map already draw; as a point it burned a pin-sharp star the streaks smeared across the frame. Karis's
+          // sphere-light normalisation scales its specular by (a / a')^2, a' = a + radius / (2 d): the energy a highlight as
+          // wide as the tube would spread out. Plain point lights (radius 0) are untouched.
+          const sp0 = lm.directSpecular.toVar(), a = T.roughness.mul(T.roughness).max(0.002);
+          const a2 = a.add(max(decay.negate(), 0).mul(T.inverseSqrt(d2.max(1e-4))).mul(0.5)).min(1), norm = a.div(a2).pow2();
+          builder.lightsNode.setupDirectLight(builder, this, { lightDirection: lv.normalize(), lightColor: color.mul(att.mul(win)) });
+          lm.directSpecular.assign(sp0.add(lm.directSpecular.sub(sp0).mul(norm)));
+        });
+      });
+    }, 'void')();
+  }
+  dispose() { this._compute.dispose(); this._lightsTexture.dispose(); this._zTexture.dispose(); super.dispose(); }
+}
+class NQClusterLighting extends THREE.Lighting {
+  createNode(lights = []) { return new NQClusterNode().setLights(lights); }
+}
+// WebGPU only: the WebGL2 backend has no storage buffers in fragment shaders, so it keeps three's forward lights
+const CLUSTERED = NQ_BACKEND === 'webgpu';
+if (CLUSTERED) renderer.lighting = new NQClusterLighting();
 
 /* ============================================================
    Street props, modelled in code with the Geo kit (rounded boxes, lathes, tubes, blobs).
@@ -3570,6 +3727,7 @@ const WORLD = {
   tanks: [],       // {x, z, r, h, circle} the Refinery's fuel tanks (hazards.js blows them up)
   flares: [],      // [x, y, z] flare stacks, burning
   plumes: [],      // [x, y, z, r] cooling-tower steam
+  emit: [],        // {m, c, mat} every glowing box (world matrix, colour x emission): r3.js buildNeonLights
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -3637,6 +3795,7 @@ function billboardTexture(kind) {
 }
 
 function buildCity() {
+  GEO_EMIT = [];   // engine.js Geo.box collects the glowing boxes from here to the end (WORLD.emit)
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
   const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(), gSub = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
@@ -4055,9 +4214,9 @@ function buildCity() {
   // run fn against a throwaway mesh and collision lists: it rolls the same dice as the real build, so cutting
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
-    const pg = g, keep = {}; g = new Geo();
+    const pg = g, pe = GEO_EMIT, keep = {}; g = new Geo(); GEO_EMIT = null;
     for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'propSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
-    try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
+    try { fn(g); } finally { g = pg; GEO_EMIT = pe; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
@@ -4069,6 +4228,7 @@ function buildCity() {
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
   WORLD.train = { x: 34, wait: 0 };   // stalled over the plaza since the outbreak
+  WORLD.emit = GEO_EMIT; GEO_EMIT = null;
 }
 
 function drawCityDynamic(time) {
@@ -7506,6 +7666,100 @@ function updateLights3(cam) {
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
   for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
+  if (CLUSTERED) updateNeonLights(cam, fdt);
+}
+
+/* ---------------- the neon lights the street (WebGPU: cluster.js) ----------------
+   Every glowing tube, trim, awning strip and sign becomes light: the corner strips wash the walls and the wet ground
+   in their colour, a sign tints the pavement under it. A long tube is cut into pieces a few metres long, each a soft
+   glowing body (cluster.js: 1 / (d^2 + r^2)) as wide as its piece, held off the wall it hangs on so the light spreads
+   across the bricks. Shop and room lights past the sixteen-light pool keep shining too, so a street no longer goes
+   dark 55 m out. All of it fades in and out with distance: nothing pops. */
+// kNeon / kSign: light per m^2 of glowing surface (the city's lamps and shop lights are far brighter than a physical tube
+// would be, so the neon is scaled to sit among them); a light's reach ends where it falls under eps
+const NEON_L = { src: [], grid: new Map(), cell: 16, pool: [], N: 640, near: [], kNeon: 14, kSign: 12, eps: 0.012, rMax: 18 };
+const NEON_SEG = 3.5, NEON_TOP = 28;   // m of tube per light; no lights higher than this
+const _nk = (i, j) => i * 73856093 ^ j * 19349663;
+function neonPush(x, y, z, c, area, rad, kind, ref) {
+  if (y > NEON_TOP) return;   // up a tower: lights nothing you see from the street (the facade's own glow covers it)
+  // held off the facade it hangs on: a light inside or on a wall lights the wall edge-on, i.e. barely at all
+  for (const b of WORLD.boxes) {
+    if (x < b.x0 - 0.4 || x > b.x1 + 0.4 || z < b.z0 - 0.4 || z > b.z1 + 0.4 || y > b.y1 + 0.4 || (b.y0 !== undefined && y < b.y0 - 0.4)) continue;
+    const dx0 = x - b.x0, dx1 = b.x1 - x, dz0 = z - b.z0, dz1 = b.z1 - z, m = Math.min(dx0, dx1, dz0, dz1);
+    if (m === dx0) x = b.x0 - 0.7; else if (m === dx1) x = b.x1 + 0.7; else if (m === dz0) z = b.z0 - 0.7; else z = b.z1 + 0.7;
+    break;
+  }
+  const lum = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11; if (lum * area < 0.02) return;
+  const s = { p: [x, y, z], c: [c[0] * area, c[1] * area, c[2] * area], lum: lum * area, rad, r: 16, kind, ref };
+  NEON_L.src.push(s);
+  const k = _nk(Math.floor(x / NEON_L.cell), Math.floor(z / NEON_L.cell)); let a = NEON_L.grid.get(k); if (!a) NEON_L.grid.set(k, a = []); a.push(s);
+}
+function buildNeonLights() {
+  if (!CLUSTERED) return;
+  for (let i = 0; i < NEON_L.N; i++) { const l = new THREE.PointLight(0xffffff, 0, 1, 1); l.layers.enableAll(); l.castShadow = false; l.matrixAutoUpdate = false; scene.add(l); NEON_L.pool.push(l); }
+  for (const e of WORLD.emit || []) {
+    const m = e.m, ax = [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]], L = ax.map(v => Math.hypot(v[0], v[1], v[2]));
+    const o = [0, 1, 2].sort((a, b) => L[b] - L[a]), long = L[o[0]], wide = L[o[1]];
+    if (long < 0.3) continue;
+    const n = Math.min(24, Math.max(1, Math.round(long / NEON_SEG))), seg = long / n, d = ax[o[0]];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5, y = m[13] + d[1] * t;
+      // a slab glowing on two long sides (a roof trim, a lit window) shows its light along a band, not its whole face
+      neonPush(m[12] + d[0] * t, y, m[14] + d[2] * t, e.c, seg * Math.min(1, Math.max(wide, 0.15)), Math.max(0.35, Math.min(1.6, seg * 0.45)), 'neon', null);
+    }
+  }
+  // signs: each canvas's mean colour, once per texture
+  const cv = document.createElement('canvas'); cv.width = 16; cv.height = 4; const cx = cv.getContext('2d', { willReadFrequently: true }); const mean = new Map();
+  for (const q of SIGNS) {
+    const s = q.s, img = s.tex.image; if (!img || !img.width) continue;
+    let mc = mean.get(s.tex);
+    if (!mc) {
+      cx.clearRect(0, 0, 16, 4); cx.drawImage(img, 0, 0, 16, 4); const D = cx.getImageData(0, 0, 16, 4).data; let r = 0, g = 0, b = 0;
+      for (let i = 0; i < D.length; i += 4) { const a = D[i + 3] / 255; r += (D[i] / 255) ** 2.2 * a; g += (D[i + 1] / 255) ** 2.2 * a; b += (D[i + 2] / 255) ** 2.2 * a; }
+      mc = [r / 64, g / 64, b / 64]; mean.set(s.tex, mc);
+    }
+    const m = s.m, w = Math.hypot(m[0], m[1], m[2]), h = Math.hypot(m[4], m[5], m[6]), nz = Math.hypot(m[8], m[9], m[10]) || 1;
+    const nx = m[8] / nz, ny = m[9] / nz, nzz = m[10] / nz, off = 0.6;
+    const n = Math.min(4, Math.max(1, Math.round(w / 4))), ux = m[0] / w, uy = m[1] / w, uz = m[2] / w;
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n - 0.5) * w;
+      neonPush(m[12] + ux * t + nx * off, m[13] + uy * t + ny * off, m[14] + uz * t + nzz * off, [mc[0] * s.col[0], mc[1] * s.col[1], mc[2] * s.col[2]], w * h / n, Math.max(0.4, Math.min(1.8, Math.min(w / n, h) * 0.5)), 'sign', q);
+    }
+  }
+}
+const byNW = (a, b) => b.pri - a.pri;
+function updateNeonLights(cam, fdt) {
+  const T = THEME, U = SETTINGS.quality >= 3, R = U ? 90 : 60, near = NEON_L.near; near.length = 0;
+  const S = NEON_L.cell, i0 = Math.floor((cam[0] - R) / S), i1 = Math.floor((cam[0] + R) / S), j0 = Math.floor((cam[2] - R) / S), j1 = Math.floor((cam[2] + R) / S);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const a = NEON_L.grid.get(_nk(i, j)); if (!a) continue;
+    for (const s of a) {
+      const dx = s.p[0] - cam[0], dy = s.p[1] - cam[1], dz = s.p[2] - cam[2], d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > R + NEON_L.rMax) continue;
+      let k = s.kind === 'sign' ? (s.ref.vis && (s.ref.s.seed % 1) >= 0.08 ? T.sign * NEON_L.kSign : 0) : T.neon * NEON_L.kNeon;
+      if (k <= 0) continue;
+      s.r = Math.min(NEON_L.rMax, Math.max(2, Math.sqrt(s.lum * k / NEON_L.eps)));   // reach: where it falls under eps (a dim Look's neon reaches less far)
+      if (d > R + s.r) continue;
+      s.k = k * Math.min(1, Math.max(0, (R + s.r - d) / 12)); s.pri = s.k * (s.c[0] + s.c[1] + s.c[2]) / Math.max(1, d * d) * s.r; near.push(s);
+    }
+  }
+  // the shop, room and doorway lights the sixteen-light pool has no slot for (or is fading out of): the complement of its fade
+  for (const l of nearbyWorld('lights', cam[0], cam[2], R)) {
+    if (l.kind === 'lamp') continue;
+    const w = 1 - (l.fw || 0); if (w <= 0.001) continue;
+    const dx = l.p[0] - cam[0], dz = l.p[2] - cam[2], d = Math.sqrt(dx * dx + dz * dz); if (d > R) continue;
+    const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c;
+    const e = l._nq || (l._nq = { p: l.p, c: [0, 0, 0], rad: 0, r: l.r, kind: 'stat' });
+    e.c[0] = c[0]; e.c[1] = c[1]; e.c[2] = c[2]; e.k = w * Math.min(1, (R - d) / 12) * PL_K * l.r; e.pri = 1e3 / Math.max(1, d * d); near.push(e);
+  }
+  if (near.length > NEON_L.N) { near.sort(byNW); near.length = NEON_L.N; }
+  let n = 0;
+  for (const s of near) {
+    const l = NEON_L.pool[n++];
+    l.position.set(s.p[0], s.p[1], s.p[2]); l.updateMatrix(); l.matrixWorld.copy(l.matrix);
+    l.color.setRGB(s.c[0], s.c[1], s.c[2]); l.intensity = s.k; l.distance = s.r; l.decay = 1; l.userData.src = s.rad || 0;
+  }
+  for (; n < NEON_L.N; n++) NEON_L.pool[n].intensity = 0;
 }
 
 /* ---------------- world meshes ---------------- */
@@ -7964,7 +8218,7 @@ function buildWorld3() {
   addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
   buildBlossoms();
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
+  buildSigns(); buildDecalPool(); buildLights(); buildNeonLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
 }
 
@@ -9785,7 +10039,7 @@ window.NQ = {
   pose(o) { Object.assign(PLAYER, o); },
   occMap() { return NQU.uOcc.value; },
   bow(state, draw, type) { Object.assign(BOW, { state, draw, type, nextType: -1, t: 0, hold: 0 }); },
-  GPOST, GRADE_U, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
+  GPOST, GRADE_U, NEON_L, CL, TEXN, NQP, NQN, GPU_PROF, TSL: THREE.TSL, buildPostGPU, BLACK_TEX: () => GPU_BLACK,
   clear() { ZOMBIES.length = 0; PROJ.length = 0; ZPROJ.length = 0; PICKUPS.length = 0; },
   shootAt(x, y, z, type = 0, power = 1) { const d = [x - PLAYER.x, y - (PLAYER.y + PLAYER.eyeH), z - PLAYER.z]; const L = Math.hypot(...d); const spd = (40 + 64 * power) * ARROWS[type].speed; PROJ.push({ x: PLAYER.x + d[0] / L * 2, y: PLAYER.y + 1.5 + d[1] / L * 2, z: PLAYER.z + d[2] / L * 2, vx: d[0] / L * spd, vy: d[1] / L * spd, vz: d[2] / L * spd, type, power, pierce: 5, hits: [], age: 0, stuck: false, stuckT: 0, dir: [d[0] / L, d[1] / L, d[2] / L] }); },
 };

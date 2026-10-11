@@ -22,6 +22,7 @@ const WORLD = {
   tanks: [],       // {x, z, r, h, circle} the Refinery's fuel tanks (hazards.js blows them up)
   flares: [],      // [x, y, z] flare stacks, burning
   plumes: [],      // [x, y, z, r] cooling-tower steam
+  emit: [],        // {m, c, mat} every glowing box (world matrix, colour x emission): r3.js buildNeonLights
 };
 const NEON = { mag: hex('#ff2e88'), cyan: hex('#29e7ff'), amber: hex('#ffb52e'), violet: hex('#b44dff'), red: hex('#ff3040'), lime: hex('#a6ff3a'), white: [1, 1, 1] };
 
@@ -89,6 +90,7 @@ function billboardTexture(kind) {
 }
 
 function buildCity() {
+  GEO_EMIT = [];   // engine.js Geo.box collects the glowing boxes from here to the end (WORLD.emit)
   const R = mulberry(7);
   const r = (a, b) => a + R() * (b - a);
   const gNear = new Geo(), gFar = new Geo(), gProps = new Geo(), gGarden = new Geo(), gForest = new Geo(), gSub = new Geo(); let g = gNear;   // near: facades + ground (receive shadows); props: cast shadows too; far: skyline
@@ -507,9 +509,9 @@ function buildCity() {
   // run fn against a throwaway mesh and collision lists: it rolls the same dice as the real build, so cutting
   // an opening through a wall never reshuffles the random layout of everything built after it
   const ghost = (fn) => {
-    const pg = g, keep = {}; g = new Geo();
+    const pg = g, pe = GEO_EMIT, keep = {}; g = new Geo(); GEO_EMIT = null;
     for (const k of ['boxes', 'circles', 'signs', 'lights', 'halos', 'fires', 'steam', 'supplies', 'indoor', 'glass', 'petals', 'blossoms', 'carSpots', 'treeSpots', 'propSpots', 'ponds', 'navBlocks']) { keep[k] = WORLD[k]; WORLD[k] = []; }
-    try { fn(g); } finally { g = pg; Object.assign(WORLD, keep); }
+    try { fn(g); } finally { g = pg; GEO_EMIT = pe; Object.assign(WORLD, keep); }
   };
   buildDistricts({ B, solid, building, lamp, barrier, vend, addSign, r, R, neonPick, facadeCols, ghost, setG: (k) => { g = k === 'props' ? gProps : k === 'far' ? gFar : k === 'garden' ? gGarden : k === 'sub' ? gSub : gNear; }, getG: () => g, getForest: () => gForest });
   g = gProps;
@@ -521,6 +523,7 @@ function buildCity() {
   WORLD.mesh = gNear.build(); WORLD.meshFar = gFar.build(); WORLD.meshProps = gProps.build(); WORLD.meshGarden = gGarden.build(); WORLD.meshForest = gForest.build(); WORLD.meshSub = gSub.build();
 
   WORLD.train = { x: 34, wait: 0 };   // stalled over the plaza since the outbreak
+  WORLD.emit = GEO_EMIT; GEO_EMIT = null;
 }
 
 function drawCityDynamic(time) {

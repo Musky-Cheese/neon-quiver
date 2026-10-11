@@ -158,6 +158,7 @@ const TEX_LAYERS = ['asphalt', 'concrete', 'brick', 'rust', 'corrugated', 'paver
    Skinned zombies carry     color = (ao, cloth, blood, glow) and a per-vertex part id that indexes per-zombie uniform arrays. */
 const ZPARTS = 10;
 /* ---------------- Geometry builder ---------------- */
+let GEO_EMIT = null;   // while buildCity runs: every glowing box (world matrix, colour x emission), the neon that lights the street
 // vertex layout: pos3 nor3 col3 mat2 => 11 floats
 class Geo {
   constructor() { this.v = []; this.i = []; this.n = 0; }
@@ -180,6 +181,7 @@ class Geo {
   }
   // unit box centered at origin (size 1) transformed by m
   box(m, c, e = 0, mat = 0, skipBottom = false) {
+    if (GEO_EMIT && m && e >= 0.8) GEO_EMIT.push({ m: m.slice(), c: [c[0] * e, c[1] * e, c[2] * e], mat });   // glowing: r3.js buildNeonLights lights the street with it
     const h = 0.5;
     this.quad(m, [h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h], [1, 0, 0], c, e, mat);
     this.quad(m, [-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h], [-1, 0, 0], c, e, mat);

@@ -275,6 +275,100 @@ function updateLights3(cam) {
   for (const d of _dyn) { if (n >= lightCap) break; setPL(PL[n++], d.p, d.c, d.r); }
   for (; n < MAX_PL; n++) PL[n].intensity = 0;
   for (let i = 0; i < MAX_PL; i++) { const l = PL[i], k = l.intensity; AIR.pos[i].set(l.position.x, l.position.y, l.position.z, l.distance); AIR.col[i].set(l.color.r * k, l.color.g * k, l.color.b * k, 0); }   // the glowing air (gpu.js nqFog)
+  if (CLUSTERED) updateNeonLights(cam, fdt);
+}
+
+/* ---------------- the neon lights the street (WebGPU: cluster.js) ----------------
+   Every glowing tube, trim, awning strip and sign becomes light: the corner strips wash the walls and the wet ground
+   in their colour, a sign tints the pavement under it. A long tube is cut into pieces a few metres long, each a soft
+   glowing body (cluster.js: 1 / (d^2 + r^2)) as wide as its piece, held off the wall it hangs on so the light spreads
+   across the bricks. Shop and room lights past the sixteen-light pool keep shining too, so a street no longer goes
+   dark 55 m out. All of it fades in and out with distance: nothing pops. */
+// kNeon / kSign: light per m^2 of glowing surface (the city's lamps and shop lights are far brighter than a physical tube
+// would be, so the neon is scaled to sit among them); a light's reach ends where it falls under eps
+const NEON_L = { src: [], grid: new Map(), cell: 16, pool: [], N: 640, near: [], kNeon: 14, kSign: 12, eps: 0.012, rMax: 18 };
+const NEON_SEG = 3.5, NEON_TOP = 28;   // m of tube per light; no lights higher than this
+const _nk = (i, j) => i * 73856093 ^ j * 19349663;
+function neonPush(x, y, z, c, area, rad, kind, ref) {
+  if (y > NEON_TOP) return;   // up a tower: lights nothing you see from the street (the facade's own glow covers it)
+  // held off the facade it hangs on: a light inside or on a wall lights the wall edge-on, i.e. barely at all
+  for (const b of WORLD.boxes) {
+    if (x < b.x0 - 0.4 || x > b.x1 + 0.4 || z < b.z0 - 0.4 || z > b.z1 + 0.4 || y > b.y1 + 0.4 || (b.y0 !== undefined && y < b.y0 - 0.4)) continue;
+    const dx0 = x - b.x0, dx1 = b.x1 - x, dz0 = z - b.z0, dz1 = b.z1 - z, m = Math.min(dx0, dx1, dz0, dz1);
+    if (m === dx0) x = b.x0 - 0.7; else if (m === dx1) x = b.x1 + 0.7; else if (m === dz0) z = b.z0 - 0.7; else z = b.z1 + 0.7;
+    break;
+  }
+  const lum = c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11; if (lum * area < 0.02) return;
+  const s = { p: [x, y, z], c: [c[0] * area, c[1] * area, c[2] * area], lum: lum * area, rad, r: 16, kind, ref };
+  NEON_L.src.push(s);
+  const k = _nk(Math.floor(x / NEON_L.cell), Math.floor(z / NEON_L.cell)); let a = NEON_L.grid.get(k); if (!a) NEON_L.grid.set(k, a = []); a.push(s);
+}
+function buildNeonLights() {
+  if (!CLUSTERED) return;
+  for (let i = 0; i < NEON_L.N; i++) { const l = new THREE.PointLight(0xffffff, 0, 1, 1); l.layers.enableAll(); l.castShadow = false; l.matrixAutoUpdate = false; scene.add(l); NEON_L.pool.push(l); }
+  for (const e of WORLD.emit || []) {
+    const m = e.m, ax = [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]], L = ax.map(v => Math.hypot(v[0], v[1], v[2]));
+    const o = [0, 1, 2].sort((a, b) => L[b] - L[a]), long = L[o[0]], wide = L[o[1]];
+    if (long < 0.3) continue;
+    const n = Math.min(24, Math.max(1, Math.round(long / NEON_SEG))), seg = long / n, d = ax[o[0]];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5, y = m[13] + d[1] * t;
+      // a slab glowing on two long sides (a roof trim, a lit window) shows its light along a band, not its whole face
+      neonPush(m[12] + d[0] * t, y, m[14] + d[2] * t, e.c, seg * Math.min(1, Math.max(wide, 0.15)), Math.max(0.35, Math.min(1.6, seg * 0.45)), 'neon', null);
+    }
+  }
+  // signs: each canvas's mean colour, once per texture
+  const cv = document.createElement('canvas'); cv.width = 16; cv.height = 4; const cx = cv.getContext('2d', { willReadFrequently: true }); const mean = new Map();
+  for (const q of SIGNS) {
+    const s = q.s, img = s.tex.image; if (!img || !img.width) continue;
+    let mc = mean.get(s.tex);
+    if (!mc) {
+      cx.clearRect(0, 0, 16, 4); cx.drawImage(img, 0, 0, 16, 4); const D = cx.getImageData(0, 0, 16, 4).data; let r = 0, g = 0, b = 0;
+      for (let i = 0; i < D.length; i += 4) { const a = D[i + 3] / 255; r += (D[i] / 255) ** 2.2 * a; g += (D[i + 1] / 255) ** 2.2 * a; b += (D[i + 2] / 255) ** 2.2 * a; }
+      mc = [r / 64, g / 64, b / 64]; mean.set(s.tex, mc);
+    }
+    const m = s.m, w = Math.hypot(m[0], m[1], m[2]), h = Math.hypot(m[4], m[5], m[6]), nz = Math.hypot(m[8], m[9], m[10]) || 1;
+    const nx = m[8] / nz, ny = m[9] / nz, nzz = m[10] / nz, off = 0.6;
+    const n = Math.min(4, Math.max(1, Math.round(w / 4))), ux = m[0] / w, uy = m[1] / w, uz = m[2] / w;
+    for (let i = 0; i < n; i++) {
+      const t = ((i + 0.5) / n - 0.5) * w;
+      neonPush(m[12] + ux * t + nx * off, m[13] + uy * t + ny * off, m[14] + uz * t + nzz * off, [mc[0] * s.col[0], mc[1] * s.col[1], mc[2] * s.col[2]], w * h / n, Math.max(0.4, Math.min(1.8, Math.min(w / n, h) * 0.5)), 'sign', q);
+    }
+  }
+}
+const byNW = (a, b) => b.pri - a.pri;
+function updateNeonLights(cam, fdt) {
+  const T = THEME, U = SETTINGS.quality >= 3, R = U ? 90 : 60, near = NEON_L.near; near.length = 0;
+  const S = NEON_L.cell, i0 = Math.floor((cam[0] - R) / S), i1 = Math.floor((cam[0] + R) / S), j0 = Math.floor((cam[2] - R) / S), j1 = Math.floor((cam[2] + R) / S);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const a = NEON_L.grid.get(_nk(i, j)); if (!a) continue;
+    for (const s of a) {
+      const dx = s.p[0] - cam[0], dy = s.p[1] - cam[1], dz = s.p[2] - cam[2], d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > R + NEON_L.rMax) continue;
+      let k = s.kind === 'sign' ? (s.ref.vis && (s.ref.s.seed % 1) >= 0.08 ? T.sign * NEON_L.kSign : 0) : T.neon * NEON_L.kNeon;
+      if (k <= 0) continue;
+      s.r = Math.min(NEON_L.rMax, Math.max(2, Math.sqrt(s.lum * k / NEON_L.eps)));   // reach: where it falls under eps (a dim Look's neon reaches less far)
+      if (d > R + s.r) continue;
+      s.k = k * Math.min(1, Math.max(0, (R + s.r - d) / 12)); s.pri = s.k * (s.c[0] + s.c[1] + s.c[2]) / Math.max(1, d * d) * s.r; near.push(s);
+    }
+  }
+  // the shop, room and doorway lights the sixteen-light pool has no slot for (or is fading out of): the complement of its fade
+  for (const l of nearbyWorld('lights', cam[0], cam[2], R)) {
+    if (l.kind === 'lamp') continue;
+    const w = 1 - (l.fw || 0); if (w <= 0.001) continue;
+    const dx = l.p[0] - cam[0], dz = l.p[2] - cam[2], d = Math.sqrt(dx * dx + dz * dz); if (d > R) continue;
+    const c = l.kind === 'fountain' ? T.fountain : l.shop ? [l.c[0] * T.shop, l.c[1] * T.shop, l.c[2] * T.shop] : l.c;
+    const e = l._nq || (l._nq = { p: l.p, c: [0, 0, 0], rad: 0, r: l.r, kind: 'stat' });
+    e.c[0] = c[0]; e.c[1] = c[1]; e.c[2] = c[2]; e.k = w * Math.min(1, (R - d) / 12) * PL_K * l.r; e.pri = 1e3 / Math.max(1, d * d); near.push(e);
+  }
+  if (near.length > NEON_L.N) { near.sort(byNW); near.length = NEON_L.N; }
+  let n = 0;
+  for (const s of near) {
+    const l = NEON_L.pool[n++];
+    l.position.set(s.p[0], s.p[1], s.p[2]); l.updateMatrix(); l.matrixWorld.copy(l.matrix);
+    l.color.setRGB(s.c[0], s.c[1], s.c[2]); l.intensity = s.k; l.distance = s.r; l.decay = 1; l.userData.src = s.rad || 0;
+  }
+  for (; n < NEON_L.N; n++) NEON_L.pool[n].intensity = 0;
 }
 
 /* ---------------- world meshes ---------------- */
@@ -733,7 +827,7 @@ function buildWorld3() {
   addWorldChunks(WORLD.meshSub, true, true, 'suburbs');
   buildBlossoms();
   if (window.DBG_OCC) console.log('world chunks ms', (performance.now() - t0).toFixed(0));
-  buildSigns(); buildDecalPool(); buildLights(); buildVolumes(); buildOcclusion(); buildGlass();
+  buildSigns(); buildDecalPool(); buildLights(); buildNeonLights(); buildVolumes(); buildOcclusion(); buildGlass();
   updateWorldStreaming([PLAYER.x, PLAYER.y, PLAYER.z], true);
 }
 
