@@ -167,9 +167,10 @@ function navSpawnPoint(minD = 26, maxD = 62) {
 }
 
 /* ---------------- supplies ---------------- */
-function nearestSupply(kind, x, z) {
+// r: search radius; pass 0 to search the whole city (there are only a few dozen supplies)
+function nearestSupply(kind, x, z, r = 12) {
   let best = null, bd = 1e9;
-  for (const s of nearbyWorld('supplies', x, z, 12)) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
+  for (const s of r ? nearbyWorld('supplies', x, z, r) : WORLD.supplies) { if (s.kind !== kind) continue; const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; best = s; } }
   return best ? { s: best, d: bd } : null;
 }
 function updateSupplies(dt) {
@@ -184,7 +185,7 @@ function updateSupplies(dt) {
     }
   }
   const t = nearestSupply('terminal', PLAYER.x, PLAYER.z);
-  GAME.nearTerminal = GAME.intermission && t && t.d < 2.6 ? t.s : null;
+  GAME.nearTerminal = GAME.intermission && GAME.wave > 0 && t && t.d < 2.6 ? t.s : null;   // not before wave 1: nothing to spend yet
 }
 // burn barrels: a bright core and flickering tongues of flame above the rim (particles do the rest)
 function drawFires(time) {
@@ -309,7 +310,7 @@ function drawMinimap(hx, W, H, time) {
 // on-screen pointer to the nearest armory terminal during an intermission
 function drawObjective(hx, W, H) {
   if (!GAME.intermission || GAME.state !== 'playing') return;
-  const t = nearestSupply('terminal', PLAYER.x, PLAYER.z); if (!t) return;
+  const t = nearestSupply('terminal', PLAYER.x, PLAYER.z, 0); if (!t) return;
   const cx = W / 2, cy = H / 2;
   const ang = Math.atan2(t.s.x - PLAYER.x, t.s.z - PLAYER.z), fwd = Math.atan2(-Math.sin(PLAYER.yaw), -Math.cos(PLAYER.yaw));
   let rel = ang - fwd; rel = ((rel + Math.PI) % TAU + TAU) % TAU - Math.PI;

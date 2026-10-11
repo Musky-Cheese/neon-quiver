@@ -267,9 +267,10 @@ function updateZombies(dt, time) {
       if (z.dieT > CORPSE_LIFE) ZOMBIES.splice(i, 1);
       continue;
     }
-    if (z.type === 'spitter') { updateSpitter(z, dt, P); continue; }
-    if (z.type === 'screamer') { updateScreamer(z, dt, P); continue; }
-    if (z.type === 'climber') { updateClimber(z, dt, P); continue; }
+    // the specials keep their distance on purpose, so time spent in their own range counts as progress
+    if (z.type === 'spitter') { updateSpitter(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 18); continue; }
+    if (z.type === 'screamer') { updateScreamer(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 8); continue; }
+    if (z.type === 'climber') { updateClimber(z, dt, P); zStallCheck(z, dt, Math.hypot(P.x - z.x, P.z - z.z), z.climbState !== 'ground'); continue; }
     if (z.state === 'drop') { // boss falls from the sky
       z.vy = (z.vy || 0) - 40 * dt; z.y += z.vy * dt;
       if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(PLAYER.at(z.x, z.z, 0.5)); AUD.roar(PLAYER.at(z.x, z.z, 4)); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
@@ -304,14 +305,7 @@ function updateZombies(dt, time) {
     if (spd > 0.5 && moved < spd * dt * 0.3) z.stuckT += dt; else z.stuckT = Math.max(0, z.stuckT - dt * 0.5);
     if (z.stuckT > 2.5) { z.side *= -1; z.stuckT = 0.6; }
     z.phase += dt * (z.crawl ? 3.2 : z.type === 'runner' ? 11 : z.type === 'brute' ? 4.2 : z.type === 'boss' ? 3.2 : 5.2) * (spd > 0.1 || z.crawl ? 1 : 0.15);
-    if (GAME.state === 'playing' && z.type !== 'boss') {
-      const pd = NAV.ready ? Math.min(navDistAt(z.x, z.z), 1e6) : dist;
-      if (pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
-      if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
-        const s = navSpawnPoint();
-        z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
-      }
-    }
+    if (z.type !== 'boss') zStallCheck(z, dt, dist, false);
     z.groan -= dt;
     if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), zVoice(z)); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
@@ -326,6 +320,18 @@ function updateZombies(dt, time) {
   }
 }
 // speed / attack-rate factors from Cryo (slow or freeze) and Shock (stun)
+// one that hasn't got closer along the flow field for 12 s (30 s crawling) is stuck behind something: bring it back in
+// at a fresh spawn point, so a wave can always end
+function zStallCheck(z, dt, dist, engaged) {
+  if (GAME.state !== 'playing') return;
+  const pd = NAV.ready ? Math.min(navDistAt(z.x, z.z), 1e6) : dist;
+  if (engaged || pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
+  if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
+    const s = navSpawnPoint();
+    z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
+    if (z.type === 'climber') { z.climbState = 'ground'; z.y = 0; z.climbCd = rand(2, 4); }
+  }
+}
 function zSlowK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? z.chillK : 1; }
 function zAtkK(z) { return z.stun > 0 ? 0 : z.chill > 0 ? (z.chillK <= 0 ? 0 : Math.max(0.45, z.chillK)) : 1; }
 // Cryo Arrow: the coolant capsule slows (Lv 3: freezes) whatever it hits, plus anything standing right at the impact.
@@ -559,12 +565,12 @@ function updateClimber(z, dt, P) {
     }
     z.atkCd -= dt;
   } else if (z.climbState === 'climb') {
-    z.climbT += dt; const k = Math.min(1, z.climbT / 1.1);
+    z.climbT += dt * zAtkK(z); const k = Math.min(1, z.climbT / 1.1);   // stunned or frozen: it hangs on the wall
     z.y = lerp(z.climbFrom, z.climbTo, easeOut(k)); z.state = 'walk';
     if (k >= 1) { z.climbState = 'perch'; z.perchT = 0; }
   } else if (z.climbState === 'perch') {
-    z.perchT += dt;
-    const want = Math.atan2(P.x - z.x, P.z - z.z); let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(dyaw, -4 * dt, 4 * dt);
+    const ck = zAtkK(z); z.perchT += dt * ck;
+    const want = Math.atan2(P.x - z.x, P.z - z.z); let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(dyaw, -4 * dt * ck, 4 * dt * ck);
     if (z.perchT > 0.7) {
       const dx = P.x - z.x, dz = P.z - z.z, d = Math.hypot(dx, dz) || 1;
       z.climbState = 'pounce'; z.pounceT = 0;
@@ -574,6 +580,7 @@ function updateClimber(z, dt, P) {
     }
   } else if (z.climbState === 'pounce') {
     z.pounceT += dt; z.dvy -= 16 * dt;
+    if (zSlowK(z) <= 0) { z.dvx = 0; z.dvz = 0; }   // stunned or frozen mid-leap: it drops where it is
     z.x += z.dvx * dt; z.z += z.dvz * dt; z.y = Math.max(0, z.y + z.dvy * dt);
     pushOutCircle(z, 0.3 * z.scale);
     if (z.y <= 0.02 && z.pounceT > 0.15) {

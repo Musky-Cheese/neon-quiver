@@ -393,6 +393,9 @@ const AUD = {
     this.intensity = 0.5;
     const sched = () => {
       if (!this.ctx) return;
+      // a hidden tab throttles this timer while the audio clock runs on: skip the steps that went by instead of
+      // playing them all at once when the tab comes back
+      if (next < c.currentTime) { const k = Math.ceil((c.currentTime - next) / step); next += k * step; n += k; }
       while (next < c.currentTime + 0.2) {
         const bar = Math.floor(n / 16) % 4, s = n % 16, ch = prog[bar], t = next;
         // bass
