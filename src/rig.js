@@ -215,9 +215,10 @@ function poseZombieRig(z, dt, time) {
     if (timed !== undefined && timed !== null && z.state !== 'dying') { act.timeScale = 0; act.time = clamp(timed, 0, 0.999) * dur; }
     else if (z.state === 'dying') act.timeScale = 0;
     else if (r.cur === 'idle') act.timeScale = 1;
-    else { const rate = z.crawl ? 3.2 : PHASE_RATE[z.type] * (r.cur === 'walk_b' ? 0.85 : 1) * (0.92 + 0.16 * ((z.seed * 7.31) % 1)); act.timeScale = rate / (TAU / dur) * (z.crawl ? 1 : clamp((z.mv || 0) / Math.max(0.5, z.speed), 0.6, 1.25)); }
+    else { const rate = z.crawl ? 3.2 : PHASE_RATE[z.type] * (r.cur === 'walk_b' ? 0.85 : 1) * (0.92 + 0.16 * ((z.seed * 7.31) % 1)); act.timeScale = rate / (TAU / dur) * (z.crawl ? 1 : clamp((z.mv || 0) / Math.max(0.5, z.speed), 0.6, 1.25)) * (z.back ? -1 : 1); }
   }
   r.mixer.update(dt);
+  if (act) z.gaitU = act.time / dur;   // where in the stride it is: zLocomote's lurch follows it
   // ---------- procedural layers ----------
   const R = z.R;
   // body shape per breed (the mixer rewrites scale every update)
