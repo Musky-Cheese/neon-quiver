@@ -6075,8 +6075,8 @@ function updateZombies(dt, time) {
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
     z.atkCd -= dt;
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
-    // the token holders swing; the rest only if the player walks right into them
-    if (z.state === 'walk' && dist < (z.tok || z.crawl ? reach : reach * 0.7) && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; z.atkN++; }
+    // the token holders swing, and the second row, pressed right behind, claws over their shoulders
+    if (z.state === 'walk' && dist < (z.tok || z.crawl ? reach : reach + 0.45) && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; z.atkN++; }
     if (z.state === 'attack') {
       z.atkT += dt / z.T.atk * zAtkK(z);
       if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1) * (z.tok ? MELEE.press : 1), z.x, z.z); }
@@ -6105,7 +6105,7 @@ function navOpen(x, z) { const k = navIdx(x, z); return k >= 0 && !NAV.block[k];
 // that has swung a few times while others wait hands its token on, so the front line rotates.
 const MELEE = { list: [], held: [], waiting: 0, ringR: 0, press: 1 };
 function meleeAssign(dt, P) {
-  const n = Math.min(9, 7 + Math.floor((GAME.wave || 1) / 5)), list = MELEE.list, held = MELEE.held;
+  const n = Math.min(12, 9 + Math.floor((GAME.wave || 1) / 4)), list = MELEE.list, held = MELEE.held;
   list.length = 0; held.length = 0; let waiting = 0;
   for (const z of ZOMBIES) {
     z.tokCd = Math.max(0, z.tokCd - dt);
@@ -6122,9 +6122,9 @@ function meleeAssign(dt, P) {
     for (let i = 0; i < list.length && held.length < n; i++) { const z = list[i]; z.tok = true; z.atkN = 0; z.slotA = Math.atan2(z.x - P.x, z.z - P.z); held.push(z); }
   }
   MELEE.waiting = waiting;
-  // crowd pressure: the bodies shoving from behind put weight into the front line's blows (+6% per waiter, up to +48%),
+  // crowd pressure: the bodies shoving from behind put weight into the front line's blows (+8% per waiter, up to +64%),
   // so capping the attackers keeps a mob about as dangerous as the old dogpile
-  MELEE.press = 1 + 0.06 * Math.min(waiting, 8);
+  MELEE.press = 1 + 0.08 * Math.min(waiting, 8);
   // spread the holders' slot angles: each is drawn to where it stands, and pairs closer than their bodies allow push apart
   if (!held.length) return;
   for (const z of held) { const a = Math.atan2(z.x - P.x, z.z - P.z); z.slotA = wrapA(a + clamp(wrapA(z.slotA - a), -0.7, 0.7)); z.slotA = wrapA(z.slotA + wrapA(a - z.slotA) * Math.min(1, dt * 2)); }
@@ -6173,8 +6173,8 @@ function zRoute(z, dt, P, dist, reach, melee) {
       _rt[3] = ds;
       return ds < 0.25 ? 0 : 1;
     }
-    // waiting ring: hold a step outside reach, swaying, shuffle round it to make room
-    const R = reach + 1.3 + z.holdR, a = Math.atan2(-ux, -uz) + 0.18 * Math.sin(GAME.time * 0.7 + z.seed);
+    // waiting ring: a second row half a step outside reach, swaying, shuffling round to make room
+    const R = reach + 0.45 + z.holdR * 0.6, a = Math.atan2(-ux, -uz) + 0.18 * Math.sin(GAME.time * 0.7 + z.seed);
     const hx = P.x + Math.sin(a) * R, hz = P.z + Math.cos(a) * R;
     if (dist < R + 1.2) {
       _rt[2] = 1;
@@ -9689,7 +9689,7 @@ const GAME = {
     this.wave++;
     refillForWave();
     const boss = this.wave % 5 === 0, M = mutRoll(this.wave);   // a sector alert bends this wave (objectives.js)
-    const n = Math.round((8 + this.wave * 4) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
+    const n = Math.round((10 + this.wave * 5) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : M ? `SECTOR ALERT · ${M.name} · ${M.sub}` : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : M ? M.col : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
@@ -9713,8 +9713,8 @@ const GAME = {
     else if (r < pBrute + pSpit + pScream + pClimb + pRun) type = 'runner';
     else type = 'walker';
     type = mutType(type);
-    // pick a spawn not right next to the player
-    const s = navSpawnPoint();
+    // pick a spawn out of sight but not far off (18-44 m of walking), so a wave is on top of the player quickly
+    const s = navSpawnPoint(18, 44);
     const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
     if (Math.random() < pElite) makeElite(z);
     mutSpawned(z);
@@ -9725,12 +9725,12 @@ const GAME = {
     }
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
-  maxAlive() { return Math.min(44, 11 + Math.round(this.wave * 2.5)); },   // how many may be up at once (objectives' extra spawns respect it too)
+  maxAlive() { return Math.min(48, 14 + Math.round(this.wave * 3)); },   // how many may be up at once (objectives' extra spawns respect it too)
   aliveCount() { let n = 0; for (const z of ZOMBIES) if (!z.dead) n++; return n; },
   update(dt) {
     if (this.state === 'playing') {
       const maxAlive = this.maxAlive();
-      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
+      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.3, 1.4 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
