@@ -68,6 +68,9 @@ function spawnZombie(type, x, z, wave) {
     look: 0, lookP: 0, twT: rand(2, 8), breath: rand(0.8, 1.3),
     chill: 0, chillK: 0.3, stun: 0, markT: 0, quiver: 0, toks: null, stuck: [], headless: false, jawGone: false, helmetGone: false, lastX: x, lastZ: z, stuckT: 0, hpBarT: 0, groan: rand(1, 6),
     slamCd: 4, summonCd: 10, roarT: 0, jaw: 0, vx: 0, vz: 0,
+    // locomotion (zLocomote): forward speed, carried velocity, a lane to walk in, a side to flank from, the melee token
+    sp: 0, mvx: 0, mvz: 0, lane: rand(-1, 1), flank: Math.random() < 0.35 ? (Math.random() < 0.5 ? -1 : 1) : 0,
+    los: false, losT: rand(0, 0.3), tok: false, tokCd: 0, atkN: 0, slotA: 0, holdR: rand(0, 0.8),
     // spitter/screamer/climber state
     spitCd: rand(2.5, 4.5), screamCd: rand(5, 9), buffT: 0, climbState: 'ground', climbCd: rand(3, 6), climbT: 0, perchT: 0, pounceT: 0,
     // hit reactions (damped springs): head pitch, torso pitch, torso yaw, leg buckle
@@ -154,6 +157,7 @@ function damageZombie(z, dmg, part, hitPos, dir, arrowType, power = 1, explosive
     if (hitPos) { const rx = Math.cos(z.yaw), rz = -Math.sin(z.yaw); const side = Math.sign((hitPos[0] - z.x) * rx + (hitPos[2] - z.z) * rz) || 1; R.yv -= side * (6 + 4 * power) * k; }
   }
   if (dir && z.type !== 'boss') { const kb = z.type === 'brute' ? 0.15 : 0.45; z.vx += dir[0] * kb * 6 * power; z.vz += dir[2] * kb * 6 * power; }
+  if (dir) z.sp *= 1 - 0.45 * k;   // a hit knocks the stride out of it: it has to build its speed back up
   if (hitPos && dmg > 3) bloodBurst(hitPos[0], hitPos[1], hitPos[2], dir, part === 'head' ? 26 : 14, 1, z.type === 'boss' ? 2 : 1);
   // enough damage to the legs drops walkers and runners to a crawl
   if (!z.crawl && part === 'legs' && (z.type === 'walker' || z.type === 'runner') && z.legDmg >= 0.4 * z.maxHp && z.hp > 0) {
@@ -234,6 +238,7 @@ function updateZombies(dt, time) {
   const P = PLAYER;
   groanCd -= dt;
   rebuildZombieGrid();
+  if (GAME.state !== 'title') meleeAssign(dt, P);
   // corpse cap: if too many bodies are lying around, retire the oldest one (past its death flail) a little early
   let deadN = 0; for (const zz of ZOMBIES) if (zz.dead) deadN++;
   if (deadN > CORPSE_CAP) {
@@ -270,7 +275,7 @@ function updateZombies(dt, time) {
     // the specials keep their distance on purpose, so time spent in their own range counts as progress
     if (z.type === 'spitter') { updateSpitter(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 18); continue; }
     if (z.type === 'screamer') { updateScreamer(z, dt, P); const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, d <= 8); continue; }
-    if (z.type === 'climber') { updateClimber(z, dt, P); zStallCheck(z, dt, Math.hypot(P.x - z.x, P.z - z.z), z.climbState !== 'ground'); continue; }
+    if (z.type === 'climber') { updateClimber(z, dt, P); { const d = Math.hypot(P.x - z.x, P.z - z.z); zStallCheck(z, dt, d, z.climbState !== 'ground' || (z.los && d < 10)); } continue; }
     if (z.state === 'drop') { // boss falls from the sky
       z.vy = (z.vy || 0) - 40 * dt; z.y += z.vy * dt;
       if (z.y <= 0) { z.y = 0; z.state = 'roar'; z.roarT = 0; shake(1.2); AUD.slam(PLAYER.at(z.x, z.z, 0.5)); AUD.roar(PLAYER.at(z.x, z.z, 4)); flashLight(z.x, 2, z.z, [4, 1, 3], 30, 0.6);
@@ -281,43 +286,213 @@ function updateZombies(dt, time) {
     }
     if (z.crawl) z.crawlT += dt;
     // --- steering
-    let tx = P.x, tz = P.z;
-    if (GAME.state === 'title') { if (!z.wt || Math.hypot(z.wt[0] - z.x, z.wt[1] - z.z) < 2) z.wt = [rand(-30, 30), rand(-30, 30)]; tx = z.wt[0]; tz = z.wt[1]; }
-    const dist = Math.hypot(tx - z.x, tz - z.z) || 1e-3;
-    // around corners the flow field (world.js) leads; in the open, head straight for the player
-    if (GAME.state !== 'title' && NAV.ready && dist > 4.5 && navTarget(z.x, z.z, _nc)) { tx = _nc[0]; tz = _nc[1]; }
-    const want = Math.atan2(tx - z.x, tz - z.z);
-    let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    const turn = z.crawl ? 1.8 : z.type === 'runner' ? 7 : z.type === 'boss' ? 1.6 : 3.2;
-    z.yaw += clamp(dyaw, -turn * dt, turn * dt);
     const reach = z.crawl ? 1.25 : z.T.reach * (z.type === 'boss' ? 1 : z.scale) + 0.35;
     const slow = z.state === 'attack' || z.state === 'slam' || z.state === 'roar' ? 0 : 1;
     let spd = z.speed * slow * zSlowK(z) * z.wade * (z.burn > 0 ? 1.08 : 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1) * (z.buffT > 0 ? 1.22 : 1);
     if (z.crawl) spd *= z.crawlT < 0.8 ? 0 : (0.6 + 0.4 * Math.max(0, Math.sin(z.phase)));  // lurching pulls
-    if (dist < reach * 0.8) spd = 0;
-    z.mv = spd;
-    let mx = Math.sin(z.yaw) * spd, mz = Math.cos(z.yaw) * spd;
-    if (z.stuckT > 0.5) { mx += Math.cos(z.yaw) * z.side * spd * 0.9; mz -= Math.sin(z.yaw) * z.side * spd * 0.9; }
-    z.x += (mx + z.vx) * dt; z.z += (mz + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
-    for (const o of zombieCandidates(z.x - 2.2, z.x + 2.2, z.z - 2.2, z.z + 2.2)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
-    pushOutCircle(z, 0.32 * z.scale);
-    const moved = Math.hypot(z.x - z.lastX, z.z - z.lastZ); z.lastX = z.x; z.lastZ = z.z;
-    if (spd > 0.5 && moved < spd * dt * 0.3) z.stuckT += dt; else z.stuckT = Math.max(0, z.stuckT - dt * 0.5);
-    if (z.stuckT > 2.5) { z.side *= -1; z.stuckT = 0.6; }
-    z.phase += dt * (z.crawl ? 3.2 : z.type === 'runner' ? 11 : z.type === 'brute' ? 4.2 : z.type === 'boss' ? 3.2 : 5.2) * (spd > 0.1 || z.crawl ? 1 : 0.15);
-    if (z.type !== 'boss') zStallCheck(z, dt, dist, false);
+    let dist, face = null;
+    if (GAME.state === 'title') {
+      if (!z.wt || Math.hypot(z.wt[0] - z.x, z.wt[1] - z.z) < 2) z.wt = [rand(-30, 30), rand(-30, 30)];
+      _rt[0] = z.wt[0]; _rt[1] = z.wt[1]; dist = Math.hypot(_rt[0] - z.x, _rt[1] - z.z) || 1e-3;
+    } else {
+      dist = Math.hypot(P.x - z.x, P.z - z.z) || 1e-3;
+      spd *= zRoute(z, dt, P, dist, reach, true);
+      if (dist < reach + 1.8 || _rt[2]) face = P;   // close in (or holding at the ring): keep the eyes on the player
+    }
+    zLocomote(z, dt, _rt[0], _rt[1], spd, face, 0.9, GAME.state === 'title' ? Infinity : _rt[3]);
+    z.phase += dt * (z.crawl ? 3.2 : z.type === 'runner' ? 11 : z.type === 'brute' ? 4.2 : z.type === 'boss' ? 3.2 : 5.2) * (z.mv > 0.1 || z.crawl ? 1 : 0.15);
+    if (z.type !== 'boss') zStallCheck(z, dt, dist, z.los && dist < 10);   // waiting its turn in sight of the player is progress
     z.groan -= dt;
     if (z.groan <= 0 && groanCd <= 0 && dist < 38) { z.groan = rand(4, 9); groanCd = 0.6; AUD.groan(PLAYER.at(z.x, z.z), clamp(0.16 - dist / 300, 0.03, 0.16), zVoice(z)); z.jaw = 1; }
     z.jaw = Math.max(0, z.jaw - dt * 1.2);
     z.atkCd -= dt;
     if (z.type === 'boss') { updateBoss(z, dt, dist); continue; }
-    if (z.state === 'walk' && dist < reach && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
+    // the token holders swing, and the second row, pressed right behind, claws over their shoulders
+    if (z.state === 'walk' && dist < (z.tok || z.crawl ? reach : reach + 0.45) && z.atkCd <= 0 && (!z.crawl || z.crawlT > 0.8)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; z.atkN++; }
     if (z.state === 'attack') {
       z.atkT += dt / z.T.atk * zAtkK(z);
-      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1), z.x, z.z); }
+      if (!z.hitDone && z.atkT > 0.55) { z.hitDone = true; if (dist < reach + 0.5 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * (z.crawl ? 0.7 : 1) * (z.buffT > 0 ? 1.2 : 1) * (z.tok ? MELEE.press : 1), z.x, z.z); }
       if (z.atkT >= 1) { z.state = 'walk'; z.atkCd = rand(0.3, 0.7); }
     }
   }
+}
+/* -------- locomotion -------- */
+// per breed: acc / brk = forward speed gained / shed per second; grip = how fast sideways momentum dies (low: the runner
+// skids past a dodge); turn = rad/s standing, scaled by turnRun at full tilt; lurch = speed swing across each step
+const LOCO_K = {
+  walker: { acc: 3.2, brk: 5, grip: 10, turn: 3.2, turnRun: 0.8, lurch: 0.22 },
+  runner: { acc: 9, brk: 6.5, grip: 3.2, turn: 7, turnRun: 0.55, lurch: 0.08 },
+  brute: { acc: 1.5, brk: 2.2, grip: 6, turn: 2.2, turnRun: 0.7, lurch: 0.16 },
+  boss: { acc: 2.2, brk: 3, grip: 6, turn: 1.6, turnRun: 0.8, lurch: 0.1 },
+  spitter: { acc: 3, brk: 5, grip: 10, turn: 3.6, turnRun: 0.8, lurch: 0.18 },
+  screamer: { acc: 3.4, brk: 5, grip: 10, turn: 3.2, turnRun: 0.8, lurch: 0.18 },
+  climber: { acc: 8, brk: 6.5, grip: 4, turn: 7, turnRun: 0.6, lurch: 0.06 },
+  crawl: { acc: 2.5, brk: 6, grip: 12, turn: 1.8, turnRun: 1, lurch: 0 },
+};
+const MELEE_TYPES = { walker: 1, runner: 1, brute: 1 };
+const wrapA = a => ((a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+function navOpen(x, z) { const k = navIdx(x, z); return k >= 0 && !NAV.block[k]; }
+// Attack tokens and the ring: only so many melee zombies close in to strike at once (more as the waves climb); they spread
+// round the player on an inner ring, and the rest wait a step further out, swaying, until a token frees up. A holder
+// that has swung a few times while others wait hands its token on, so the front line rotates.
+const MELEE = { list: [], held: [], waiting: 0, ringR: 0, press: 1 };
+function meleeAssign(dt, P) {
+  const n = Math.min(12, 9 + Math.floor((GAME.wave || 1) / 4)), list = MELEE.list, held = MELEE.held;
+  list.length = 0; held.length = 0; let waiting = 0;
+  for (const z of ZOMBIES) {
+    z.tokCd = Math.max(0, z.tokCd - dt);
+    if (z.dead || z.state === 'drop' || !MELEE_TYPES[z.type] || z.crawl) { z.tok = false; continue; }
+    const d = Math.hypot(P.x - z.x, P.z - z.z);
+    // frozen or stunned bodies give their place up; so does one cut off from the player (no line, not touching)
+    const ok = d < 7.5 && zSlowK(z) > 0 && (z.los || d < 2.6) && Math.abs((P.y || 0) - z.y) < 1.4;
+    if (!ok) { z.tok = false; continue; }
+    if (z.tok) held.push(z); else { z._md = d; if (!z.tokCd) list.push(z); waiting++; }
+  }
+  if (waiting) for (let i = held.length - 1; i >= 0; i--) { const z = held[i]; if (z.atkN >= 3 && z.state !== 'attack') { z.tok = false; z.tokCd = rand(1.5, 2.5); z.atkN = 0; held.splice(i, 1); } }
+  if (held.length < n && list.length) {
+    list.sort((a, b) => a._md - b._md);
+    for (let i = 0; i < list.length && held.length < n; i++) { const z = list[i]; z.tok = true; z.atkN = 0; z.slotA = Math.atan2(z.x - P.x, z.z - P.z); held.push(z); }
+  }
+  MELEE.waiting = waiting;
+  // crowd pressure: the bodies shoving from behind put weight into the front line's blows (+8% per waiter, up to +64%),
+  // so capping the attackers keeps a mob about as dangerous as the old dogpile
+  MELEE.press = 1 + 0.08 * Math.min(waiting, 8);
+  // spread the holders' slot angles: each is drawn to where it stands, and pairs closer than their bodies allow push apart
+  if (!held.length) return;
+  for (const z of held) { const a = Math.atan2(z.x - P.x, z.z - P.z); z.slotA = wrapA(a + clamp(wrapA(z.slotA - a), -0.7, 0.7)); z.slotA = wrapA(z.slotA + wrapA(a - z.slotA) * Math.min(1, dt * 2)); }
+  // the ring widens (up to the edge of reach) when the bodies on it need more room
+  let room = 0; for (const z of held) room += 1.24 * z.scale + 0.3;
+  MELEE.ringR = room / TAU;
+  if (held.length < 2) return;
+  held.sort((a, b) => a.slotA - b.slotA);
+  const rr = Math.max(1.3, MELEE.ringR);
+  for (let pass = 0; pass < 4; pass++) for (let i = 0; i < held.length; i++) {
+    const a = held[i], b = held[(i + 1) % held.length], gap = (0.62 * (a.scale + b.scale) + 0.3) / rr;
+    const d = wrapA(b.slotA - a.slotA), dd = d < 0 ? d + TAU : d;
+    if (dd < gap) { const k = (gap - dd) * 0.5; a.slotA -= k; b.slotA += k; }
+  }
+  for (const z of held) { const a = Math.atan2(z.x - P.x, z.z - P.z); z.slotA = wrapA(a + clamp(wrapA(z.slotA - a), -0.7, 0.7)); }
+}
+// where to walk this frame, into _rt[0..1]; _rt[2] = 1 while holding at the ring. Returns a speed factor.
+// No line to the player: the flow field, in this zombie's own lane. A clear line: straight on, runners leading a moving
+// target, some cutting in from a flank, walkers drifting. Close in: a ring slot (token) or the waiting ring (none).
+const _rt = [0, 0, 0, 0];   // target x, z; holding at the ring; distance left to stop in (arrival braking)
+function zRoute(z, dt, P, dist, reach, melee) {
+  _rt[0] = P.x; _rt[1] = P.z; _rt[2] = 0; _rt[3] = Infinity;
+  z.losT -= dt;
+  if (z.losT <= 0) {   // a staggered knee-high ray, a few times a second
+    z.losT = rand(0.18, 0.3);
+    const oy = z.y + 0.9, dx = P.x - z.x, dy = (P.y || 0) + 0.9 - oy, dz = P.z - z.z, L = Math.hypot(dx, dy, dz) || 1e-3;
+    z.los = dist < 34 && Math.abs(dy) < 1.4 && (() => { const t = rayWorld(z.x, oy, z.z, dx, dy, dz, L); return t === null || t > L - 0.4; })();
+  }
+  const fast = z.type === 'runner' || z.type === 'climber';
+  const there = dist < reach * 0.8 && !z.tok;   // in reach without a slot to walk to: stand and swing
+  if (!z.los) {
+    if (NAV.ready && navTarget(z.x, z.z, _nc)) {
+      // a sideways offset (0.6 m at most) off the shared route, so a pack spreads across the street instead of queueing
+      const fx = _nc[0] - z.x, fz = _nc[1] - z.z, fl = Math.hypot(fx, fz) || 1, o = z.lane * 0.6;
+      const lx = _nc[0] + fz / fl * o, lz = _nc[1] - fx / fl * o;
+      if (navOpen(lx, lz)) { _rt[0] = lx; _rt[1] = lz; } else { _rt[0] = _nc[0]; _rt[1] = _nc[1]; }
+    }
+    return there ? 0 : 1;
+  }
+  const ux = (P.x - z.x) / dist, uz = (P.z - z.z) / dist;
+  if (melee && !z.crawl && z.type !== 'boss' && dist < 7.5 && (z.tok || MELEE_TYPES[z.type])) {
+    if (z.tok) {
+      const r = clamp(MELEE.ringR, reach * 0.7, reach * 0.92), sx = P.x + Math.sin(z.slotA) * r, sz = P.z + Math.cos(z.slotA) * r;
+      if (navOpen(sx, sz)) { _rt[0] = sx; _rt[1] = sz; }
+      const ds = Math.hypot(_rt[0] - z.x, _rt[1] - z.z);
+      _rt[3] = ds;
+      return ds < 0.25 ? 0 : 1;
+    }
+    // waiting ring: a second row half a step outside reach, swaying, shuffling round to make room
+    const R = reach + 0.45 + z.holdR * 0.6, a = Math.atan2(-ux, -uz) + 0.18 * Math.sin(GAME.time * 0.7 + z.seed);
+    const hx = P.x + Math.sin(a) * R, hz = P.z + Math.cos(a) * R;
+    if (dist < R + 1.2) {
+      _rt[2] = 1;
+      if (navOpen(hx, hz)) { _rt[0] = hx; _rt[1] = hz; } else { _rt[0] = z.x; _rt[1] = z.z; }
+      const dh = Math.hypot(_rt[0] - z.x, _rt[1] - z.z);
+      _rt[3] = dh;
+      return dh < 0.3 ? 0 : Math.min(1, 0.7 / Math.max(0.5, z.speed));
+    }
+    return 1;
+  }
+  let ax = P.x, az = P.z;
+  if (fast && dist > 3) { const lead = Math.min(0.7, dist / Math.max(1, z.speed)) * 0.6; ax += (P.vx || 0) * lead; az += (P.vz || 0) * lead; }
+  // a flank: aim off to one side, less the closer it gets, so a few in each pack come round instead of head-on
+  let off = z.flank && dist > 6 && dist < 26 ? z.flank * Math.min(3.5, (dist - 6) * 0.35) : 0;
+  // walkers and the slow breeds weave a little
+  if (!fast && z.type !== 'boss') off += Math.sin(GAME.time * 0.45 + z.seed * 5) * Math.min(1.2, dist * 0.12);
+  if (off) { const ox = ax + uz * off, oz = az - ux * off; if (navOpen(ox, oz) && navOpen((ox + z.x) * 0.5, (oz + z.z) * 0.5)) { ax = ox; az = oz; } }
+  _rt[0] = ax; _rt[1] = az; _rt[3] = dist - reach * 0.75;
+  return there ? 0 : 1;
+}
+// soft spacing, added to the wanted direction: neighbours and walls push with a falloff that's gentle at the edge and
+// firm up close, so a crowd spreads and squeezes instead of jostling (the hard overlap push below stays as a backstop)
+const _sep = [0, 0];
+function zSpacing(z, out) {
+  let sx = 0, sz = 0;
+  for (const o of zombieCandidates(z.x - 2, z.x + 2, z.z - 2, z.z + 2)) {
+    if (o === z || o.dead || o.state === 'drop') continue;
+    const ax = z.x - o.x, az = z.z - o.z, d2 = ax * ax + az * az, R = 0.75 * (z.scale + o.scale) + 0.2;
+    if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), w = 1 - d / R, g = 2.4 * (z.tok === o.tok ? 1 : z.tok ? 0.35 : 1.8); sx += ax / d * w * w * g; sz += az / d * w * w * g; }
+  }
+  const [boxes, circles] = worldCandidates(z.x - 1.3, z.x + 1.3, z.z - 1.3, z.z + 1.3), W = 0.9 + 0.3 * z.scale;
+  for (const b of boxes) {
+    if (z.y > b.y1 - 0.02 || b.y1 - z.y < 0.45 || b.y0 > z.y + 2.2) continue;   // what pushOutCircle lets them walk over or under
+    const ax = z.x - clamp(z.x, b.x0, b.x1), az = z.z - clamp(z.z, b.z0, b.z1), d2 = ax * ax + az * az;
+    if (d2 < W * W && d2 > 1e-6) { const d = Math.sqrt(d2), w = 1 - d / W; sx += ax / d * w * w * 1.6; sz += az / d * w * w * 1.6; }
+  }
+  for (const c of circles) {
+    if (z.y > c.h - 0.02) continue;
+    const ax = z.x - c.x, az = z.z - c.z, d = Math.hypot(ax, az), R = c.r + W;
+    if (d < R && d > c.r * 0.5) { const w = 1 - (d - c.r) / W; sx += ax / d * w * w * 1.6; sz += az / d * w * w * 1.6; }
+  }
+  const l = Math.hypot(sx, sz); if (l > 0.9) { sx *= 0.9 / l; sz *= 0.9 / l; }
+  out[0] = sx; out[1] = sz;
+}
+// move toward (tx, tz) at up to spd. The body turns at its own rate (slower at a run) and walks where it faces; forward
+// speed builds and bleeds off; sideways momentum skids out by grip, so a runner overshoots a dodge and a brute takes a
+// while to get going. face: a point to keep looking at while moving slower than strafeMax (side-steps and backs off
+// facing it). Then the steps' lurch, the hard overlap push, the world, and the stuck check.
+function zLocomote(z, dt, tx, tz, spd, face, strafeMax, rem = Infinity) {
+  const L = z.crawl ? LOCO_K.crawl : LOCO_K[z.type];
+  let dx = tx - z.x, dz = tz - z.z; const dl = Math.hypot(dx, dz);
+  if (dl > 1e-3) { dx /= dl; dz /= dl; } else { dx = Math.sin(z.yaw); dz = Math.cos(z.yaw); }
+  if (spd > 0) {
+    zSpacing(z, _sep); dx += _sep[0]; dz += _sep[1];
+    if (z.stuckT > 0.5) { const px = dz * z.side * 0.9, pz = -dx * z.side * 0.9; dx += px; dz += pz; }
+    const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
+  }
+  if (zSlowK(z) <= 0) { z.sp = 0; z.mvx = 0; z.mvz = 0; }   // frozen solid / stunned: no sliding
+  const facing = !!face && spd < strafeMax;
+  const turn = L.turn * (1 - (1 - L.turnRun) * Math.min(1, z.sp / Math.max(1, z.speed))) * (zSlowK(z) > 0 ? 1 : 0);
+  const wantYaw = facing ? Math.atan2(face.x - z.x, face.z - z.z) : spd > 0 ? Math.atan2(dx, dz) : face ? Math.atan2(face.x - z.x, face.z - z.z) : z.yaw;
+  z.yaw += clamp(wrapA(wantYaw - z.yaw), -turn * dt, turn * dt);
+  // ease off to turn hard (walkers more than runners, who keep their speed and skid)
+  let tgt = spd;
+  if (!facing && spd > 0) { const off = Math.abs(wrapA(Math.atan2(dx, dz) - z.yaw)); tgt *= off > 1.9 ? 0.2 : Math.max(0.2, 1 - off * (L.grip < 5 ? 0.12 : 0.32)); }
+  if (rem < 40) tgt = Math.min(tgt, Math.sqrt(2 * L.brk * 0.8 * Math.max(0, rem)) + 0.1);
+  z.sp = Math.max(0, z.sp + clamp(tgt - z.sp, -L.brk * dt, L.acc * dt));
+  const hx = facing ? dx : Math.sin(z.yaw), hz = facing ? dz : Math.cos(z.yaw), g = 1 - Math.exp(-L.grip * dt);
+  z.mvx += (hx * z.sp - z.mvx) * g; z.mvz += (hz * z.sp - z.mvz) * g;
+  // the lurch: the stride surges and drags twice a cycle, phase-locked to the walk clip (whose playback follows mv,
+  // so the planted foot stays planted)
+  const u = z.gaitU !== undefined ? z.gaitU : z.phase / TAU, lk = 1 + L.lurch * Math.sin(u * 2 * TAU);
+  const spdNow = Math.hypot(z.mvx, z.mvz);
+  z.mv = spdNow * lk;
+  z.back = facing && spdNow > 0.1 && (z.mvx * Math.sin(z.yaw) + z.mvz * Math.cos(z.yaw)) < -0.3 * spdNow;   // backing off: the rig plays the walk in reverse
+  z.x += (z.mvx * lk + z.vx) * dt; z.z += (z.mvz * lk + z.vz) * dt; z.vx *= Math.max(0, 1 - 6 * dt); z.vz *= Math.max(0, 1 - 6 * dt);
+  for (const o of zombieCandidates(z.x - 2.2, z.x + 2.2, z.z - 2.2, z.z + 2.2)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = 0.55 * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * (z.tok === o.tok ? 0.5 : z.tok ? 0.2 : 0.8); z.x += sx * k; z.z += sz * k; } }
+  // and none walks into the player's body: momentum stops at the skin
+  if (GAME.state !== 'title') { const P = PLAYER, ax = z.x - P.x, az = z.z - P.z, d = Math.hypot(ax, az), R = 0.4 + 0.3 * z.scale;
+    if (d < R && d > 1e-4 && Math.abs((P.y || 0) - z.y) < 1.4) { const nx = ax / d, nz = az / d, vn = z.mvx * nx + z.mvz * nz; z.x = P.x + nx * R; z.z = P.z + nz * R; if (vn < 0) { z.mvx -= vn * nx; z.mvz -= vn * nz; } } }
+  pushOutCircle(z, 0.32 * z.scale);
+  const moved = Math.hypot(z.x - z.lastX, z.z - z.lastZ); z.lastX = z.x; z.lastZ = z.z;
+  // a wall soaks up the momentum pressed into it
+  if (dt > 0 && moved < spdNow * dt * 0.5) { z.mvx *= 0.85; z.mvz *= 0.85; }
+  if (spd > 0.5 && moved < spd * dt * 0.3) z.stuckT += dt; else z.stuckT = Math.max(0, z.stuckT - dt * 0.5);
+  if (z.stuckT > 2.5) { z.side *= -1; z.stuckT = 0.6; }
 }
 // speed / attack-rate factors from Cryo (slow or freeze) and Shock (stun)
 // one that hasn't got closer along the flow field for 12 s (30 s crawling) is stuck behind something: bring it back in
@@ -328,7 +503,7 @@ function zStallCheck(z, dt, dist, engaged) {
   if (engaged || pd < (z.bestD ?? 1e9) - 1) { z.bestD = pd; z.progT = 0; } else z.progT = (z.progT || 0) + dt;
   if ((z.progT > (z.crawl ? 30 : 12) && dist > 5) || !isFinite(z.x + z.z)) {
     const s = navSpawnPoint();
-    z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0;
+    z.x = s[0]; z.z = s[1]; z.lastX = z.x; z.lastZ = z.z; z.bestD = 1e9; z.progT = 0; z.stuckT = 0; z.vx = z.vz = 0; z.sp = z.mvx = z.mvz = 0; z.tok = false;
     if (z.type === 'climber') { z.climbState = 'ground'; z.y = 0; z.climbCd = rand(2, 4); }
   }
 }
@@ -442,10 +617,6 @@ function hasLineOfSight(z, P) {
   const t = rayWorld(ox, oy, oz, dx, dy, dz, L);
   return t === null || t > L - 0.5;
 }
-function separateFrom(z, rad) {
-  const rr = rad * (z.scale + 3.2);
-  for (const o of zombieCandidates(z.x - rr, z.x + rr, z.z - rr, z.z + rr)) { if (o === z || o.dead || o.state === 'drop') continue; const sx = z.x - o.x, sz = z.z - o.z, d2 = sx * sx + sz * sz, R = rad * (z.scale + o.scale); if (d2 < R * R && d2 > 1e-6) { const d = Math.sqrt(d2), k = (R - d) / d * 0.5; z.x += sx * k; z.z += sz * k; } }
-}
 const ZPROJ = [];
 function spitAt(z, P) {
   const ox = z.x, oy = 1.35 * z.scale, oz = z.z;
@@ -475,17 +646,12 @@ function updateZProj(dt) {
 function drawZProj() { for (const a of ZPROJ) drawItem(MESH.sphere, M4.trs(poolM(), a.x, a.y, a.z, 0, 0, 0, 0.09, 0.09, 0.09), [0.35, 0.9, 0.15], [0.5, 1.6, 0.2]); }
 function updateSpitter(z, dt, P) {
   const dx = P.x - z.x, dz = P.z - z.z, dist = Math.hypot(dx, dz) || 1e-3;
-  let tx = P.x, tz = P.z, hold = false;
-  if (dist < 8) { tx = z.x - dx; tz = z.z - dz; } else if (dist <= 16) hold = true;
-  const want = Math.atan2(tx - z.x, tz - z.z);
-  let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
-  z.yaw += clamp(dyaw, -3.6 * dt, 3.6 * dt);
-  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1);
-  z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
-  pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
-  z.phase += dt * 5.2 * (spd > 0.1 ? 1 : 0.2);
-  // aim toward the player once inside its engagement band, whatever direction it's moving
-  if (dist >= 6 && dist <= 18) { const aim = Math.atan2(dx, dz); let ay = ((aim - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI; z.yaw += clamp(ay, -6 * dt, 6 * dt); }
+  let hold = false, spdK = 1;
+  if (dist < 8) { _rt[0] = z.x - dx; _rt[1] = z.z - dz; } else if (dist <= 16) { hold = true; _rt[0] = P.x; _rt[1] = P.z; } else spdK = zRoute(z, dt, P, dist, 1.6, false);
+  const spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (hold ? 0.12 : 1) * spdK;
+  // inside its engagement band it keeps its aim on the player, backing off or edging in without turning away
+  zLocomote(z, dt, _rt[0], _rt[1], spd, dist >= 6 && dist <= 18 ? P : null, 2.2);
+  z.phase += dt * 5.2 * (z.mv > 0.1 ? 1 : 0.2);
   z.spitCd -= dt;
   if (z.state === 'walk' && dist >= 6 && dist <= 18 && z.spitCd <= 0 && GAME.state === 'playing' && hasLineOfSight(z, P)) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
   if (z.state === 'attack') {
@@ -503,17 +669,13 @@ function screamPulse(z) {
 }
 function updateScreamer(z, dt, P) {
   const dx = P.x - z.x, dz = P.z - z.z, dist = Math.hypot(dx, dz) || 1e-3;
-  let tx = P.x, tz = P.z;
-  if (dist < 5.5) { tx = z.x - dx; tz = z.z - dz; }
-  const want = Math.atan2(tx - z.x, tz - z.z);
-  let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
-  z.yaw += clamp(dyaw, -3.2 * dt, 3.2 * dt);
-  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6);
   const reach = z.T.reach * z.scale + 0.35;
+  let spdK = 1;
+  if (dist < 5.5) { _rt[0] = z.x - dx; _rt[1] = z.z - dz; } else spdK = zRoute(z, dt, P, dist, reach, false);
+  let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * spdK;
   if (z.state === 'attack' || z.state === 'roar' || dist < 2.2) spd = 0;
-  z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
-  pushOutCircle(z, 0.32 * z.scale); separateFrom(z, 0.55);
-  z.phase += dt * 5 * (spd > 0.1 ? 1 : 0.2);
+  zLocomote(z, dt, _rt[0], _rt[1], spd, dist < 5.5 ? P : null, 2.2);
+  z.phase += dt * 5 * (z.mv > 0.1 ? 1 : 0.2);
   z.screamCd -= dt;
   if (z.state === 'walk' && z.screamCd <= 0 && GAME.state === 'playing') { z.state = 'roar'; z.roarT = 0; z.screamCd = rand(9, 13); z.screamed = false; }
   if (z.state === 'roar') { z.roarT += dt; z.jaw = 1; if (z.roarT > 0.15 && !z.screamed) { screamPulse(z); z.screamed = true; } if (z.roarT > 1.1) z.state = 'walk'; }
@@ -540,21 +702,16 @@ function findClimbWall(z) {
 function updateClimber(z, dt, P) {
   const dist = Math.hypot(P.x - z.x, P.z - z.z) || 1e-3;
   if (z.climbState === 'ground') {
-    let tx = P.x, tz = P.z;
-    if (NAV.ready && dist > 4.5 && navTarget(z.x, z.z, _nc)) { tx = _nc[0]; tz = _nc[1]; }
-    const want = Math.atan2(tx - z.x, tz - z.z);
-    let dyaw = ((want - z.yaw + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    z.yaw += clamp(dyaw, -7 * dt, 7 * dt);
-    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
     const reach = z.T.reach * z.scale + 0.35;
-    if (dist < reach * 0.8) spd = 0;
-    z.mv = spd; z.x += Math.sin(z.yaw) * spd * dt; z.z += Math.cos(z.yaw) * spd * dt;
-    pushOutCircle(z, 0.3 * z.scale); separateFrom(z, 0.5);
-    z.phase += dt * 9 * (spd > 0.1 ? 1 : 0.2);
+    let spd = z.speed * zSlowK(z) * (z.wade || 1) * (1 - z.flinch * 0.6) * (z.stumble > 0 ? 0.35 : 1);
+    spd *= zRoute(z, dt, P, dist, reach, false);
+    if (z.state === 'attack') spd = 0;
+    zLocomote(z, dt, _rt[0], _rt[1], spd, dist < reach + 1.8 ? P : null, 0.9, _rt[3]);
+    z.phase += dt * 9 * (z.mv > 0.1 ? 1 : 0.2);
     z.climbCd -= dt;
     if (z.climbCd <= 0 && dist > 7 && dist < 26) {
       const wall = findClimbWall(z);
-      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.at(z.x, z.z), 0.12, 1.3); }
+      if (wall) { z.climbState = 'climb'; z.climbT = 0; z.sp = z.mvx = z.mvz = 0; z.climbFrom = z.y; z.climbTo = Math.min(wall.y1 - 0.4, 6); AUD.groan(PLAYER.at(z.x, z.z), 0.12, 1.3); }
       else z.climbCd = rand(2, 4);
     }
     if (z.state === 'walk' && dist < reach && z.atkCd <= 0) { z.state = 'attack'; z.atkT = 0; z.hitDone = false; }
@@ -584,7 +741,7 @@ function updateClimber(z, dt, P) {
     z.x += z.dvx * dt; z.z += z.dvz * dt; z.y = Math.max(0, z.y + z.dvy * dt);
     pushOutCircle(z, 0.3 * z.scale);
     if (z.y <= 0.02 && z.pounceT > 0.15) {
-      z.y = 0; z.climbState = 'ground'; z.climbCd = rand(5, 9); shakeNear(z, 0.15);
+      z.y = 0; z.climbState = 'ground'; z.mvx = z.dvx * 0.4; z.mvz = z.dvz * 0.4; z.sp = Math.hypot(z.mvx, z.mvz); z.lastX = z.x; z.lastZ = z.z; z.climbCd = rand(5, 9); shakeNear(z, 0.15);
       burst(z.x, 0.2, z.z, 20, [0.35, 0.3, 0.15], 5, 0.35, 0.08, 6, 1.4);
       const pd = Math.hypot(PLAYER.x - z.x, PLAYER.z - z.z);
       if (pd < 2.1 && GAME.state === 'playing') PLAYER.hurt(z.T.dmg * z.dmgK * 1.3, z.x, z.z);

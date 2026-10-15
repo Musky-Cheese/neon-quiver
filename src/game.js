@@ -459,7 +459,7 @@ const GAME = {
     this.wave++;
     refillForWave();
     const boss = this.wave % 5 === 0, M = mutRoll(this.wave);   // a sector alert bends this wave (objectives.js)
-    const n = Math.round((8 + this.wave * 4) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
+    const n = Math.round((10 + this.wave * 5) * (boss ? (this.wave >= 10 ? 0.75 : 0.55) : 1) * (M ? M.count : 1));
     this.toSpawn = n; this.spawnT = 1.2; this.clearT = 0;
     this.showBanner(`WAVE ${this.wave}`, boss ? 'THE WARDEN IS COMING' : M ? `SECTOR ALERT · ${M.name} · ${M.sub}` : this.wave === 1 ? 'SURVIVE THE NIGHT' : `${n} INFECTED INBOUND`, boss ? '#ff3df0' : M ? M.col : '#ff2e88');
     AUD.waveHorn(boss); AUD.intensity = boss ? 1 : Math.min(0.9, 0.55 + this.wave * 0.05);
@@ -483,8 +483,8 @@ const GAME = {
     else if (r < pBrute + pSpit + pScream + pClimb + pRun) type = 'runner';
     else type = 'walker';
     type = mutType(type);
-    // pick a spawn not right next to the player
-    const s = navSpawnPoint();
+    // pick a spawn out of sight but not far off (18-44 m of walking), so a wave is on top of the player quickly
+    const s = navSpawnPoint(18, 44);
     const z = spawnZombie(type, s[0] + rand(-0.4, 0.4), s[1] + rand(-0.4, 0.4), w);
     if (Math.random() < pElite) makeElite(z);
     mutSpawned(z);
@@ -495,12 +495,12 @@ const GAME = {
     }
   },
   spawnExtra(type, x, z) { spawnZombie(type, x, z, this.wave); },
-  maxAlive() { return Math.min(44, 11 + Math.round(this.wave * 2.5)); },   // how many may be up at once (objectives' extra spawns respect it too)
+  maxAlive() { return Math.min(48, 14 + Math.round(this.wave * 3)); },   // how many may be up at once (objectives' extra spawns respect it too)
   aliveCount() { let n = 0; for (const z of ZOMBIES) if (!z.dead) n++; return n; },
   update(dt) {
     if (this.state === 'playing') {
       const maxAlive = this.maxAlive();
-      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.35, 1.7 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
+      if (this.toSpawn > 0) { this.spawnT -= dt; if (this.spawnT <= 0 && this.aliveCount() < maxAlive) { this.spawnOne(); this.toSpawn--; this.spawnT = Math.max(0.3, 1.4 - this.wave * 0.09) * rand(0.6, 1.3) * ((mutDef() || {}).spawnK || 1); } }
       if (this.bossPending > 0) { this.bossPending -= dt; if (this.bossPending <= 0) this.spawnBoss(); }
       if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) { this.combo = 0; hudScore(); } }
       if (this.wave > 0 && this.toSpawn === 0 && this.bossPending <= 0 && this.aliveCount() === 0 && !objNestAlive()) {
