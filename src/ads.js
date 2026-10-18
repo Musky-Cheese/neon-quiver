@@ -12,7 +12,7 @@
 // one art size for every slot: logo inside the centred safe area, light art on dark or clear reads best at night
 const AD_SIZE = [1024, 512], AD_SAFE = [896, 384], AD_MAX_KB = 500;
 const AD_LAYER = [512, 256];   // what a world slot draws into: a layer of the billboard batch, same 2:1 aspect
-const ADS_CONTACT = '@fouadmoabi8';   // advertisers DM this X (Twitter) handle; the title card shows it, empty hides the line
+const ADS_CONTACT = '@fouadmoabi8';   // advertisers DM this X (Twitter) handle (kept for the sales sheet; the title screen no longer shows it)
 // world: a billboard picked by its spot on the plaza ring (the city layout decides where they are; these are the
 // biggest ones the title orbit and the spawn view show), or a flyer hung beside each Armory terminal
 const ADS = {
@@ -94,12 +94,6 @@ function adsBuildWorld(g) {
 // after boot: the Armory card, then the manifest (never in demo mode, which always shows the pitch)
 function adsInit() {
   adsCard();
-  const ct = document.getElementById('adContact');
-  if (ct && ADS_CONTACT) {
-    const a = document.createElement('a'); a.href = 'https://x.com/' + encodeURIComponent(ADS_CONTACT.replace(/^@/, '')); a.target = '_blank'; a.rel = 'noopener'; a.textContent = ADS_CONTACT;
-    a.addEventListener('click', e => e.stopPropagation());   // a link out, never a click into the game
-    ct.replaceChildren('DM ', a, ' on X (Twitter)'); ct.hidden = false;
-  }
   if (ADS.demo) return;
   fetch('ads/sponsors.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(m => {
     if (!m || typeof m !== 'object') return;

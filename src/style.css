@@ -107,19 +107,6 @@ button, select, input { font-family: var(--f); }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
 .keys kbd { font-family: var(--f); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; padding: 2px 7px; border: 1px solid rgba(233, 236, 255, 0.3); border-bottom-width: 2px; color: var(--ink); white-space: nowrap; justify-self: start; }
 .arrows-legend { display: grid; gap: 7px; font-size: 14px; }
-.ad-card p { margin: 0; font-size: 14px; line-height: 1.35; color: var(--dim); }
-.ad-card .ad-spec { margin-top: 6px; font-size: 12px; letter-spacing: 0.04em; color: var(--ink); }
-.ad-card .ad-contact { margin-top: 6px; color: var(--ink); }
-.ad-card a { color: var(--cyan); text-decoration: none; border-bottom: 1px solid rgba(41, 231, 255, 0.4); }
-.ad-card a:hover, .ad-card a:focus-visible { border-bottom-color: var(--cyan); outline: none; }
-/* short screens: the advertiser card steps out beside Controls instead of stacking under Quiver, so the column
-   keeps the height it had (1366×768 has no room for a third card in it) */
-@media (max-height: 879px) and (min-width: 1300px) {
-  .t-side { grid-template-columns: 260px 360px; width: auto; align-items: end; }
-  .t-side > .card-p { grid-column: 2; }
-  .t-side > .ad-card { grid-column: 1; grid-row: 1 / span 2; align-self: end; }
-}
-@media (max-height: 879px) and (min-width: 861px) and (max-width: 1299px) { .ad-card .ad-pitch { display: none; } }
 .arrows-legend div { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
 .arrows-legend i { width: 10px; height: 10px; background: var(--c); box-shadow: 0 0 8px var(--c); display: block; transform: rotate(45deg) translateY(1px); }
 .arrows-legend span { color: var(--dim); }
