@@ -17,7 +17,7 @@ const THEMES = {
     zen: [0.012, 0.008, 0.03], mid: [0.09, 0.025, 0.12], glow: [0.35, 0.08, 0.25], cloud: [0.16, 0.05, 0.2], stars: 1, disc: [0.75, 0.9, 1.0], discDir: [-0.55, 0.42, -0.72],
     ambLo: [0.03, 0.02, 0.05], ambHi: [0.06, 0.07, 0.14], sun: [0.1, 0.12, 0.22], sunDir: [-0.35, 0.75, 0.25], rim: [0.3, 0.16, 0.42],
     neon: 1, win: 0.8, winWarm: 0, grid: 0.22, dyn: 1, sign: 1, wet: 1,
-    bloom: 0.85, thr: 0.85, expo: 1.1, sat: 1, grade: [1, 1, 1], lift: [0, 0, 0],
+    bloom: 0.55, thr: 1.0, expo: 1.05, sat: 1, grade: [1, 1, 1], lift: [0, 0, 0],   // softer glare: less bloom, higher threshold, a touch less exposure; grade untouched
     rain: 0.55, rainCol: [0.45, 0.55, 0.9], lamp: [1.2, 1.5, 2.0], fountain: [0.4, 1.6, 2.2], shop: 1,
   },
   smog: {
